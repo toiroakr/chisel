@@ -1,0 +1,38 @@
+{
+  "name": "chisel",
+  "version": "0.1.0",
+  "description": "Progressive executable specifications for TypeScript",
+  "type": "module",
+  "bin": {
+    "chisel": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/**/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "example:check": "tsx src/cli.ts check examples/order-cancellation.spec.ts",
+    "example:strict": "tsx src/cli.ts check examples/order-cancellation.spec.ts --strict",
+    "example:generate": "tsx src/cli.ts generate examples/order-cancellation.spec.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "tsx": "^4.23.13"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "typescript": "^7.0.2"
+  }
+}
