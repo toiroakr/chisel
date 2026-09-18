@@ -27,10 +27,11 @@
     "example:generate": "tsx src/cli.ts generate examples/order-cancellation.spec.ts"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=26"
   },
   "license": "MIT",
   "dependencies": {
+    "temporal-spec": "^1.0.1",
     "tsx": "^4.23.13"
   },
   "devDependencies": {

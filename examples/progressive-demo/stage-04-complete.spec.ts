@@ -4,6 +4,7 @@ import {
   example,
   examples,
   implement,
+  instant,
   object,
   string,
   sum,
@@ -11,8 +12,8 @@ import {
 
 const 予約ID = string("予約ID");
 const 決済ID = string("決済ID");
-const 宿泊開始日時 = string("宿泊開始日時");
-const キャンセル要求日時 = string("キャンセル要求日時");
+const 宿泊開始日時 = instant();
+const キャンセル要求日時 = instant();
 
 const 予約 = sum("状態", {
   受付済み: object({ 予約ID }),
@@ -69,8 +70,8 @@ const 具体例 = examples(予約をキャンセルする, [
       状態: "予約確定",
       予約ID: "予約-2",
       決済ID: "決済-2",
-      宿泊開始日時: "2026-10-10T15:00:00.000Z",
-      キャンセル要求日時: "2026-10-09T14:59:59.000Z",
+      宿泊開始日時: Temporal.Instant.from("2026-10-10T15:00:00Z"),
+      キャンセル要求日時: Temporal.Instant.from("2026-10-09T14:59:59Z"),
     },
     expect: {
       result: { 結果: "受理", 予約ID: "予約-2" },
@@ -93,8 +94,8 @@ const 具体例 = examples(予約をキャンセルする, [
       状態: "予約確定",
       予約ID: "予約-3",
       決済ID: "決済-3",
-      宿泊開始日時: "2026-10-10T15:00:00.000Z",
-      キャンセル要求日時: "2026-10-09T15:00:00.000Z",
+      宿泊開始日時: Temporal.Instant.from("2026-10-10T15:00:00Z"),
+      キャンセル要求日時: Temporal.Instant.from("2026-10-09T15:00:00Z"),
     },
     expect: {
       result: { 結果: "受理", 予約ID: "予約-3" },
@@ -117,8 +118,8 @@ const 具体例 = examples(予約をキャンセルする, [
       状態: "予約確定",
       予約ID: "予約-4",
       決済ID: "決済-4",
-      宿泊開始日時: "2026-10-10T15:00:00.000Z",
-      キャンセル要求日時: "2026-10-09T15:00:01.000Z",
+      宿泊開始日時: Temporal.Instant.from("2026-10-10T15:00:00Z"),
+      キャンセル要求日時: Temporal.Instant.from("2026-10-09T15:00:01Z"),
     },
     expect: {
       result: { 結果: "受理", 予約ID: "予約-4" },
@@ -230,9 +231,9 @@ export const 完成した仕様 = defineSpecification({
 });
 
 function 返金可能か(
-  宿泊開始日時: string,
-  キャンセル要求日時: string,
+  宿泊開始日時: Temporal.Instant,
+  キャンセル要求日時: Temporal.Instant,
 ): boolean {
-  const 返金期限 = Date.parse(宿泊開始日時) - 24 * 60 * 60 * 1000;
-  return Date.parse(キャンセル要求日時) <= 返金期限;
+  const 返金期限 = 宿泊開始日時.subtract({ hours: 24 });
+  return Temporal.Instant.compare(キャンセル要求日時, 返金期限) <= 0;
 }

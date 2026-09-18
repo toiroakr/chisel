@@ -155,6 +155,8 @@ export const cancellation = defineSpecification({
 
 ## Commands
 
+Chisel requires Node.js 26 or later and uses its built-in Temporal API.
+
 ```sh
 npm install
 npm run check

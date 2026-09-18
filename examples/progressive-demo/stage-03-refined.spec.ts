@@ -3,6 +3,7 @@ import {
   defineSpecification,
   example,
   examples,
+  instant,
   object,
   string,
   sum,
@@ -10,8 +11,8 @@ import {
 
 const 予約ID = string("予約ID");
 const 決済ID = string("決済ID");
-const 宿泊開始日時 = string("宿泊開始日時");
-const キャンセル要求日時 = string("キャンセル要求日時");
+const 宿泊開始日時 = instant();
+const キャンセル要求日時 = instant();
 
 const 予約 = sum("状態", {
   受付済み: object({ 予約ID }),

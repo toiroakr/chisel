@@ -1,3 +1,5 @@
+import type { Temporal as TemporalTypes } from "temporal-spec";
+
 export interface ValidationIssue {
   readonly path: string;
   readonly message: string;
@@ -27,6 +29,10 @@ export interface NumberSchema extends Schema<number> {
 
 export interface BooleanSchema extends Schema<boolean> {
   readonly kind: "boolean";
+}
+
+export interface InstantSchema extends Schema<TemporalTypes.Instant> {
+  readonly kind: "instant";
 }
 
 export interface LiteralSchema<T extends string | number | boolean | null>
@@ -72,7 +78,7 @@ export interface SumSchema<
   ): SumVariant<Discriminant, Variants, Tag>;
 }
 
-export type AnySumSchema = SumSchema<string, SumVariants>;
+export type AnySumSchema = SumSchema<any, any>;
 export type Tags<S> = S extends SumSchema<string, infer Variants>
   ? keyof Variants & string
   : never;
@@ -133,6 +139,24 @@ export function boolean(): BooleanSchema {
     return typeof value === "boolean"
       ? valid(value)
       : invalid(path, "Expected a boolean");
+  }
+}
+
+export function instant(): InstantSchema {
+  return {
+    kind: "instant",
+    parse,
+    placeholder: () =>
+      temporalInstant().from("2000-01-01T00:00:00Z"),
+  };
+
+  function parse(
+    value: unknown,
+    path = "$",
+  ): ValidationResult<TemporalTypes.Instant> {
+    return value instanceof temporalInstant()
+      ? valid(value)
+      : invalid(path, "Expected a Temporal.Instant");
   }
 }
 
@@ -270,4 +294,18 @@ export function tagOf(schema: AnySumSchema, value: unknown): string | undefined 
   return typeof tag === "string" && schema.variantTags.includes(tag)
     ? tag
     : undefined;
+}
+
+function temporalInstant(): TemporalTypes.InstantConstructor {
+  const temporal = (
+    globalThis as unknown as {
+      readonly Temporal?: {
+        readonly Instant?: TemporalTypes.InstantConstructor;
+      };
+    }
+  ).Temporal;
+  if (temporal?.Instant === undefined) {
+    throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
+  }
+  return temporal.Instant;
 }

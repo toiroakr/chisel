@@ -2,8 +2,6 @@ import type {
   AnySumSchema,
   Infer,
   Schema,
-  SumSchema,
-  SumVariants,
   Tags,
   VariantOf,
 } from "./schema.js";
@@ -38,7 +36,7 @@ export type ControlTable<Effects extends AnySumSchema> = Readonly<
 >;
 
 export interface Behavior<
-  InputSchema extends SumSchema<string, SumVariants>,
+  InputSchema extends AnySumSchema,
   ResultSchema extends Schema<unknown>,
   EffectSchema extends AnySumSchema,
 > {
@@ -51,7 +49,7 @@ export interface Behavior<
 }
 
 export type AnyBehavior = Behavior<
-  SumSchema<string, SumVariants>,
+  AnySumSchema,
   Schema<unknown>,
   AnySumSchema
 >;
@@ -60,14 +58,14 @@ export type BehaviorInput<B> = B extends Behavior<infer Input, Schema<unknown>, 
   ? Infer<Input>
   : never;
 export type BehaviorResult<B> = B extends Behavior<
-  SumSchema<string, SumVariants>,
+  AnySumSchema,
   infer Result,
   AnySumSchema
 >
   ? Infer<Result>
   : never;
 export type BehaviorEffect<B> = B extends Behavior<
-  SumSchema<string, SumVariants>,
+  AnySumSchema,
   Schema<unknown>,
   infer Effect
 >
@@ -101,7 +99,7 @@ export function pending(reason: string): Pending {
 }
 
 export function behavior<
-  const InputSchema extends SumSchema<string, SumVariants>,
+  const InputSchema extends AnySumSchema,
   const ResultSchema extends Schema<unknown>,
   const EffectSchema extends AnySumSchema,
 >(options: {

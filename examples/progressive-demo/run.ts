@@ -5,6 +5,7 @@ import {
   defineSpecification,
   evaluateSpecification,
   examples,
+  formatTypeScriptValue,
   generateExamples,
 } from "../../src/index.js";
 import type {
@@ -126,7 +127,7 @@ function formatGeneratedRows(
     .map(
       row =>
         `example(${behaviorBinding}, ${JSON.stringify(row.name)}, {\n` +
-        `  given: ${JSON.stringify(row.given, null, 2).replaceAll("\n", "\n  ")},\n` +
+        `  given: ${formatTypeScriptValue(row.given).replaceAll("\n", "\n  ")},\n` +
         `  expect: unanswered(${JSON.stringify(row.reason)}),\n` +
         "})",
     )

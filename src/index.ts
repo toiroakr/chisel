@@ -1,5 +1,8 @@
+export type {} from "temporal-spec/global";
+
 export {
   boolean,
+  instant,
   literal,
   isSumSchema,
   number,
@@ -12,6 +15,7 @@ export type {
   AnySchema,
   AnySumSchema,
   Infer,
+  InstantSchema,
   ObjectSchema,
   Schema,
   SumSchema,
@@ -21,6 +25,8 @@ export type {
   ValidationResult,
   VariantOf,
 } from "./schema.js";
+
+export { formatTypeScriptValue } from "./codegen.js";
 
 export {
   behavior,

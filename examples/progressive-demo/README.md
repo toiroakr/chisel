@@ -31,7 +31,7 @@ Chiselは`受付済み`、`予約確定`、`チェックイン済み`、`キャ�
 
 ## 3. dataとbehaviorを更新する
 
-仕様を話し合う中で、`予約確定`の返金可否は宿泊開始日時とキャンセル要求日時から決まると分かります。[stage-03-refined.spec.ts](./stage-03-refined.spec.ts)では、`予約確定`に次の情報を追加します。
+仕様を話し合う中で、`予約確定`の返金可否は宿泊開始日時とキャンセル要求日時から決まると分かります。[stage-03-refined.spec.ts](./stage-03-refined.spec.ts)では、`予約確定`に`instant()`で定義した次の情報を追加します。
 
 ```text
 宿泊開始日時
@@ -54,7 +54,7 @@ node dist/cli.js generate examples/progressive-demo/stage-03-refined.spec.ts
 
 [stage-04-complete.spec.ts](./stage-04-complete.spec.ts)では、生成された雛形を期限前・期限ちょうど・期限後の3例へ展開します。キャンセル要求が宿泊開始の24時間前までなら返金し、それより後なら返金しない仕様です。
 
-返金可否は保存済みの状態ではなく、2つの日時からmodelが計算します。実行時に時計を直接読む代わりにキャンセル要求日時を入力へ含めるため、exampleは実行時刻に依存しません。
+返金可否は保存済みの状態ではなく、2つの`Temporal.Instant`からmodelが計算します。実行時に時計を直接読む代わりにキャンセル要求日時を入力へ含めるため、exampleは実行時刻に依存しません。
 
 Chiselはmodelをすべてのexampleに対して実行します。一致すると次の状態になります。
 

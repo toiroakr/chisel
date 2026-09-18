@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { tsImport } from "tsx/esm/api";
 import { isBehavior } from "./behavior.js";
 import type { AnyBehavior } from "./behavior.js";
+import { formatTypeScriptValue } from "./codegen.js";
 import {
   defineSpecification,
   evaluateSpecification,
@@ -165,7 +166,7 @@ function formatGeneratedExample(
   binding: string,
   generated: GeneratedExample,
 ): string {
-  const given = indent(JSON.stringify(generated.given, null, 2), 4);
+  const given = indent(formatTypeScriptValue(generated.given), 4);
   return `  example(${binding}, ${JSON.stringify(generated.name)}, {\n    given: ${given.trimStart()},\n    expect: unanswered(${JSON.stringify(generated.reason)}),\n  })`;
 }
 
