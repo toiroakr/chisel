@@ -1,29 +1,24 @@
 # Chisel
 
-Chisel is an experimental TypeScript toolkit for growing an executable business specification from a coarse model and concrete examples.
+Chisel is an experimental TypeScript toolkit for growing an executable business specification from a closed data model, generated examples, and human-provided expectations.
 
-It keeps four concerns connected:
+The workflow is deliberately ordered:
 
-- a closed runtime model that can also infer TypeScript types;
-- explicit pending decisions that are allowed while exploring a domain;
-- typed input, result, and effect examples;
-- an adequacy report that can become a strict CI gate.
+```text
+declare data and behavior
+→ generate unanswered examples
+→ let a human fill expected results
+→ refine data and behavior
+→ implement an executable model
+→ check the model against the examples
+```
 
-The model is intentionally value-first. TypeScript types are erased at runtime, so a type alias alone cannot tell a tool which variants still need examples.
+## 1. Declare data and behavior
 
-## Example
+The first version describes the domain vocabulary and the behavior boundary, not its implementation.
 
 ```ts
-import {
-  behavior,
-  defineSpecification,
-  example,
-  examples,
-  object,
-  pending,
-  string,
-  sum,
-} from "chisel";
+import { behavior, object, string, sum } from "chisel";
 
 const Order = sum("state", {
   unpaid: object({ orderId: string("OrderId") }),
@@ -31,27 +26,91 @@ const Order = sum("state", {
     orderId: string("OrderId"),
     paymentId: string("PaymentId"),
   }),
-  preparing: object({
-    orderId: string("OrderId"),
-    paymentId: string("PaymentId"),
-  }),
 });
 
-const Result = sum("type", {
+const CancelResult = sum("type", {
   accepted: object({ orderId: string("OrderId") }),
   rejected: object({ reason: string("Reason") }),
 });
 
-const Effect = sum("type", {
+const CancelEffect = sum("type", {
   refund: object({ paymentId: string("PaymentId") }),
   restock: object({ orderId: string("OrderId") }),
 });
 
-const cancelOrder = behavior({
+export const cancelOrder = behavior({
   name: "cancel-order",
   input: Order,
-  result: Result,
-  effects: Effect,
+  result: CancelResult,
+  effects: CancelEffect,
+  dependsOn: ["refund", "restock"],
+});
+```
+
+## 2. Generate unanswered examples
+
+```sh
+chisel generate ./cancel-order.spec.ts
+```
+
+Chisel emits TypeScript rows for every uncovered input variant.
+
+```ts
+export const cancelOrderExamples = examples(cancelOrder, [
+  example(cancelOrder, "cancel-order: unpaid", {
+    given: {
+      state: "unpaid",
+      orderId: "<OrderId>",
+    },
+    expect: unanswered(
+      "Expected result for unpaid must be decided by a human",
+    ),
+  }),
+  example(cancelOrder, "cancel-order: paid", {
+    given: {
+      state: "paid",
+      orderId: "<OrderId>",
+      paymentId: "<PaymentId>",
+    },
+    expect: unanswered(
+      "Expected result for paid must be decided by a human",
+    ),
+  }),
+]);
+```
+
+## 3. Fill expectations
+
+A human replaces `unanswered()` with the expected result and effect trace.
+
+```ts
+example(cancelOrder, "cancel a paid order", {
+  given: {
+    state: "paid",
+    orderId: "o-1",
+    paymentId: "p-1",
+  },
+  expect: {
+    result: {
+      type: "accepted",
+      orderId: "o-1",
+    },
+    effects: [
+      { type: "refund", paymentId: "p-1" },
+      { type: "restock", orderId: "o-1" },
+    ],
+  },
+});
+```
+
+Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants.
+
+## 4. Implement the model
+
+Once expectations are known, `implement()` supplies the executable model.
+
+```ts
+const implementation = implement(cancelOrder, {
   cases: {
     unpaid: {
       kind: "decision",
@@ -72,10 +131,13 @@ const cancelOrder = behavior({
         ],
       }),
     },
-    preparing: pending("Cancellation policy is undecided"),
   },
   controls: {
-    refund: pending("Refund compensation is undecided"),
+    refund: {
+      execution: "queue",
+      idempotency: "required",
+      compensation: "manual",
+    },
     restock: {
       execution: "outbox",
       idempotency: "required",
@@ -84,62 +146,43 @@ const cancelOrder = behavior({
   },
 });
 
-const rows = examples(cancelOrder, [
-  example<typeof cancelOrder>("cancel an unpaid order", {
-    given: { state: "unpaid", orderId: "o-1" },
-    expect: {
-      result: { type: "accepted", orderId: "o-1" },
-      effects: [{ type: "restock", orderId: "o-1" }],
-    },
-  }),
-]);
-
 export const cancellation = defineSpecification({
   name: "order cancellation",
-  examples: rows,
+  examples: cancelOrderExamples,
+  implementation,
 });
 ```
-
-Adding another `Order` variant makes `cases` fail to compile until the new decision is implemented or marked as pending. Changing a result or effect shape makes stale examples fail to compile.
 
 ## Commands
 
 ```sh
 npm install
 npm run check
-npm run example:check
-npm run example:generate
-npm run example:strict
+npm run demo
 ```
 
-The CLI can load a TypeScript specification directly:
+The built CLI can load TypeScript directly.
 
 ```sh
-npx chisel check ./order.spec.ts
-npx chisel check ./order.spec.ts --strict
-npx chisel generate ./order.spec.ts
+node dist/cli.js generate ./cancel-order.spec.ts
+node dist/cli.js check ./cancel-order.spec.ts
+node dist/cli.js check ./cancel-order.spec.ts --strict
 ```
 
-`check` always prints the current state. With `--strict`, incomplete specifications exit with status 1. `generate` emits placeholder inputs for uncovered input variants while leaving the expected result for a human to decide.
+`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example.
 
-## Adequacy
+## Progressive demo
 
-The current analyzer checks:
+The [hotel reservation demo](./examples/progressive-demo/README.md) runs the complete declaration → generation → human answer → refinement → implementation sequence.
 
-- coverage of every input variant;
-- coverage of every result variant;
-- coverage of every effect variant;
-- pending behavior decisions;
-- missing or pending control policies;
-- model/example mismatches.
+```sh
+npm run demo
+```
 
-Free-form TypeScript inside a decision can contain branches that Chisel cannot discover. The report therefore marks internal decision coverage as `undetermined` instead of claiming that line or branch coverage proves semantic completeness. A future rule/partition API can make those decisions enumerable without requiring a TypeScript compiler plugin.
+## Analysis boundary
+
+The current analyzer measures declared input, result, and effect variants. Free-form TypeScript inside a decision may contain branches Chisel cannot discover, so internal decision coverage remains `undetermined`. A future rule and partition API can make those branches enumerable.
 
 ## Conformance
 
-`verifyConformance` runs the same examples against an external implementation. This separates two questions:
-
-1. does the executable model agree with the human-approved examples?
-2. does the controller, database, or service implementation conform to that model?
-
-The expected effect list is part of the contract, so ordering, idempotency keys, and compensation-related decisions can be reviewed rather than hidden inside infrastructure code.
+`verifyConformance` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model.

@@ -6,12 +6,13 @@ import {
   evaluateSpecification,
   example,
   examples,
-  generateTodos,
+  generateExamples,
+  implement,
   object,
-  pending,
-  runBehavior,
+  runImplementation,
   string,
   sum,
+  unanswered,
   verifyConformance,
 } from "../src/index.js";
 
@@ -29,12 +30,18 @@ const Effect = sum("type", {
   notify: object({ id: string("Id") }),
 });
 
-function completeBehavior() {
+function publishingBehavior() {
   return behavior({
     name: "publish",
     input: Input,
     result: Result,
     effects: Effect,
+    dependsOn: ["notify"],
+  });
+}
+
+function publishingImplementation(definition: ReturnType<typeof publishingBehavior>) {
+  return implement(definition, {
     cases: {
       draft: {
         kind: "decision",
@@ -64,9 +71,50 @@ function completeBehavior() {
 }
 
 describe("chisel", () => {
-  it("runs a decision and validates its trace", async () => {
-    const definition = completeBehavior();
-    const actual = await runBehavior(definition, { state: "draft", id: "a" });
+  it("generates unanswered examples from a behavior declaration", () => {
+    const definition = publishingBehavior();
+
+    const generated = generateExamples(definition);
+
+    assert.deepEqual(generated.map(row => row.given), [
+      { state: "draft", id: "<Id>" },
+      { state: "published", id: "<Id>" },
+    ]);
+  });
+
+  it("keeps human answers separate from the implementation", async () => {
+    const definition = publishingBehavior();
+    const rows = examples(definition, [
+      example(definition, "publish draft", {
+        given: { state: "draft", id: "a" },
+        expect: {
+          result: { type: "accepted", id: "a" },
+          effects: [{ type: "notify", id: "a" }],
+        },
+      }),
+      example(definition, "published behavior is unanswered", {
+        given: { state: "published", id: "b" },
+        expect: unanswered("A human must decide repeated publication"),
+      }),
+    ]);
+    const specification = defineSpecification({ name: "publishing", examples: rows });
+
+    const report = await evaluateSpecification(specification);
+
+    assert.equal(report.implementation, "missing");
+    assert.deepEqual(report.input.missing, ["published"]);
+    assert.deepEqual(report.unanswered.map(row => row.variant), ["published"]);
+    assert.equal(report.adequate, false);
+  });
+
+  it("runs an implementation after expectations have been decided", async () => {
+    const definition = publishingBehavior();
+    const implementation = publishingImplementation(definition);
+
+    const actual = await runImplementation(implementation, {
+      state: "draft",
+      id: "a",
+    });
 
     assert.deepEqual(actual, {
       result: { type: "accepted", id: "a" },
@@ -74,17 +122,18 @@ describe("chisel", () => {
     });
   });
 
-  it("reports a complete specification", async () => {
-    const definition = completeBehavior();
+  it("accepts a model that satisfies all human-approved examples", async () => {
+    const definition = publishingBehavior();
+    const implementation = publishingImplementation(definition);
     const rows = examples(definition, [
-      example<typeof definition>("publish draft", {
+      example(definition, "publish draft", {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
       }),
-      example<typeof definition>("reject published", {
+      example(definition, "reject published", {
         given: { state: "published", id: "b" },
         expect: {
           result: { type: "rejected", reason: "already-published" },
@@ -92,82 +141,18 @@ describe("chisel", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({ name: "publishing", examples: rows });
-
-    const report = await evaluateSpecification(specification);
-
-    assert.equal(report.adequate, true);
-    assert.deepEqual(report.input.missing, []);
-    assert.deepEqual(report.result.missing, []);
-    assert.deepEqual(report.effects.missing, []);
-  });
-
-  it("finds pending decisions and generates missing examples", async () => {
-    const definition = behavior({
-      name: "publish",
-      input: Input,
-      result: Result,
-      effects: Effect,
-      cases: {
-        draft: {
-          kind: "decision",
-          id: "publish-draft",
-          run: input => ({
-            result: { type: "accepted", id: input.id },
-            effects: [{ type: "notify", id: input.id }],
-          }),
-        },
-        published: pending("Repeat publication policy is undecided"),
-      },
-      controls: { notify: pending("Delivery guarantee is undecided") },
+    const specification = defineSpecification({
+      name: "publishing",
+      examples: rows,
+      implementation,
     });
-    const rows = examples(definition, [
-      example<typeof definition>("publish draft", {
-        given: { state: "draft", id: "a" },
-        expect: {
-          result: { type: "accepted", id: "a" },
-          effects: [{ type: "notify", id: "a" }],
-        },
-      }),
-    ]);
-    const specification = defineSpecification({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
-    const generated = generateTodos(specification);
-
-    assert.equal(report.adequate, false);
-    assert.deepEqual(report.input.missing, ["published"]);
-    assert.deepEqual(report.pendingDecisions, [
-      {
-        variant: "published",
-        reason: "Repeat publication policy is undecided",
-      },
-    ]);
-    assert.deepEqual(generated, [
-      {
-        name: "publish: published",
-        given: { state: "published", id: "<Id>" },
-        reason: "Expected result for published must be decided by a human",
-      },
-    ]);
-  });
-
-  it("compares an implementation with the examples", async () => {
-    const definition = completeBehavior();
-    const rows = examples(definition, [
-      example<typeof definition>("publish draft", {
-        given: { state: "draft", id: "a" },
-        expect: {
-          result: { type: "accepted", id: "a" },
-          effects: [{ type: "notify", id: "a" }],
-        },
-      }),
-    ]);
-
-    const failures = await verifyConformance(rows, async input =>
-      runBehavior(definition, input),
+    const failures = await verifyConformance(rows, input =>
+      runImplementation(implementation, input),
     );
 
+    assert.equal(report.adequate, true);
     assert.deepEqual(failures, []);
   });
 });

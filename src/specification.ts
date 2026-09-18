@@ -5,27 +5,22 @@ import type {
   BehaviorInput,
   BehaviorResult,
   Execution,
+  Implementation,
 } from "./behavior.js";
-import { runBehavior } from "./behavior.js";
+import { runImplementation } from "./behavior.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
-export interface CompleteExample<B extends AnyBehavior> {
-  readonly kind: "example";
-  readonly name: string;
-  readonly given: BehaviorInput<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
-}
-
-export interface TodoExample<B extends AnyBehavior> {
-  readonly kind: "todo";
-  readonly name: string;
-  readonly given: BehaviorInput<B>;
+export interface Unanswered {
+  readonly kind: "unanswered";
   readonly reason: string;
 }
 
-export type Example<B extends AnyBehavior> =
-  | CompleteExample<B>
-  | TodoExample<B>;
+export interface Example<B extends AnyBehavior> {
+  readonly kind: "example";
+  readonly name: string;
+  readonly given: BehaviorInput<B>;
+  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
+}
 
 export interface ExampleSet<B extends AnyBehavior> {
   readonly kind: "example-set";
@@ -37,6 +32,7 @@ export interface Specification<B extends AnyBehavior = AnyBehavior> {
   readonly kind: "specification";
   readonly name: string;
   readonly examples: ExampleSet<B>;
+  readonly implementation: Implementation<B> | undefined;
 }
 
 export interface ExampleFailure {
@@ -46,6 +42,12 @@ export interface ExampleFailure {
 
 export interface PendingDecision {
   readonly variant: string;
+  readonly reason: string;
+}
+
+export interface UnansweredExample {
+  readonly name: string;
+  readonly variant: string | undefined;
   readonly reason: string;
 }
 
@@ -60,9 +62,10 @@ export interface AdequacyReport {
   readonly input: Coverage;
   readonly result: Coverage;
   readonly effects: Coverage;
+  readonly implementation: "present" | "missing";
+  readonly unanswered: readonly UnansweredExample[];
   readonly pendingDecisions: readonly PendingDecision[];
   readonly controlGaps: readonly ControlGap[];
-  readonly todos: readonly string[];
   readonly failures: readonly ExampleFailure[];
   readonly internalDecisionCoverage: "undetermined";
   readonly adequate: boolean;
@@ -74,7 +77,7 @@ export interface Coverage {
   readonly total: number;
 }
 
-export interface GeneratedTodo {
+export interface GeneratedExample {
   readonly name: string;
   readonly given: unknown;
   readonly reason: string;
@@ -86,21 +89,29 @@ export type ConformanceSubject<B extends AnyBehavior> = (
   | Execution<BehaviorResult<B>, BehaviorEffect<B>>
   | Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>>;
 
+export function unanswered(
+  reason = "期待結果を人間が決める必要があります",
+): Unanswered {
+  return { kind: "unanswered", reason };
+}
+
+export function isUnanswered(value: unknown): value is Unanswered {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Readonly<Record<string, unknown>>).kind === "unanswered"
+  );
+}
+
 export function example<B extends AnyBehavior>(
+  definition: B,
   name: string,
   value: {
     readonly given: BehaviorInput<B>;
-    readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
+    readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
   },
-): CompleteExample<B> {
+): Example<B> {
   return { kind: "example", name, ...value };
-}
-
-export function todo<B extends AnyBehavior>(
-  name: string,
-  value: { readonly given: BehaviorInput<B>; readonly reason: string },
-): TodoExample<B> {
-  return { kind: "todo", name, ...value };
 }
 
 export function examples<
@@ -113,8 +124,14 @@ export function examples<
 export function defineSpecification<B extends AnyBehavior>(options: {
   readonly name: string;
   readonly examples: ExampleSet<B>;
+  readonly implementation?: Implementation<B>;
 }): Specification<B> {
-  return { kind: "specification", ...options };
+  return {
+    kind: "specification",
+    name: options.name,
+    examples: options.examples,
+    implementation: options.implementation,
+  };
 }
 
 export function isSpecification(value: unknown): value is Specification {
@@ -133,15 +150,25 @@ export async function evaluateSpecification(
   const coveredResults = new Set<string>();
   const coveredEffects = new Set<string>();
   const failures: ExampleFailure[] = [];
-  const todos: string[] = [];
+  const unansweredRows: UnansweredExample[] = [];
 
   for (const row of specification.examples.rows) {
-    if (row.kind === "todo") {
-      todos.push(row.name);
+    const inputValidation = definition.input.parse(row.given);
+    const inputTag = tagOf(definition.input, row.given);
+    if (!inputValidation.success) {
+      failures.push({ name: row.name, message: "Example input is invalid" });
       continue;
     }
 
-    const inputTag = tagOf(definition.input, row.given);
+    if (isUnanswered(row.expect)) {
+      unansweredRows.push({
+        name: row.name,
+        variant: inputTag,
+        reason: row.expect.reason,
+      });
+      continue;
+    }
+
     if (inputTag !== undefined) {
       coveredInputs.add(inputTag);
     }
@@ -166,48 +193,59 @@ export async function evaluateSpecification(
       }
     }
 
-    try {
-      const actual = await runBehavior(definition, row.given);
-      if (!isDeepStrictEqual(actual, row.expect)) {
+    if (specification.implementation !== undefined) {
+      try {
+        const actual = await runImplementation(
+          specification.implementation,
+          row.given,
+        );
+        if (!isDeepStrictEqual(actual, row.expect)) {
+          failures.push({
+            name: row.name,
+            message: `Expected ${JSON.stringify(row.expect)}, received ${JSON.stringify(actual)}`,
+          });
+        }
+      } catch (error) {
         failures.push({
           name: row.name,
-          message: `Expected ${JSON.stringify(row.expect)}, received ${JSON.stringify(actual)}`,
+          message: error instanceof Error ? error.message : String(error),
         });
       }
-    } catch (error) {
-      failures.push({
-        name: row.name,
-        message: error instanceof Error ? error.message : String(error),
-      });
     }
   }
 
-  const pendingDecisions = Object.entries(definition.cases).flatMap(
-    ([variant, decision]) =>
-      decision.kind === "pending"
-        ? [{ variant, reason: decision.reason }]
-        : [],
-  );
+  const pendingDecisions =
+    specification.implementation === undefined
+      ? []
+      : Object.entries(specification.implementation.cases).flatMap(
+          ([variant, decision]) =>
+            decision.kind === "pending"
+              ? [{ variant, reason: decision.reason }]
+              : [],
+        );
 
-  const controlGaps = definition.effects.variantTags.flatMap(effect => {
-    const control = definition.controls[effect];
-    if (control === undefined) {
-      return [{ effect, reason: "control policy is missing" }];
-    }
-    return "kind" in control && control.kind === "pending"
-      ? [{ effect, reason: control.reason }]
-      : [];
-  });
+  const controlGaps =
+    specification.implementation === undefined
+      ? []
+      : definition.effects.variantTags.flatMap(effect => {
+          const control = specification.implementation?.controls[effect];
+          if (control === undefined) {
+            return [{ effect, reason: "control policy is missing" }];
+          }
+          return "kind" in control && control.kind === "pending"
+            ? [{ effect, reason: control.reason }]
+            : [];
+        });
 
   const input = coverage(definition.input.variantTags, coveredInputs);
-  const result =
-    isSumSchema(definition.result)
-      ? coverage(definition.result.variantTags, coveredResults)
-      : coverage([], new Set());
+  const result = isSumSchema(definition.result)
+    ? coverage(definition.result.variantTags, coveredResults)
+    : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
   const adequate =
+    specification.implementation !== undefined &&
     failures.length === 0 &&
-    todos.length === 0 &&
+    unansweredRows.length === 0 &&
     pendingDecisions.length === 0 &&
     controlGaps.length === 0 &&
     input.missing.length === 0 &&
@@ -220,19 +258,24 @@ export async function evaluateSpecification(
     input,
     result,
     effects,
+    implementation:
+      specification.implementation === undefined ? "missing" : "present",
+    unanswered: unansweredRows,
     pendingDecisions,
     controlGaps,
-    todos,
     failures,
     internalDecisionCoverage: "undetermined",
     adequate,
   };
 }
 
-export function generateTodos(specification: Specification): readonly GeneratedTodo[] {
-  const definition = specification.examples.behavior;
+export function generateExamples(
+  target: AnyBehavior | ExampleSet<AnyBehavior>,
+): readonly GeneratedExample[] {
+  const definition = target.kind === "behavior" ? target : target.behavior;
+  const rows = target.kind === "behavior" ? [] : target.rows;
   const existing = new Set(
-    specification.examples.rows
+    rows
       .map(row => tagOf(definition.input, row.given))
       .filter((tag): tag is string => tag !== undefined),
   );
@@ -242,7 +285,7 @@ export function generateTodos(specification: Specification): readonly GeneratedT
     .map(tag => ({
       name: `${definition.name}: ${tag}`,
       given: definition.input.placeholderFor(tag),
-      reason: `Expected result for ${tag} must be decided by a human`,
+      reason: `${tag}の期待結果を人間が決める必要があります`,
     }));
 }
 
@@ -252,7 +295,7 @@ export async function verifyConformance<B extends AnyBehavior>(
 ): Promise<readonly ExampleFailure[]> {
   const failures: ExampleFailure[] = [];
   for (const row of exampleSet.rows) {
-    if (row.kind === "todo") {
+    if (isUnanswered(row.expect)) {
       continue;
     }
     try {

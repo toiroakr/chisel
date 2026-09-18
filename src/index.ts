@@ -22,18 +22,27 @@ export type {
   VariantOf,
 } from "./schema.js";
 
-export { behavior, pending, runBehavior, SpecificationError } from "./behavior.js";
+export {
+  behavior,
+  implement,
+  isBehavior,
+  pending,
+  runImplementation,
+  SpecificationError,
+} from "./behavior.js";
 export type {
   AnyBehavior,
+  AnyImplementation,
   Behavior,
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
-  Cases,
   ControlPolicy,
   ControlTable,
   Decision,
   Execution,
+  Implementation,
+  ImplementationCases,
   Pending,
 } from "./behavior.js";
 
@@ -42,22 +51,23 @@ export {
   evaluateSpecification,
   example,
   examples,
-  generateTodos,
+  generateExamples,
+  isUnanswered,
   isSpecification,
-  todo,
+  unanswered,
   verifyConformance,
 } from "./specification.js";
 export type {
   AdequacyReport,
-  CompleteExample,
   ConformanceSubject,
   ControlGap,
   Coverage,
   Example,
   ExampleFailure,
   ExampleSet,
-  GeneratedTodo,
+  GeneratedExample,
   PendingDecision,
   Specification,
-  TodoExample,
+  Unanswered,
+  UnansweredExample,
 } from "./specification.js";

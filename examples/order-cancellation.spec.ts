@@ -3,6 +3,7 @@ import {
   defineSpecification,
   example,
   examples,
+  implement,
   literal,
   object,
   pending,
@@ -43,11 +44,15 @@ const CancelEffect = sum("type", {
   }),
 });
 
-const cancelOrder = behavior({
+export const cancelOrder = behavior({
   name: "cancel-order",
   input: Order,
   result: CancelResult,
   effects: CancelEffect,
+  dependsOn: ["refund", "restock"],
+});
+
+const implementation = implement(cancelOrder, {
   cases: {
     unpaid: {
       kind: "decision",
@@ -118,7 +123,7 @@ const cancelOrder = behavior({
 });
 
 const cancellationExamples = examples(cancelOrder, [
-  example<typeof cancelOrder>("cancel an unpaid order", {
+  example(cancelOrder, "cancel an unpaid order", {
     given: { state: "unpaid", orderId: "o-1" },
     expect: {
       result: {
@@ -134,7 +139,7 @@ const cancellationExamples = examples(cancelOrder, [
       ],
     },
   }),
-  example<typeof cancelOrder>("cancel a paid order", {
+  example(cancelOrder, "cancel a paid order", {
     given: { state: "paid", orderId: "o-2", paymentId: "p-2" },
     expect: {
       result: {
@@ -155,14 +160,14 @@ const cancellationExamples = examples(cancelOrder, [
       ],
     },
   }),
-  example<typeof cancelOrder>("reject a shipped order", {
+  example(cancelOrder, "reject a shipped order", {
     given: { state: "shipped", orderId: "o-3", shipmentId: "s-3" },
     expect: {
       result: { type: "rejected", reason: "already-shipped" },
       effects: [],
     },
   }),
-  example<typeof cancelOrder>("reject an already cancelled order", {
+  example(cancelOrder, "reject an already cancelled order", {
     given: { state: "cancelled", orderId: "o-4" },
     expect: {
       result: { type: "rejected", reason: "already-cancelled" },
@@ -174,4 +179,5 @@ const cancellationExamples = examples(cancelOrder, [
 export const orderCancellation = defineSpecification({
   name: "order cancellation",
   examples: cancellationExamples,
+  implementation,
 });

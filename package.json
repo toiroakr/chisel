@@ -20,6 +20,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/**/*.test.ts",
     "check": "npm run typecheck && npm test",
+    "demo": "tsx examples/progressive-demo/run.ts",
+    "demo:type-break": "tsc -p examples/progressive-demo/type-break/tsconfig.json --pretty false",
     "example:check": "tsx src/cli.ts check examples/order-cancellation.spec.ts",
     "example:strict": "tsx src/cli.ts check examples/order-cancellation.spec.ts --strict",
     "example:generate": "tsx src/cli.ts generate examples/order-cancellation.spec.ts"

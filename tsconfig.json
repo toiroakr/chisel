@@ -10,5 +10,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "test", "examples"]
+  "include": ["src", "test", "examples"],
+  "exclude": ["examples/progressive-demo/type-break"]
 }

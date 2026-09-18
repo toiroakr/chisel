@@ -26,16 +26,6 @@ export interface Decision<Input, Result, Effect> {
   run(input: Input): Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
 }
 
-export type Cases<
-  Input extends SumSchema<string, SumVariants>,
-  Result,
-  Effect,
-> = {
-  readonly [Tag in Tags<Input>]:
-    | Decision<VariantOf<Input, Tag>, Result, Effect>
-    | Pending;
-};
-
 export interface ControlPolicy {
   readonly execution: "direct" | "outbox" | "queue";
   readonly idempotency: "required" | "not-required";
@@ -57,12 +47,7 @@ export interface Behavior<
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
-  readonly cases: Cases<
-    InputSchema,
-    Infer<ResultSchema>,
-    Infer<EffectSchema>
-  >;
-  readonly controls: ControlTable<EffectSchema>;
+  readonly dependsOn: readonly string[];
 }
 
 export type AnyBehavior = Behavior<
@@ -89,6 +74,21 @@ export type BehaviorEffect<B> = B extends Behavior<
   ? Infer<Effect>
   : never;
 
+export type ImplementationCases<B extends AnyBehavior> = {
+  readonly [Tag in Tags<B["input"]>]:
+    | Decision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>>
+    | Pending;
+};
+
+export interface Implementation<B extends AnyBehavior> {
+  readonly kind: "implementation";
+  readonly behavior: B;
+  readonly cases: ImplementationCases<B>;
+  readonly controls: ControlTable<B["effects"]>;
+}
+
+export type AnyImplementation = Implementation<AnyBehavior>;
+
 export class SpecificationError extends Error {
   constructor(message: string) {
     super(message);
@@ -109,12 +109,7 @@ export function behavior<
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
-  readonly cases: Cases<
-    InputSchema,
-    Infer<ResultSchema>,
-    Infer<EffectSchema>
-  >;
-  readonly controls?: ControlTable<EffectSchema>;
+  readonly dependsOn?: readonly string[];
 }): Behavior<InputSchema, ResultSchema, EffectSchema> {
   return {
     kind: "behavior",
@@ -122,15 +117,38 @@ export function behavior<
     input: options.input,
     result: options.result,
     effects: options.effects,
-    cases: options.cases,
-    controls: options.controls ?? ({} as ControlTable<EffectSchema>),
+    dependsOn: options.dependsOn ?? [],
   };
 }
 
-export async function runBehavior<B extends AnyBehavior>(
+export function implement<B extends AnyBehavior>(
   definition: B,
+  options: {
+    readonly cases: ImplementationCases<B>;
+    readonly controls?: ControlTable<B["effects"]>;
+  },
+): Implementation<B> {
+  return {
+    kind: "implementation",
+    behavior: definition,
+    cases: options.cases,
+    controls: options.controls ?? ({} as ControlTable<B["effects"]>),
+  };
+}
+
+export function isBehavior(value: unknown): value is AnyBehavior {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Readonly<Record<string, unknown>>).kind === "behavior"
+  );
+}
+
+export async function runImplementation<B extends AnyBehavior>(
+  implementation: Implementation<B>,
   input: BehaviorInput<B>,
 ): Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>> {
+  const definition = implementation.behavior;
   const parsedInput = definition.input.parse(input);
   if (!parsedInput.success) {
     throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
@@ -141,7 +159,9 @@ export async function runBehavior<B extends AnyBehavior>(
     throw new SpecificationError("Input has no recognized variant");
   }
 
-  const selected = definition.cases[tag as Tags<typeof definition.input>];
+  const selected = implementation.cases[
+    tag as keyof ImplementationCases<B>
+  ];
   if (selected === undefined) {
     throw new SpecificationError(`No decision for input variant ${tag}`);
   }
