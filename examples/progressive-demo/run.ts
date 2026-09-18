@@ -40,14 +40,14 @@ showTypeBreak();
 
 await show(
   "STEP 3 — dataとbehaviorを更新する",
-  "予約確定を返金可能な予約と返金不可な予約に分割する。古いexampleは型エラーになり、新しいvariantのexampleが生成される。",
+  "予約確定に宿泊開始日時とキャンセル要求日時を追加する。古いexampleは型エラーになり、更新後の入力形を持つexampleが生成される。",
   詳細化した仕様,
   "予約をキャンセルする",
 );
 
 await show(
   "STEP 4 — exampleを満たすmodelを実装する",
-  "期限後の期待値を決め、implement()で全exampleを満たす実行可能モデルとcontrol policyを書く。",
+  "生成された雛形を期限前・期限ちょうど・期限後の3例へ展開し、24時間前まで返金するmodelを実装する。",
   完成した仕様,
 );
 

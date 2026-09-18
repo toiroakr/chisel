@@ -45,9 +45,54 @@ describe("progressive specification demo", () => {
     assert.equal(段階2.implementation, "missing");
 
     assert.equal(段階3.adequate, false);
-    assert.deepEqual(段階3.input.missing, ["返金不可な予約"]);
+    assert.deepEqual(段階3.input.missing, ["予約確定"]);
     assert.equal(段階3.implementation, "missing");
 
     assert.equal(段階4.adequate, true);
+  });
+
+  it("derives refund eligibility from timestamps at the 24-hour boundary", () => {
+    const 予約確定の具体例 = 完成した仕様.examples.rows.filter(
+      row => (row.given as { readonly 状態: string }).状態 === "予約確定",
+    );
+
+    assert.deepEqual(
+      予約確定の具体例.map(row => row.given),
+      [
+        {
+          状態: "予約確定",
+          予約ID: "予約-2",
+          決済ID: "決済-2",
+          宿泊開始日時: "2026-10-10T15:00:00.000Z",
+          キャンセル要求日時: "2026-10-09T14:59:59.000Z",
+        },
+        {
+          状態: "予約確定",
+          予約ID: "予約-3",
+          決済ID: "決済-3",
+          宿泊開始日時: "2026-10-10T15:00:00.000Z",
+          キャンセル要求日時: "2026-10-09T15:00:00.000Z",
+        },
+        {
+          状態: "予約確定",
+          予約ID: "予約-4",
+          決済ID: "決済-4",
+          宿泊開始日時: "2026-10-10T15:00:00.000Z",
+          キャンセル要求日時: "2026-10-09T15:00:01.000Z",
+        },
+      ],
+    );
+    assert.deepEqual(
+      予約確定の具体例.map(row =>
+        "effects" in row.expect
+          ? row.expect.effects.map(effect => effect.種類)
+          : [],
+      ),
+      [
+        ["返金", "部屋を解放"],
+        ["返金", "部屋を解放"],
+        ["部屋を解放"],
+      ],
+    );
   });
 });

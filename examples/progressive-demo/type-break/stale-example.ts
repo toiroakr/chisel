@@ -3,7 +3,7 @@ import { 予約をキャンセルする } from "../stage-03-refined.spec.js";
 
 export const 古い具体例 = example(
   予約をキャンセルする,
-  "分割前の予約確定の具体例",
+  "日時追加前の予約確定の具体例",
   {
     given: {
       状態: "予約確定",
