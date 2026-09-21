@@ -41,10 +41,42 @@ export interface LiteralSchema<T extends string | number | boolean | null>
   readonly value: T;
 }
 
+export interface ArraySchema<T> extends Schema<readonly T[]> {
+  readonly kind: "array";
+  readonly element: Schema<T>;
+}
+
+export interface OptionalSchema<T> extends Schema<T | undefined> {
+  readonly kind: "optional";
+  readonly schema: Schema<T>;
+}
+
+export interface RecordSchema<T> extends Schema<Readonly<Record<string, T>>> {
+  readonly kind: "record";
+  readonly value: Schema<T>;
+}
+
 export type ObjectShape = Readonly<Record<string, AnySchema>>;
 
+type OptionalShapeKeys<Shape extends ObjectShape> = {
+  readonly [K in keyof Shape]: Shape[K] extends OptionalSchema<unknown>
+    ? K
+    : never;
+}[keyof Shape];
+
+type RequiredShapeKeys<Shape extends ObjectShape> = Exclude<
+  keyof Shape,
+  OptionalShapeKeys<Shape>
+>;
+
+export type InferShape<Shape extends ObjectShape> = {
+  readonly [K in RequiredShapeKeys<Shape>]: Infer<Shape[K]>;
+} & {
+  readonly [K in OptionalShapeKeys<Shape>]?: Exclude<Infer<Shape[K]>, undefined>;
+};
+
 export interface ObjectSchema<Shape extends ObjectShape>
-  extends Schema<{ [K in keyof Shape]: Infer<Shape[K]> }> {
+  extends Schema<InferShape<Shape>> {
   readonly kind: "object";
   readonly shape: Shape;
 }
@@ -187,10 +219,7 @@ export function object<const Shape extends ObjectShape>(
     placeholder,
   };
 
-  function parse(
-    value: unknown,
-    path = "$",
-  ): ValidationResult<{ [K in keyof Shape]: Infer<Shape[K]> }> {
+  function parse(value: unknown, path = "$"): ValidationResult<InferShape<Shape>> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       return invalid(path, "Expected an object");
     }
@@ -202,7 +231,9 @@ export function object<const Shape extends ObjectShape>(
     for (const [key, field] of Object.entries(shape)) {
       const result = field.parse(source[key], `${path}.${key}`);
       if (result.success) {
-        output[key] = result.value;
+        if (result.value !== undefined) {
+          output[key] = result.value;
+        }
       } else {
         issues.push(...result.issues);
       }
@@ -210,13 +241,94 @@ export function object<const Shape extends ObjectShape>(
 
     return issues.length > 0
       ? { success: false, issues }
-      : valid(output as { [K in keyof Shape]: Infer<Shape[K]> });
+      : valid(output as InferShape<Shape>);
   }
 
   function placeholder(): unknown {
-    return Object.fromEntries(
-      Object.entries(shape).map(([key, field]) => [key, field.placeholder()]),
-    );
+    const output: Record<string, unknown> = {};
+    for (const [key, field] of Object.entries(shape)) {
+      const value = field.placeholder();
+      if (value !== undefined) {
+        output[key] = value;
+      }
+    }
+    return output;
+  }
+}
+
+export function array<T>(element: Schema<T>): ArraySchema<T> {
+  return {
+    kind: "array",
+    element,
+    parse,
+    placeholder: () => [],
+  };
+
+  function parse(value: unknown, path = "$"): ValidationResult<readonly T[]> {
+    if (!Array.isArray(value)) {
+      return invalid(path, "Expected an array");
+    }
+
+    const output: T[] = [];
+    const issues: ValidationIssue[] = [];
+
+    value.forEach((item, index) => {
+      const result = element.parse(item, `${path}[${index}]`);
+      if (result.success) {
+        output.push(result.value);
+      } else {
+        issues.push(...result.issues);
+      }
+    });
+
+    return issues.length > 0 ? { success: false, issues } : valid(output);
+  }
+}
+
+export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
+  return {
+    kind: "optional",
+    schema,
+    parse,
+    placeholder: () => undefined,
+  };
+
+  function parse(value: unknown, path = "$"): ValidationResult<T | undefined> {
+    return value === undefined ? valid(undefined) : schema.parse(value, path);
+  }
+}
+
+export function record<T>(value: Schema<T>): RecordSchema<T> {
+  return {
+    kind: "record",
+    value,
+    parse,
+    placeholder: () => ({}),
+  };
+
+  function parse(
+    raw: unknown,
+    path = "$",
+  ): ValidationResult<Readonly<Record<string, T>>> {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return invalid(path, "Expected an object");
+    }
+
+    const output: Record<string, T> = {};
+    const issues: ValidationIssue[] = [];
+
+    for (const [key, item] of Object.entries(
+      raw as Readonly<Record<string, unknown>>,
+    )) {
+      const result = value.parse(item, `${path}.${key}`);
+      if (result.success) {
+        output[key] = result.value;
+      } else {
+        issues.push(...result.issues);
+      }
+    }
+
+    return issues.length > 0 ? { success: false, issues } : valid(output);
   }
 }
 

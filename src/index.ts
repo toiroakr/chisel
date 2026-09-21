@@ -1,12 +1,15 @@
 export type {} from "temporal-spec/global";
 
 export {
+  array,
   boolean,
   instant,
   literal,
   isSumSchema,
   number,
   object,
+  optional,
+  record,
   string,
   sum,
   tagOf,
@@ -14,9 +17,13 @@ export {
 export type {
   AnySchema,
   AnySumSchema,
+  ArraySchema,
   Infer,
+  InferShape,
   InstantSchema,
   ObjectSchema,
+  OptionalSchema,
+  RecordSchema,
   Schema,
   SumSchema,
   SumVariant,
