@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/**/*.test.ts",
+    "test": "tsx --test",
     "check": "npm run typecheck && npm test",
     "demo": "tsx examples/progressive-demo/run.ts",
     "demo:type-break": "tsc -p examples/progressive-demo/type-break/tsconfig.json --pretty false",
