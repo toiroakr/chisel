@@ -10,6 +10,25 @@ import type {
 import { runImplementation } from "./behavior.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
+async function runAndCompare<B extends AnyBehavior>(
+  name: string,
+  given: BehaviorInput<B>,
+  expected: Execution<BehaviorResult<B>, BehaviorEffect<B>>,
+  subject: ConformanceSubject<B>,
+): Promise<ExampleFailure | undefined> {
+  try {
+    const actual = await subject(given);
+    return isDeepStrictEqual(actual, expected)
+      ? undefined
+      : {
+          name,
+          message: `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+        };
+  } catch (error) {
+    return { name, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export interface Unanswered {
   readonly kind: "unanswered";
   readonly reason: string;
@@ -56,6 +75,11 @@ export interface ControlGap {
   readonly reason: string;
 }
 
+export interface DependencyIssue {
+  readonly variant: string | undefined;
+  readonly reason: string;
+}
+
 export interface AdequacyReport {
   readonly specification: string;
   readonly behavior: string;
@@ -66,6 +90,7 @@ export interface AdequacyReport {
   readonly unanswered: readonly UnansweredExample[];
   readonly pendingDecisions: readonly PendingDecision[];
   readonly controlGaps: readonly ControlGap[];
+  readonly dependencyIssues: readonly DependencyIssue[];
   readonly failures: readonly ExampleFailure[];
   readonly internalDecisionCoverage: "undetermined";
   readonly adequate: boolean;
@@ -193,23 +218,13 @@ export async function evaluateSpecification(
       }
     }
 
-    if (specification.implementation !== undefined) {
-      try {
-        const actual = await runImplementation(
-          specification.implementation,
-          row.given,
-        );
-        if (!isDeepStrictEqual(actual, row.expect)) {
-          failures.push({
-            name: row.name,
-            message: `Expected ${JSON.stringify(row.expect)}, received ${JSON.stringify(actual)}`,
-          });
-        }
-      } catch (error) {
-        failures.push({
-          name: row.name,
-          message: error instanceof Error ? error.message : String(error),
-        });
+    const implementation = specification.implementation;
+    if (implementation !== undefined) {
+      const failure = await runAndCompare(row.name, row.given, row.expect, input =>
+        runImplementation(implementation, input),
+      );
+      if (failure !== undefined) {
+        failures.push(failure);
       }
     }
   }
@@ -237,6 +252,28 @@ export async function evaluateSpecification(
             : [];
         });
 
+  const knownEffects = new Set(definition.effects.variantTags);
+  const unknownDependency = (tag: string): boolean => !knownEffects.has(tag);
+  const dependencyIssues: DependencyIssue[] = [
+    ...definition.dependsOn.filter(unknownDependency).map(tag => ({
+      variant: undefined,
+      reason: `未知の作用'${tag}'に依存すると宣言されています`,
+    })),
+    ...(specification.implementation === undefined
+      ? []
+      : Object.entries(specification.implementation.cases).flatMap(
+          ([variant, decision]) =>
+            decision.kind === "decision"
+              ? (decision.dependsOn ?? [])
+                  .filter(unknownDependency)
+                  .map(tag => ({
+                    variant,
+                    reason: `未知の作用'${tag}'に依存すると宣言されています`,
+                  }))
+              : [],
+        )),
+  ];
+
   const input = coverage(definition.input.variantTags, coveredInputs);
   const result = isSumSchema(definition.result)
     ? coverage(definition.result.variantTags, coveredResults)
@@ -248,6 +285,7 @@ export async function evaluateSpecification(
     unansweredRows.length === 0 &&
     pendingDecisions.length === 0 &&
     controlGaps.length === 0 &&
+    dependencyIssues.length === 0 &&
     input.missing.length === 0 &&
     result.missing.length === 0 &&
     effects.missing.length === 0;
@@ -263,6 +301,7 @@ export async function evaluateSpecification(
     unanswered: unansweredRows,
     pendingDecisions,
     controlGaps,
+    dependencyIssues,
     failures,
     internalDecisionCoverage: "undetermined",
     adequate,
@@ -298,19 +337,9 @@ export async function verifyConformance<B extends AnyBehavior>(
     if (isUnanswered(row.expect)) {
       continue;
     }
-    try {
-      const actual = await subject(row.given);
-      if (!isDeepStrictEqual(actual, row.expect)) {
-        failures.push({
-          name: row.name,
-          message: `Expected ${JSON.stringify(row.expect)}, received ${JSON.stringify(actual)}`,
-        });
-      }
-    } catch (error) {
-      failures.push({
-        name: row.name,
-        message: error instanceof Error ? error.message : String(error),
-      });
+    const failure = await runAndCompare(row.name, row.given, row.expect, subject);
+    if (failure !== undefined) {
+      failures.push(failure);
     }
   }
   return failures;

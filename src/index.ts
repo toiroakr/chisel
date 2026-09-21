@@ -68,6 +68,7 @@ export type {
   ConformanceSubject,
   ControlGap,
   Coverage,
+  DependencyIssue,
   Example,
   ExampleFailure,
   ExampleSet,
