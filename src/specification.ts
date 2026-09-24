@@ -653,6 +653,28 @@ export function generateExamples(
     }
   }
 
+  const positionsByPath = new Map(
+    positionsOf(definition.input).map(position => [position.path, position] as const),
+  );
+  for (const drawn of implementation === undefined ? [] : guardPartitionsOf(implementation)) {
+    const position = positionsByPath.get(drawn.path);
+    if (position === undefined) {
+      continue;
+    }
+    for (const item of drawn.classes) {
+      const standsIn = [...rows, ...generated].some(row =>
+        position.valuesIn(row.given).some(value => value !== undefined && item.contains(value)),
+      );
+      if (!standsIn) {
+        generated.push({
+          name: `${definition.name}: ${drawn.path} = ${item.name}`,
+          given: position.write(originFor(position), "value", item.witness),
+          reason: `${drawn.path}が${item.name}の期待結果を人間が決める必要があります`,
+        });
+      }
+    }
+  }
+
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown) =>
       comparisonsReached(implementation!, given).filter(item => item.rule === drawn.comparison);

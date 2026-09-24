@@ -370,4 +370,14 @@ describe("classes a guard's threshold divides a position into", () => {
       "not-derivable",
     ]);
   });
+
+  it("offers a row in each class a guard threshold drew that no row is in", () => {
+    const names = generateExamples(examples(注文を受け付ける, [合計で(100000)]), 上限で分ける).map(
+      row => row.name,
+    );
+
+    expect(names.filter(name => name.includes(" = "))).toStrictEqual([
+      "注文を受け付ける: @入力済み.合計 = 100000 < v",
+    ]);
+  });
 });
