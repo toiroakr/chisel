@@ -35,6 +35,13 @@ export type {
 
 export { formatTypeScriptValue } from "./codegen.js";
 
+export { positionsOf } from "./partition.js";
+export type {
+  DividedPosition,
+  Position,
+  UndividedPosition,
+} from "./partition.js";
+
 export {
   behavior,
   implement,
