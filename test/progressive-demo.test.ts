@@ -51,6 +51,7 @@ describe("progressive specification demo", () => {
     expect(段階3.implementation).toBe("missing");
 
     expect(段階4.adequate).toBe(true);
+    expect(段階4.verdict).toBe("undetermined");
   });
 
   it("derives refund eligibility from timestamps at the 24-hour boundary", () => {

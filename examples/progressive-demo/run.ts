@@ -92,6 +92,11 @@ function showTypeBreak(): void {
 }
 
 function formatReport(report: AdequacyReport): string {
+  const verdictLabels: Readonly<Record<AdequacyReport["verdict"], string>> = {
+    satisfied: "完全",
+    not_satisfied: "不完全",
+    undetermined: "未確定",
+  };
   const implementation = report.implementation === "present" ? "あり" : "なし";
   const lines = [
     `入力variant    ${report.input.covered.length}/${report.input.total}`,
@@ -115,7 +120,7 @@ function formatReport(report: AdequacyReport): string {
   for (const failure of report.failures) {
     lines.push(`不一致           ${failure.name}: ${failure.message}`);
   }
-  lines.push(`充足度           ${report.adequate ? "完全" : "不完全"}`);
+  lines.push(`充足度           ${verdictLabels[report.verdict]} (${report.verdict})`);
   return lines.join("\n");
 }
 

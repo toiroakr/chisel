@@ -63,7 +63,7 @@ Chiselはmodelをすべてのexampleに対して実行します。一致する�
 結果variant    2/2
 作用variant    2/2
 実装             あり
-充足度           完全
+充足度           未確定 (undetermined)
 ```
 
-このデモにおける`完全`は、宣言されたvariantとeffectの範囲が満たされたという意味です。decision内部に自由記述したTypeScriptの分岐まで完全だとは主張しません。
+`未確定`は、宣言されたvariantとeffectの範囲には穴が見つからなかったものの、decision内部に自由記述したTypeScriptの分岐をChiselが読めないため、分岐まで網羅できたかは判定できないという意味です。穴が見つかったときの`不完全`とは区別されます。

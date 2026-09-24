@@ -53,7 +53,7 @@ export const cancelOrder = behavior({
 chisel generate ./cancel-order.spec.ts
 ```
 
-Chisel emits TypeScript rows for every uncovered input variant.
+Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)).
 
 ```ts
 export const cancelOrderExamples = examples(cancelOrder, [
@@ -103,7 +103,7 @@ example(cancelOrder, "cancel a paid order", {
 });
 ```
 
-Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants.
+Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants, classes and border points, each composed from an answered row with only the position in question moved.
 
 ## 4. Implement the model
 
@@ -171,7 +171,7 @@ node dist/cli.js check ./cancel-order.spec.ts
 node dist/cli.js check ./cancel-order.spec.ts --strict
 ```
 
-`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example.
+`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants, classes or border points are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example. It never fails because a measure could not be made: that is reported as an `undetermined` verdict instead.
 
 ## Progressive demo
 
@@ -181,9 +181,65 @@ The [hotel reservation demo](./examples/progressive-demo/README.md) runs the com
 npm run demo
 ```
 
-## Analysis boundary
+## Analysis
 
-The current analyzer measures declared input, result, and effect variants. Free-form TypeScript inside a decision may contain branches Chisel cannot discover, so internal decision coverage remains `undetermined`. A future rule and partition API can make those branches enumerable.
+The analyzer follows the example-adequacy model of [Souther](https://github.com/souther-lang/souther). It measures what the model itself states and nothing else:
+
+- **Cases** of the input, result and effect sums. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
+- **Classes** of each input position, derived from the types: an `optional` field is absent or present, a `boolean` true or false, a sum field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
+- **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `integer`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named.
+
+```ts
+const Line = object({
+  quantity: integer().invariant(v => ge(v, 1)),
+  unitPrice: integer().invariant(v => ge(v, 0)),
+});
+const Lines = array(Line).invariant(v => ge(length(v), 1));
+```
+
+- **Arms and rules** of a decision written with `rules`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
+
+```ts
+const implementation = implement(checkout, {
+  cases: {
+    withItems: rules(
+      "check stock, then confirm",
+      cart => [
+        guard(all(cart.lines, line => le(line.quantity, line.stock)), () => ({
+          result: { type: "rejected", reason: "out of stock" },
+          effects: [],
+        })),
+      ],
+      cart => confirm(cart),
+    ),
+  },
+});
+```
+
+  Every guard has a `holds` and an `else` arm, and every case of a `match` is an arm; each way through the guards is a rule. A guard comparing a position with a constant divides it into classes and owes all four border points; one comparing two positions draws its border on their difference. A guard point is met only by a row that reached the comparison.
+
+A free-form `run` closure may contain branches Chisel cannot read, so its arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. The same holds for a comparison inside `rules` that Chisel cannot draw a line from.
+
+## Postconditions and dependencies
+
+A behavior can state what it ensures of its answer, and declare the outside world it needs:
+
+```ts
+const findMember = behavior({
+  name: "find-member",
+  input, result, effects,
+  requires: { now: dependency(instant()), lookup: dependency(string("MemberId"), boolean()) },
+  ensures: clause => [
+    clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
+      and(gt(asked.id, 0), eq(answer.id, asked.id)),
+    ),
+  ],
+});
+```
+
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`.
+
+`check` also counts the pairs of classes the rows reach (an observation, never an obligation), and `check --json` writes the whole report as one document.
 
 ## Conformance
 
