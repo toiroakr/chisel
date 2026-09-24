@@ -77,6 +77,34 @@ describe("a value dependency", () => {
   });
 });
 
+describe("a value a row writes for a dependency", () => {
+  it("is held to what the dependency answers", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(受付する, [
+          example(受付する, "時刻を文字列で書いた", {
+            given: { 状態: "申込済み", 申込ID: "a-1" },
+            with: { 現在時刻: "2026-10-01T09:00:00Z" as never },
+            expect: {
+              result: { 受付日時: Temporal.Instant.from("2026-10-01T09:00:00Z") },
+              effects: [],
+            },
+          }),
+        ]),
+        implementation: 今で受け付ける,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([
+      {
+        name: "時刻を文字列で書いた",
+        message: "with 現在時刻 is not a value the dependency answers: Expected a Temporal.Instant",
+      },
+    ]);
+  });
+});
+
 describe("a function dependency", () => {
   const 在庫を確かめる = behavior({
     name: "在庫を確かめる",
@@ -142,5 +170,40 @@ describe("a function dependency", () => {
     );
 
     expect(report.failures).toStrictEqual([]);
+  });
+
+  const issuesOf = async (fakes: Parameters<typeof defineSpecification>[0]["fakes"]) =>
+    (
+      await evaluateSpecification(
+        defineSpecification({
+          name: "在庫",
+          examples: examples(在庫を確かめる, []),
+          implementation: 照会して答える,
+          ...(fakes === undefined ? {} : { fakes }),
+        }),
+      )
+    ).fakeIssues;
+
+  it("reports a fake row that answers nothing because an earlier row states its input", async () => {
+    expect(
+      await issuesOf([fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10], ["商品-A", 3]])]),
+    ).toStrictEqual(['Fake 在庫を照会する row 2 answers nothing: row 1 already states "商品-A"']);
+  });
+
+  it("reports a fake value that is not a value of what the dependency answers", async () => {
+    expect(
+      await issuesOf([
+        fake(在庫を確かめる, "在庫を照会する", [["商品-A", 1.5]]),
+      ]),
+    ).toStrictEqual(["Fake 在庫を照会する row 1 answers a value the dependency cannot: Expected an integer"]);
+  });
+
+  it("reports two tables standing in for one dependency, neither of which is used", async () => {
+    expect(
+      await issuesOf([
+        fake(在庫を確かめる, "在庫を照会する", [["商品-A", 1]]),
+        fake(在庫を確かめる, "在庫を照会する", [["商品-A", 2]]),
+      ]),
+    ).toStrictEqual(["Fake 在庫を照会する is written 2 times"]);
   });
 });

@@ -12,7 +12,7 @@ import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
-import { answerFrom } from "./dependency.js";
+import { answerFrom, fakeIssuesOf } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
@@ -134,6 +134,7 @@ export interface AdequacyReport {
   readonly partitions: readonly PartitionCoverage[];
   readonly borders: readonly BorderCoverage[];
   readonly pairs: readonly PairCount[];
+  readonly fakeIssues: readonly string[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -332,18 +333,33 @@ export async function evaluateSpecification(
   const reached: ComparisonReached[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
+  const fakeIssues = fakeIssuesOf(definition.requires, definition.name, specification.fakes);
   const tables = new Map(
-    specification.fakes.map(table => [table.dependency, answerFrom(table)] as const),
+    specification.fakes
+      .filter(table => !fakeIssues.some(item => item.table.dependency === table.dependency))
+      .map(table => [table.dependency, answerFrom(table)] as const),
   );
   const standIns = (row: Example<AnyBehavior>): unknown => ({
     ...Object.fromEntries(tables),
     ...(row.with ?? {}),
   });
-  const unstoodFor = (row: Example<AnyBehavior>): string | undefined =>
-    Object.keys(definition.requires).find(
-      name =>
-        !(name in ((row.with ?? {}) as Readonly<Record<string, unknown>>)) && !tables.has(name),
+  const unstoodFor = (row: Example<AnyBehavior>): string | undefined => {
+    const written = (row.with ?? {}) as Readonly<Record<string, unknown>>;
+    for (const [name, value] of Object.entries(written)) {
+      const declared = definition.requires[name];
+      if (declared === undefined) {
+        return `with ${name} names no dependency of ${definition.name}`;
+      }
+      const parsed = declared.output.parse(value);
+      if (!parsed.success) {
+        return `with ${name} is not a value the dependency answers: ${parsed.issues[0]!.message}`;
+      }
+    }
+    const missing = Object.keys(definition.requires).find(
+      name => !(name in written) && !tables.has(name),
     );
+    return missing === undefined ? undefined : `No stand-in for dependency ${missing}`;
+  };
   const observe = (
     inputTag: string,
     actual: unknown,
@@ -388,7 +404,7 @@ export async function evaluateSpecification(
           : implementation.cases[inputTag];
       const unstoodOwed = unstoodFor(row);
       if (implementation !== undefined && unstoodOwed !== undefined) {
-        failures.push({ name: row.name, message: `No stand-in for dependency ${unstoodOwed}` });
+        failures.push({ name: row.name, message: unstoodOwed });
       } else if (
         implementation !== undefined &&
         decision !== undefined &&
@@ -454,7 +470,7 @@ export async function evaluateSpecification(
     const implementation = specification.implementation;
     const unstood = unstoodFor(row);
     if (implementation !== undefined && unstood !== undefined) {
-      failures.push({ name: row.name, message: `No stand-in for dependency ${unstood}` });
+      failures.push({ name: row.name, message: unstood });
     } else if (implementation !== undefined) {
       const { actual, failure } = await runAndCompare(
         row.name,
@@ -637,6 +653,7 @@ export async function evaluateSpecification(
   });
   borders.push(...ensuresBorders);
   const adequate =
+    fakeIssues.length === 0 &&
     specification.implementation !== undefined &&
     failures.length === 0 &&
     unansweredRows.length === 0 &&
@@ -691,6 +708,7 @@ export async function evaluateSpecification(
     partitions,
     borders,
     pairs: countPairs(positions, answeredGivens),
+    fakeIssues: fakeIssues.map(item => item.issue),
     evidence: {
       input: definition.input.variantTags.map(tag => ({
         case: tag,

@@ -105,3 +105,63 @@ export function answerFrom(table: FakeTable): (input: unknown) => unknown {
     throw new FakeMiss(table.dependency, input);
   };
 }
+
+export function fakeIssuesOf(
+  requires: Requirements,
+  behavior: string,
+  tables: readonly FakeTable[],
+): readonly { readonly table: FakeTable; readonly issue: string }[] {
+  const issues: { table: FakeTable; issue: string }[] = [];
+  for (const table of tables) {
+    const name = table.dependency;
+    const declared = requires[name];
+    const written = tables.filter(other => other.dependency === name).length;
+    if (declared === undefined) {
+      issues.push({ table, issue: `Fake ${name} names no dependency of ${behavior}` });
+      continue;
+    }
+    if (declared.takes === "nothing") {
+      issues.push({ table, issue: `Fake ${name} stands in for a value dependency; write it with with` });
+      continue;
+    }
+    if (written > 1) {
+      if (tables.find(other => other.dependency === name) === table) {
+        issues.push({ table, issue: `Fake ${name} is written ${written} times` });
+      }
+      continue;
+    }
+    table.rows.forEach(([asked, answer], index) => {
+      const input = declared.input.parse(asked);
+      if (!input.success) {
+        issues.push({
+          table,
+          issue: `Fake ${name} row ${index + 1} is asked a value the dependency cannot take: ${input.issues[0]!.message}`,
+        });
+      }
+      const output = declared.output.parse(answer);
+      if (!output.success) {
+        issues.push({
+          table,
+          issue: `Fake ${name} row ${index + 1} answers a value the dependency cannot: ${output.issues[0]!.message}`,
+        });
+      }
+      const earlier = table.rows.findIndex(([other]) => isDeepStrictEqual(other, asked));
+      if (earlier < index) {
+        issues.push({
+          table,
+          issue: `Fake ${name} row ${index + 1} answers nothing: row ${earlier + 1} already states ${JSON.stringify(asked)}`,
+        });
+      }
+    });
+    if (table.otherwise !== undefined) {
+      const fallback = declared.output.parse(table.otherwise.value);
+      if (!fallback.success) {
+        issues.push({
+          table,
+          issue: `Fake ${name} default answers a value the dependency cannot: ${fallback.issues[0]!.message}`,
+        });
+      }
+    }
+  }
+  return issues;
+}
