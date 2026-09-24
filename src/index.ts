@@ -88,10 +88,12 @@ export type {
   ExampleSet,
   GeneratedExample,
   InputCaseEvidence,
+  Measure,
   PartitionCoverage,
   PendingDecision,
   ResultCaseEvidence,
   Specification,
   Unanswered,
   UnansweredExample,
+  Verdict,
 } from "./specification.js";

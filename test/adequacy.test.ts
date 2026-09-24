@@ -225,3 +225,74 @@ describe("graded evidence in the adequacy report", () => {
     });
   });
 });
+
+describe("measures and verdict", () => {
+  const 確定する = implement(注文を確定する, {
+    cases: {
+      商品あり: {
+        kind: "decision",
+        id: "確定する",
+        run: cart => ({
+          result: { 結果: "確定", カートID: cart.カートID },
+          effects: [{ 種類: "決済要求", カートID: cart.カートID }],
+        }),
+      },
+    },
+    controls: {
+      決済要求: { execution: "queue", idempotency: "required", compensation: "manual" },
+    },
+  });
+  const 両方のクラス = examples(注文を確定する, [
+    クーポンなしで確定する,
+    example(注文を確定する, "クーポンありで確定する", {
+      given: { 状態: "商品あり", カートID: "c-2", クーポン: "C-1" },
+      expect: {
+        result: { 結果: "確定", カートID: "c-2" },
+        effects: [{ 種類: "決済要求", カートID: "c-2" }],
+      },
+    }),
+  ]);
+
+  it("says arms are not applicable when nothing implements the behavior", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "注文確定", examples: 両方のクラス }),
+    );
+
+    expect(report.measures.arms).toStrictEqual({
+      status: "unavailable",
+      reason: "not applicable",
+    });
+  });
+
+  it("says arms are not measured and names each free-form decision as not read", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "注文確定", examples: 両方のクラス, implementation: 確定する }),
+    );
+
+    expect(report.measures.arms).toStrictEqual({
+      status: "unavailable",
+      reason: "not measured",
+      notRead: ["確定する"],
+    });
+  });
+
+  it("is not_satisfied when a measure found a gap", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "注文確定",
+        examples: examples(注文を確定する, [クーポンなしで確定する]),
+        implementation: 確定する,
+      }),
+    );
+
+    expect(report.verdict).toBe("not_satisfied");
+  });
+
+  it("is undetermined rather than satisfied when no gap was found but the arms could not be read", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "注文確定", examples: 両方のクラス, implementation: 確定する }),
+    );
+
+    expect(report.verdict).toBe("undetermined");
+  });
+});

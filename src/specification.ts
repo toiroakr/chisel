@@ -109,9 +109,21 @@ export interface AdequacyReport {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
   };
+  readonly measures: { readonly arms: Measure };
   readonly internalDecisionCoverage: "undetermined";
   readonly adequate: boolean;
+  readonly verdict: Verdict;
 }
+
+export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
+
+export type Measure =
+  | { readonly status: "unavailable"; readonly reason: "not applicable" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: "not measured";
+      readonly notRead: readonly string[];
+    };
 
 export interface InputCaseEvidence {
   readonly case: string;
@@ -390,6 +402,22 @@ export async function evaluateSpecification(
       partition => partition.kind === "not-derivable" || partition.missing.length === 0,
     );
 
+  const arms: Measure =
+    specification.implementation === undefined
+      ? { status: "unavailable", reason: "not applicable" }
+      : {
+          status: "unavailable",
+          reason: "not measured",
+          notRead: Object.values(specification.implementation.cases).flatMap(decision =>
+            decision.kind === "decision" ? [decision.id] : [],
+          ),
+        };
+  const verdict: Verdict = !adequate
+    ? "not_satisfied"
+    : arms.reason === "not measured"
+      ? "undetermined"
+      : "satisfied";
+
   return {
     specification: specification.name,
     behavior: definition.name,
@@ -420,8 +448,10 @@ export async function evaluateSpecification(
           }))
         : [],
     },
+    measures: { arms },
     internalDecisionCoverage: "undetermined",
     adequate,
+    verdict,
   };
 }
 
