@@ -8,10 +8,15 @@ import {
   example,
   examples,
   fake,
+  generateExamples,
+  generationReport,
   implement,
+  match,
+  rules,
   integer,
   instant,
   object,
+  optional,
   string,
   sum,
 } from "../src/index.js";
@@ -205,5 +210,65 @@ describe("a function dependency", () => {
         fake(在庫を確かめる, "在庫を照会する", [["商品-A", 2]]),
       ]),
     ).toStrictEqual(["Fake 在庫を照会する is written 2 times"]);
+  });
+});
+
+describe("generated rows and dependencies", () => {
+  it("carries the values the answered row it was composed from stands in with", () => {
+    const 受付する2 = behavior({
+      name: "受付する2",
+      input: sum("状態", { 申込済み: object({ 紹介コード: optional(string("紹介コード")) }) }),
+      result: object({ 受付日時: instant() }),
+      effects: sum("種類", {}),
+      requires: { 現在時刻: dependency(instant()) },
+    });
+    const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
+
+    expect(
+      generateExamples(
+        examples(受付する2, [
+          example(受付する2, "紹介なし", {
+            given: { 状態: "申込済み" },
+            with: { 現在時刻: 時刻 },
+            expect: { result: { 受付日時: 時刻 }, effects: [] },
+          }),
+        ]),
+      ).map(row => row.with),
+    ).toStrictEqual([{ 現在時刻: 時刻 }]);
+  });
+
+  it("follows the way of a row whose handler needs a stand-in generate does not have", () => {
+    const 送料を決める = behavior({
+      name: "送料を決める",
+      input: sum("状態", {
+        確定済み: object({ 配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }) }),
+      }),
+      result: object({ 送料: integer() }),
+      effects: sum("種類", {}),
+      requires: { 料金表: dependency(string("方法"), integer()) },
+    });
+    const 料金表で決める = implement(送料を決める, {
+      cases: {
+        確定済み: rules(
+          "料金表で決める",
+          () => [],
+          match(注文 => 注文.配送.方法, {
+            宅配: (_, 依存) => ({ result: { 送料: 依存.料金表("宅配") }, effects: [] }),
+            店頭受取: (_, 依存) => ({ result: { 送料: 依存.料金表("店頭受取") }, effects: [] }),
+          }),
+        ),
+      },
+    });
+    const report = generationReport(
+      examples(送料を決める, [
+        example(送料を決める, "宅配", {
+          given: { 状態: "確定済み", 配送: { 方法: "宅配" } },
+          expect: { result: { 送料: 500 }, effects: [] },
+        }),
+      ]),
+      料金表で決める,
+    );
+
+    expect(report.notComposed).toStrictEqual([]);
   });
 });

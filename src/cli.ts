@@ -343,7 +343,11 @@ function formatGeneratedExample(
   generated: GeneratedExample,
 ): string {
   const given = indent(formatTypeScriptValue(generated.given), 4);
-  return `  example(${binding}, ${JSON.stringify(generated.name)}, {\n    given: ${given.trimStart()},\n    expect: unanswered(${JSON.stringify(generated.reason)}),\n  })`;
+  const written =
+    generated.with === undefined
+      ? ""
+      : `\n    with: ${indent(formatTypeScriptValue(generated.with), 4).trimStart()},`;
+  return `  example(${binding}, ${JSON.stringify(generated.name)}, {\n    given: ${given.trimStart()},${written}\n    expect: unanswered(${JSON.stringify(generated.reason)}),\n  })`;
 }
 
 function indent(value: string, spaces: number): string {

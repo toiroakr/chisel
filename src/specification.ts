@@ -245,6 +245,7 @@ export interface Coverage {
 export interface GeneratedExample {
   readonly name: string;
   readonly given: unknown;
+  readonly with?: unknown;
   readonly reason: string;
 }
 
@@ -761,7 +762,12 @@ export function generationReport(
       .filter((tag): tag is string => tag !== undefined),
   );
 
-  const origins = rows.filter(row => !isUnanswered(row.expect)).map(row => row.given);
+  const answeredRows = rows.filter(row => !isUnanswered(row.expect));
+  const origins = answeredRows.map(row => row.given);
+  const withFrom = (origin: unknown): { readonly with?: unknown } => {
+    const written = answeredRows.find(row => row.given === origin)?.with;
+    return written === undefined ? {} : { with: written };
+  };
   const originFor = (position: Position): unknown =>
     origins.find(given => position.valuesIn(given).length > 0) ??
     definition.input.placeholder();
@@ -786,10 +792,12 @@ export function generationReport(
         position.classify(row.given).includes(className),
       );
       if (!standsIn) {
+        const origin = originFor(position);
         generated.push({
           name: `${definition.name}: ${position.path} = ${className}`,
-          given: position.place(originFor(position), className),
+          given: position.place(origin, className),
           reason: `${position.path}が${className}の期待結果を人間が決める必要があります`,
+          ...withFrom(origin),
         });
       }
     }
@@ -805,10 +813,12 @@ export function generationReport(
           coordinatesIn(position, border.measure, row.given).some(value => point.contains(value)),
         );
         if (!standsAt) {
+          const origin = originFor(position);
           generated.push({
             name: `${definition.name}: ${position.path} ${point.role} (${point.relation})`,
-            given: position.write(originFor(position), border.measure, point.witness),
+            given: position.write(origin, border.measure, point.witness),
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
+            ...withFrom(origin),
           });
         }
       }
@@ -828,10 +838,12 @@ export function generationReport(
         position.valuesIn(row.given).some(value => value !== undefined && item.contains(value)),
       );
       if (!standsIn) {
+        const origin = originFor(position);
         generated.push({
           name: `${definition.name}: ${drawn.path} = ${item.name}`,
-          given: position.write(originFor(position), "value", item.witness),
+          given: position.write(origin, "value", item.witness),
           reason: `${drawn.path}が${item.name}の期待結果を人間が決める必要があります`,
+          ...withFrom(origin),
         });
       }
     }
@@ -858,6 +870,7 @@ export function generationReport(
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
           given,
           reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
+          ...withFrom(origin),
         });
       }
     }
@@ -878,18 +891,22 @@ export function generationReport(
         continue;
       }
       const composed = composeForWay(way, tag);
-      if (composed !== undefined && takes(composed, way)) {
+      if (composed !== undefined && takes(composed.given, way)) {
         generated.push({
           name: `${definition.name}: ${decision.id} ${describeWay(way)}`,
-          given: composed,
+          given: composed.given,
           reason: `${decision.id}の道筋（${describeWay(way)}）の期待結果を人間が決める必要があります`,
+          ...withFrom(composed.origin),
         });
       } else {
         notComposed.push(`${decision.id}: ${describeWay(way)}`);
       }
     }
 
-    function composeForWay(way: Way, caseTag: string): unknown {
+    function composeForWay(
+      way: Way,
+      caseTag: string,
+    ): { readonly given: unknown; readonly origin: unknown } | undefined {
       const last = way.steps[way.steps.length - 1];
       if (last === undefined || last.distinction.kind !== "match") {
         return undefined;
@@ -903,7 +920,7 @@ export function generationReport(
         wayOf(given)?.steps.some(step => step.distinction === matched),
       );
       return position?.kind === "divided" && origin !== undefined
-        ? position.place(origin, String(last.outcome))
+        ? { given: position.place(origin, String(last.outcome)), origin }
         : undefined;
     }
   }

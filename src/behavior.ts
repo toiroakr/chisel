@@ -396,7 +396,9 @@ export function traceSync(
       (distinction, outcome) => steps.push({ distinction, outcome }),
     );
   } catch {
-    return { comparisons, way: undefined };
+    // Not undefined: the way is settled before a handler runs, so a handler
+    // that needs a stand-in generate does not have leaves the way intact.
+    return { comparisons, way: { decision: decision.id, steps } };
   }
   return { comparisons, way: { decision: decision.id, steps } };
 }
