@@ -213,3 +213,13 @@ describe("cli run() with a rules decision", () => {
     expect(await output("generate")).toMatch(/在庫数 OFF \(= 1\)/);
   });
 });
+
+describe("cli run() generate with a way it could not compose", () => {
+  it("names the way as a comment instead of leaving it out", async () => {
+    const result = await run(["generate", fixture("test/fixtures/uncomposable.ts")]);
+
+    expect(result.stdout.join("\n")).toMatch(
+      /^\/\/ 組み立てられなかった道筋: 並び: \$\.姓 < \$\.名 holds → otherwise$/m,
+    );
+  });
+});

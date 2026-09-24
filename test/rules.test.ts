@@ -7,11 +7,15 @@ import {
   evaluateSpecification,
   example,
   examples,
+  generateExamples,
+  generationReport,
   guard,
   implement,
   integer,
   ge,
   le,
+  length,
+  lt,
   match,
   object,
   or,
@@ -328,5 +332,77 @@ describe("match over a sum field", () => {
         { way: "$.配送.方法 is 店頭受取", status: "gap" },
       ],
     });
+  });
+
+  it("lets the row a sum field class asks for stand on the way to that match case", () => {
+    expect(
+      generateExamples(examples(送料を決める, [宅配]), 方法で決める).map(row => row.given),
+    ).toStrictEqual([{ 状態: "確定済み", 配送: { 方法: "店頭受取" } }]);
+  });
+
+  it("composes a row for a match case from a row that reaches the match", () => {
+    const 重さで決める = behavior({
+      name: "重さで決める",
+      input: sum("状態", {
+        確定済み: object({
+          重さ: integer(),
+          配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
+        }),
+      }),
+      result: object({ 送料: integer() }),
+      effects: sum("種類", {}),
+    });
+    const 重さと方法 = implement(重さで決める, {
+      cases: {
+        確定済み: rules(
+          "重さと方法",
+          注文 => [guard(ge(注文.重さ, 1), () => ({ result: { 送料: 0 }, effects: [] }))],
+          match(注文 => 注文.配送.方法, {
+            宅配: () => ({ result: { 送料: 500 }, effects: [] }),
+            店頭受取: () => ({ result: { 送料: 0 }, effects: [] }),
+          }),
+        ),
+      },
+    });
+    const existing = examples(重さで決める, [
+      example(重さで決める, "宅配", {
+        given: { 状態: "確定済み", 重さ: 1, 配送: { 方法: "宅配" } },
+        expect: { result: { 送料: 500 }, effects: [] },
+      }),
+      example(重さで決める, "重さなしの店頭受取", {
+        given: { 状態: "確定済み", 重さ: 0, 配送: { 方法: "店頭受取" } },
+        expect: { result: { 送料: 0 }, effects: [] },
+      }),
+    ]);
+
+    expect(
+      generateExamples(existing, 重さと方法)
+        .filter(row => row.name.includes(" is "))
+        .map(row => row.given),
+    ).toStrictEqual([{ 状態: "確定済み", 重さ: 1, 配送: { 方法: "店頭受取" } }]);
+  });
+});
+
+describe("ways generate could not compose", () => {
+  it("says which ways no row was composed for rather than leaving them out", () => {
+    const 並べる = behavior({
+      name: "並べる",
+      input: sum("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const 並び = implement(並べる, {
+      cases: {
+        入力済み: rules(
+          "並び",
+          入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+
+    expect(generationReport(並べる, 並び).notComposed).toStrictEqual([
+      "並び: $.姓 < $.名 holds → otherwise",
+    ]);
   });
 });

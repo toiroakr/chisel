@@ -299,23 +299,37 @@ export async function runTraced<B extends AnyBehavior>(
   };
 }
 
-export function comparisonsReached(
+export function traceSync(
   implementation: AnyImplementation,
   input: unknown,
-): readonly ComparisonReached[] {
+): { readonly comparisons: readonly ComparisonReached[]; readonly way: WayTaken | undefined } {
   const parsed = implementation.behavior.input.parse(input);
   const tag = parsed.success ? tagOf(implementation.behavior.input, parsed.value) : undefined;
   const decision = tag === undefined ? undefined : implementation.cases[tag];
   if (!parsed.success || decision?.kind !== "rules") {
-    return [];
+    return { comparisons: [], way: undefined };
   }
-  const reached: ComparisonReached[] = [];
-  for (const candidate of decision.guards) {
-    if (!holds(candidate.condition, parsed.value, (rule, scope) => reached.push({ rule, scope }))) {
-      break;
-    }
+  const comparisons: ComparisonReached[] = [];
+  const steps: { distinction: Branch; outcome: boolean | string }[] = [];
+  try {
+    decide(
+      decision,
+      parsed.value,
+      [],
+      (rule, scope) => comparisons.push({ rule, scope }),
+      (distinction, outcome) => steps.push({ distinction, outcome }),
+    );
+  } catch {
+    return { comparisons, way: undefined };
   }
-  return reached;
+  return { comparisons, way: { decision: decision.id, steps } };
+}
+
+export function comparisonsReached(
+  implementation: AnyImplementation,
+  input: unknown,
+): readonly ComparisonReached[] {
+  return traceSync(implementation, input).comparisons;
 }
 
 function decide<Result, Effect>(

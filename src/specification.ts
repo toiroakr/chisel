@@ -9,10 +9,11 @@ import type {
   Implementation,
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
+import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
 import { comparisonsNotReadOf, guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
-import { comparisonsReached, runImplementation, runTraced } from "./behavior.js";
-import { describeRule, describeTerm } from "./rule.js";
+import { comparisonsReached, runImplementation, runTraced, traceSync } from "./behavior.js";
+import { describeRule, describeTerm, termData } from "./rule.js";
 import type { PointRole } from "./border.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
@@ -642,6 +643,18 @@ export function generateExamples(
   target: AnyBehavior | ExampleSet<AnyBehavior>,
   implementation?: AnyImplementation,
 ): readonly GeneratedExample[] {
+  return generationReport(target, implementation).rows;
+}
+
+export interface GenerationReport {
+  readonly rows: readonly GeneratedExample[];
+  readonly notComposed: readonly string[];
+}
+
+export function generationReport(
+  target: AnyBehavior | ExampleSet<AnyBehavior>,
+  implementation?: AnyImplementation,
+): GenerationReport {
   const definition = target.kind === "behavior" ? target : target.behavior;
   const rows = target.kind === "behavior" ? [] : target.rows;
   const existing = new Set(
@@ -752,7 +765,52 @@ export function generateExamples(
     }
   }
 
-  return generated;
+  const notComposed: string[] = [];
+  for (const [tag, decision] of Object.entries(implementation?.cases ?? {})) {
+    if (decision.kind !== "rules") {
+      continue;
+    }
+    const wayOf = (given: unknown) => traceSync(implementation!, given).way;
+    const takes = (given: unknown, way: Way) => {
+      const taken = wayOf(given);
+      return taken !== undefined && sameSteps(taken.steps, way.steps);
+    };
+    for (const way of waysOf(decision)) {
+      if ([...rows, ...generated].some(row => takes(row.given, way))) {
+        continue;
+      }
+      const composed = composeForWay(way, tag);
+      if (composed !== undefined && takes(composed, way)) {
+        generated.push({
+          name: `${definition.name}: ${decision.id} ${describeWay(way)}`,
+          given: composed,
+          reason: `${decision.id}の道筋（${describeWay(way)}）の期待結果を人間が決める必要があります`,
+        });
+      } else {
+        notComposed.push(`${decision.id}: ${describeWay(way)}`);
+      }
+    }
+
+    function composeForWay(way: Way, caseTag: string): unknown {
+      const last = way.steps[way.steps.length - 1];
+      if (last === undefined || last.distinction.kind !== "match") {
+        return undefined;
+      }
+      const matched = last.distinction;
+      const keys = termData(matched.on).path;
+      const position = positionsByPath.get(
+        `@${caseTag}${keys.slice(0, -1).map(key => `.${key}`).join("")}`,
+      );
+      const origin = origins.find(given =>
+        wayOf(given)?.steps.some(step => step.distinction === matched),
+      );
+      return position?.kind === "divided" && origin !== undefined
+        ? position.place(origin, String(last.outcome))
+        : undefined;
+    }
+  }
+
+  return { rows: generated, notComposed };
 }
 
 export async function verifyConformance<B extends AnyBehavior>(

@@ -11,7 +11,7 @@ import {
   defineSpecification,
   evaluateSpecification,
   examples,
-  generateExamples,
+  generationReport,
   isSpecification,
 } from "./specification.js";
 import type {
@@ -67,13 +67,16 @@ export async function run(argv: readonly string[]): Promise<CliResult> {
   }
 
   for (const target of targets) {
-    const generated = generateExamples(
+    const { rows: generated, notComposed } = generationReport(
       target.specification.examples,
       target.specification.implementation,
     );
     stdout.push(
       formatGeneratedExamples(target.behaviorBinding, generated, target.existingRows),
     );
+    for (const way of notComposed) {
+      stdout.push(`// 組み立てられなかった道筋: ${way}`);
+    }
   }
   return { exitCode: 0, stdout, stderr };
 }
