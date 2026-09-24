@@ -13,7 +13,7 @@ export interface BorderPoint {
 }
 
 export interface Border {
-  readonly source: "invariant" | "guard";
+  readonly source: "invariant" | "guard" | "ensures";
   readonly measure: "value" | "length";
   readonly rule: string;
   readonly closed: boolean;
@@ -184,7 +184,7 @@ function borderOf(
   const { step } = carrier;
   const on = closed ? bound : step?.(bound, inward);
   const off = closed ? step?.(bound, outward) : bound;
-  const guarded = drawing.source === "guard";
+  const guarded = drawing.source !== "invariant";
   if (on === undefined && !guarded) {
     return undefined;
   }
@@ -257,7 +257,7 @@ function namedValueBorder(
   drawing: Drawing,
 ): Drawn {
   const keeps = operator === "==";
-  const guarded = drawing.source === "guard";
+  const guarded = drawing.source !== "invariant";
   const at = (edge: unknown) => (value: unknown) => carrier.compare(value, edge) === 0;
   const below = carrier.step?.(bound, -1);
   const above = carrier.step?.(bound, 1);

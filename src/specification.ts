@@ -11,7 +11,12 @@ import type {
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
-import { comparisonsNotReadOf, guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
+import {
+  comparisonsNotReadOf,
+  ensuresBordersOf,
+  guardBordersOf,
+  guardPartitionsOf,
+} from "./guard-borders.js";
 import {
   brokenEnsures,
   comparisonsReached,
@@ -571,6 +576,26 @@ export async function evaluateSpecification(
     };
   });
   borders.push(...guardBorders);
+  const ensuresBorders = ensuresBordersOf(definition).map((drawn): BorderCoverage => {
+    const coordinates = answeredGivens
+      .filter(given => drawn.path.startsWith(`@${tagOf(definition.input, given)}.`))
+      .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
+    return {
+      path: drawn.path,
+      rule: drawn.border.rule,
+      points: drawn.border.points.map(point => ({
+        role: point.role,
+        relation: point.relation,
+        status:
+          point.status !== "owed"
+            ? point.status
+            : coordinates.some(value => value !== undefined && point.contains(value))
+              ? "met"
+              : "gap",
+      })),
+    };
+  });
+  borders.push(...ensuresBorders);
   const adequate =
     specification.implementation !== undefined &&
     failures.length === 0 &&

@@ -6,7 +6,11 @@ import {
   evaluateSpecification,
   example,
   examples,
+  and,
+  gt,
+  or,
   implement,
+  integer,
   object,
   rules,
   runImplementation,
@@ -98,5 +102,68 @@ describe("ensures", () => {
         ensures: clause => [clause.when("答えだけ", ["確定"], (_, 答え) => eq(答え.カートID, "x"))],
       }),
     ).toThrow(new SpecificationError("Ensures 答えだけ must relate the input to the answer"));
+  });
+});
+
+describe("borders an ensures clause draws", () => {
+  const 会員を探す = behavior({
+    name: "会員を探す",
+    input: sum("状態", { 照会: object({ 会員番号: integer() }) }),
+    result: sum("結果", {
+      見つかった: object({ 会員番号: integer() }),
+      見つからない: object({}),
+    }),
+    effects: sum("種類", {}),
+    ensures: clause => [
+      clause.when("見つかる会員は番号が正で入力と同じ", ["見つかった"], (照会, 答え) =>
+        and(gt(照会.会員番号, 0), eq(答え.会員番号, 照会.会員番号)),
+      ),
+    ],
+  });
+
+  it("draws a line where a conjunct compares the input with a constant and meets it by the value a row writes", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "照会",
+        examples: examples(会員を探す, [
+          example(会員を探す, "番号1の会員", {
+            given: { 状態: "照会", 会員番号: 1 },
+            expect: { result: { 結果: "見つかった", 会員番号: 1 }, effects: [] },
+          }),
+        ]),
+      }),
+    );
+
+    expect(report.borders).toStrictEqual([
+      {
+        path: "@照会.会員番号",
+        rule: "ensures 見つかる会員は番号が正で入力と同じ: input.会員番号 > 0",
+        points: [
+          { role: "ON", relation: "= 1", status: "met" },
+          { role: "OFF", relation: "= 0", status: "gap" },
+          { role: "IN", relation: "> 1", status: "gap" },
+          { role: "OUT", relation: "< 0", status: "gap" },
+        ],
+      },
+    ]);
+  });
+
+  it("draws nothing for a comparison under or(), which the rule does not require", async () => {
+    const 探す = behavior({
+      name: "探す",
+      input: sum("状態", { 照会: object({ 会員番号: integer(), 仮登録: integer() }) }),
+      result: sum("結果", { 見つかった: object({ 会員番号: integer() }) }),
+      effects: sum("種類", {}),
+      ensures: clause => [
+        clause.when("番号が正か仮登録", ["見つかった"], (照会, 答え) =>
+          and(or(gt(照会.会員番号, 0), gt(照会.仮登録, 0)), eq(答え.会員番号, 照会.会員番号)),
+        ),
+      ],
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "探す", examples: examples(探す, []) }),
+    );
+
+    expect(report.borders).toStrictEqual([]);
   });
 });

@@ -180,6 +180,17 @@ export function boundTermPath(rule: Rule): readonly string[] | undefined {
   return undefined;
 }
 
+export function shiftTerms(rule: CompareRule): CompareRule {
+  const shift = (operand: unknown): unknown => {
+    if (!isTerm(operand)) {
+      return operand;
+    }
+    const data = termData(operand);
+    return termAt(data.path.slice(1), data.measure);
+  };
+  return { ...rule, left: shift(rule.left), right: shift(rule.right) };
+}
+
 export function stepInto(rule: Rule, key: string): Rule | undefined {
   const path = boundTermPath(rule);
   if (rule.kind !== "compare" || path === undefined || path[0] !== key) {

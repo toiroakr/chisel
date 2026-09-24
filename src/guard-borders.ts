@@ -1,4 +1,4 @@
-import type { AnyImplementation, ComparisonReached } from "./behavior.js";
+import type { AnyBehavior, AnyImplementation, ComparisonReached } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
 import {
@@ -19,6 +19,7 @@ import {
   isTerm,
   readOperand,
   selfTerm,
+  shiftTerms,
   sizeOf,
   stepInto,
   termData,
@@ -48,12 +49,44 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$", at),
+          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$", at, asGuard),
         ),
   );
 }
 
 type PositionAt = (path: string) => Position | undefined;
+
+export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
+  const input = definition.input;
+  const positions = positionsOf(input);
+  const at = (path: string): Position | undefined =>
+    positions.find(position => position.path === path);
+  return definition.ensures.flatMap(clause =>
+    conjuncts(clause.rule).flatMap(part => {
+      const onInput = unrooted(part);
+      if (onInput === undefined) {
+        return [];
+      }
+      return input.variantTags.flatMap(tag =>
+        walk(onInput, input.variants[tag] as AnySchema, `@${tag}`, "$", at, {
+          source: "ensures",
+          describe: () => `${clause.name}: ${describeRule(part, "")}`,
+        }),
+      );
+    }),
+  );
+}
+
+function unrooted(rule: Rule): Rule | undefined {
+  if (rule.kind !== "compare") {
+    return undefined;
+  }
+  const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
+  if (terms.length === 0 || terms.some(term => termData(term).path[0] !== "input")) {
+    return undefined;
+  }
+  return shiftTerms(rule);
+}
 
 export interface GuardClass {
   readonly name: string;
@@ -266,18 +299,26 @@ function admittedRange(
   return { lower, upper };
 }
 
+interface Reading {
+  readonly source: "guard" | "ensures";
+  describe(rule: CompareRule, label: string): string;
+}
+
+const asGuard: Reading = { source: "guard", describe: (rule, label) => describeRule(rule, label) };
+
 function walk(
   rule: Rule,
   scope: AnySchema,
   path: string,
   label: string,
   at: PositionAt,
+  reading: Reading,
 ): GuardBorder[] {
   if (rule.kind === "and" || rule.kind === "or") {
-    return rule.rules.flatMap(part => walk(part, scope, path, label, at));
+    return rule.rules.flatMap(part => walk(part, scope, path, label, at, reading));
   }
   if (rule.kind === "not") {
-    return walk(rule.rule, scope, path, label, at);
+    return walk(rule.rule, scope, path, label, at, reading);
   }
   if (rule.kind === "all" || rule.kind === "any") {
     const of = termData(rule.of).path;
@@ -287,10 +328,10 @@ function walk(
     const suffix = of.map(key => `.${key}`).join("");
     return element === undefined
       ? []
-      : walk(rule.each, element, `${path}${suffix}[]`, `${label}${suffix}[]`, at);
+      : walk(rule.each, element, `${path}${suffix}[]`, `${label}${suffix}[]`, at, reading);
   }
   if (isTerm(rule.left) && isTerm(rule.right)) {
-    return between(rule, rule.left, rule.right, scope, path, label, at);
+    return between(rule, rule.left, rule.right, scope, path, label, at, reading);
   }
   const term = isTerm(rule.left) ? rule.left : isTerm(rule.right) ? rule.right : undefined;
   if (term === undefined) {
@@ -302,8 +343,8 @@ function walk(
     return [];
   }
   const borders = bordersOf([rule], found => carrierOf(schema, found), {
-    source: "guard",
-    describe: compared => describeRule(compared, label),
+    source: reading.source,
+    describe: () => reading.describe(rule, label),
     admits: coordinate =>
       measure !== "value" ||
       (schema.parse(coordinate).success &&
@@ -330,6 +371,7 @@ function between(
   path: string,
   label: string,
   at: PositionAt,
+  reading: Reading,
 ): GuardBorder[] {
   const sides = [left, right].map(term => {
     const { path: keys, measure } = termData(term);
@@ -354,8 +396,8 @@ function between(
     right: instants ? 0n : 0,
   };
   const borders = bordersOf([difference], () => carrier, {
-    source: "guard",
-    describe: () => describeRule(rule, label),
+    source: reading.source,
+    describe: () => reading.describe(rule, label),
     admits: () => true,
   });
   const read = (side: (typeof sides)[number], scopeValue: unknown): number | bigint | undefined => {
