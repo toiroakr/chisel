@@ -261,3 +261,71 @@ describe("generateExamples below a length of zero", () => {
     ]);
   });
 });
+
+describe("generateExamples for a guard on an array with no invariant", () => {
+  const 明細を確かめる = behavior({
+    name: "明細を確かめる",
+    input: sum("状態", { 入力済み: object({ 明細: array(integer()) }) }),
+    result: sum("結果", { 受付: object({}), 空: object({}) }),
+    effects: sum("種類", {}),
+  });
+  const 空を断る = implement(明細を確かめる, {
+    cases: {
+      入力済み: rules(
+        "空を断る",
+        入力 => [guard(gt(length(入力.明細), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        () => ({ result: { 結果: "受付" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("resizes the array to the length a guard point asks for", () => {
+    const existing = examples(明細を確かめる, [
+      example(明細を確かめる, "一件", {
+        given: { 状態: "入力済み", 明細: [1] },
+        expect: { result: { 結果: "受付" }, effects: [] },
+      }),
+    ]);
+
+    expect(generateExamples(existing, 空を断る).map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 明細: [] },
+      { 状態: "入力済み", 明細: [1, 1] },
+    ]);
+  });
+});
+
+describe("guard points generate cannot compose", () => {
+  it("names each point it could not compose instead of leaving it out", () => {
+    const 比べる = behavior({
+      name: "比べる",
+      input: sum("状態", { 入力済み: object({ 数量: integer(), 上限: optional(integer()) }) }),
+      result: sum("結果", { 受付: object({}), 却下: object({}) }),
+      effects: sum("種類", {}),
+    });
+    const 上限と比べる = implement(比べる, {
+      cases: {
+        入力済み: rules(
+          "上限と比べる",
+          入力 => [guard(le(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
+          () => ({ result: { 結果: "受付" }, effects: [] }),
+        ),
+      },
+    });
+    const existing = examples(比べる, [
+      example(比べる, "上限なし", {
+        given: { 状態: "入力済み", 数量: 1 },
+        expect: { result: { 結果: "受付" }, effects: [] },
+      }),
+    ]);
+
+    expect(
+      generationReport(existing, 上限と比べる).notComposed.filter(line =>
+        line.startsWith("@入力済み.数量 − @入力済み.上限"),
+      ),
+    ).toStrictEqual([
+      "@入力済み.数量 − @入力済み.上限 ON (= 0)",
+      "@入力済み.数量 − @入力済み.上限 IN (< 0)",
+      "@入力済み.数量 − @入力済み.上限 OUT (> 1)",
+    ]);
+  });
+});

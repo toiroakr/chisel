@@ -58,14 +58,31 @@ interface Focus {
   update(given: unknown, change: (value: unknown) => unknown): unknown;
 }
 
-export function positionsOf(input: AnySumSchema): readonly Position[] {
-  return underCases(input, "", {
-    reach: given => [given],
-    update: (given, change) => change(given),
-  });
+interface Reading {
+  readonly containers: boolean;
 }
 
-function underCases(schema: AnySumSchema, path: string, focus: Focus): Position[] {
+export function positionsOf(
+  input: AnySumSchema,
+  reading: Reading = { containers: false },
+): readonly Position[] {
+  return underCases(
+    input,
+    "",
+    {
+      reach: given => [given],
+      update: (given, change) => change(given),
+    },
+    reading,
+  );
+}
+
+function underCases(
+  schema: AnySumSchema,
+  path: string,
+  focus: Focus,
+  reading: Reading,
+): Position[] {
   return schema.variantTags.flatMap(tag =>
     fieldsOf(schema.variants[tag] as ObjectSchema<ObjectShape>, `${path}@${tag}`, {
       reach: given => focus.reach(given).filter(value => tagOf(schema, value) === tag),
@@ -73,7 +90,7 @@ function underCases(schema: AnySumSchema, path: string, focus: Focus): Position[
         focus.update(given, value =>
           change(tagOf(schema, value) === tag ? value : schema.placeholderFor(tag)),
         ),
-    }),
+    }, reading),
   );
 }
 
@@ -81,6 +98,7 @@ function fieldsOf(
   schema: ObjectSchema<ObjectShape>,
   path: string,
   focus: Focus,
+  reading: Reading,
   inherited: readonly Rule[] = [],
 ): Position[] {
   const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
@@ -102,6 +120,7 @@ function fieldsOf(
             return { ...record, [key]: next };
           }),
       },
+      reading,
       rules.flatMap(rule => {
         const inner = stepInto(rule, key);
         return inner === undefined ? [] : [inner];
@@ -114,6 +133,7 @@ function positionAt(
   schema: AnySchema,
   path: string,
   focus: Focus,
+  reading: Reading,
   inherited: readonly Rule[] = [],
 ): Position[] {
   const borders = bordersOf(
@@ -130,11 +150,16 @@ function positionAt(
         value => (value === undefined ? "なし" : "あり"),
         className => (className === "なし" ? undefined : inner.placeholder()),
       ),
-      ...positionAt(inner, `${path}?`, {
-        reach: given => focus.reach(given).filter(value => value !== undefined),
-        update: (given, change) =>
-          focus.update(given, value => change(value === undefined ? inner.placeholder() : value)),
-      }),
+      ...positionAt(
+        inner,
+        `${path}?`,
+        {
+          reach: given => focus.reach(given).filter(value => value !== undefined),
+          update: (given, change) =>
+            focus.update(given, value => change(value === undefined ? inner.placeholder() : value)),
+        },
+        reading,
+      ),
     ];
   }
   const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
@@ -155,8 +180,8 @@ function positionAt(
           const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder()];
           return items.map((item, index) => (index === 0 ? change(item) : item));
         }),
-    });
-    return withOwnBorders(path, borders, focus, elements);
+    }, reading);
+    return withOwnBorders(path, borders, focus, elements, reading);
   }
   if (schema.kind === "record") {
     const values = positionAt((schema as RecordSchema<unknown>).value, `${path}{}`, {
@@ -175,11 +200,11 @@ function positionAt(
               : [["<key>", (schema as RecordSchema<unknown>).value.placeholder()] as const];
           return Object.fromEntries(present.map(([key, item]) => [key, change(item)]));
         }),
-    });
-    return withOwnBorders(path, borders, focus, values);
+    }, reading);
+    return withOwnBorders(path, borders, focus, values, reading);
   }
   if (schema.kind === "object") {
-    return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, inherited);
+    return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, reading, inherited);
   }
   if (isSumSchema(schema)) {
     return [
@@ -197,7 +222,7 @@ function positionAt(
           sample: className => ({ [schema.discriminant]: className }),
         },
       ),
-      ...underCases(schema, path, focus),
+      ...underCases(schema, path, focus, reading),
     ];
   }
   return [
@@ -216,10 +241,21 @@ function withOwnBorders(
   borders: readonly Border[],
   focus: Focus,
   inner: readonly Position[],
+  reading: Reading,
 ): Position[] {
-  return borders.length === 0
-    ? [...inner]
-    : [{ kind: "bounded", path, borders, valuesIn: focus.reach, write: writer(focus) }, ...inner];
+  if (borders.length === 0 && !reading.containers) {
+    return [...inner];
+  }
+  return [
+    {
+      kind: borders.length === 0 ? "not-derivable" : "bounded",
+      path,
+      borders,
+      valuesIn: focus.reach,
+      write: writer(focus),
+    },
+    ...inner,
+  ];
 }
 
 function writer(focus: Focus): Position["write"] {

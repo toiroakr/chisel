@@ -909,7 +909,9 @@ export function generationReport(
       const origin =
         origins.find(given => reachedBy(given).length > 0) ?? definition.input.placeholder();
       const given = drawn.compose(origin, point.witness);
-      if (given !== undefined) {
+      if (given === undefined) {
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
+      } else {
         offer({
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
           given,

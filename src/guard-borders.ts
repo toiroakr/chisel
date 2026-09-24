@@ -47,7 +47,7 @@ export interface GuardBorder {
 
 export function guardBordersOf(implementation: AnyImplementation): readonly GuardBorder[] {
   const input = implementation.behavior.input;
-  const positions = positionsOf(input);
+  const positions = positionsOf(input, { containers: true });
   const at = (path: string): Position | undefined =>
     positions.find(position => position.path === path);
   return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
