@@ -222,6 +222,16 @@ export async function evaluateSpecification(
   const verifiedResults = new Set<string>();
   const positions = positionsOf(definition.input);
   const coveredClasses = positions.map(() => new Set<string>());
+  const observe = (inputTag: string, actual: unknown): string | undefined => {
+    executedInputs.add(inputTag);
+    const observed = isSumSchema(definition.result)
+      ? tagOf(definition.result, (actual as Execution<unknown, unknown>).result)
+      : undefined;
+    if (observed !== undefined) {
+      observedResults.add(observed);
+    }
+    return observed;
+  };
 
   for (const row of specification.examples.rows) {
     const inputValidation = definition.input.parse(row.given);
@@ -244,14 +254,7 @@ export async function evaluateSpecification(
           : implementation.cases[inputTag];
       if (implementation !== undefined && decision?.kind === "decision") {
         try {
-          const actual = await runImplementation(implementation, row.given);
-          executedInputs.add(inputTag!);
-          const observed = isSumSchema(definition.result)
-            ? tagOf(definition.result, actual.result)
-            : undefined;
-          if (observed !== undefined) {
-            observedResults.add(observed);
-          }
+          observe(inputTag!, await runImplementation(implementation, row.given));
         } catch (error) {
           failures.push({
             name: row.name,
@@ -302,15 +305,9 @@ export async function evaluateSpecification(
         input => runImplementation(implementation, input),
       );
       if (actual !== undefined && inputTag !== undefined) {
-        executedInputs.add(inputTag);
-        const observed = isSumSchema(definition.result)
-          ? tagOf(definition.result, (actual as Execution<unknown, unknown>).result)
-          : undefined;
-        if (observed !== undefined) {
-          observedResults.add(observed);
-          if (observed === resultTag) {
-            verifiedResults.add(observed);
-          }
+        const observed = observe(inputTag, actual);
+        if (observed !== undefined && observed === resultTag) {
+          verifiedResults.add(observed);
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
