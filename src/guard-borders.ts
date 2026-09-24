@@ -15,10 +15,12 @@ import {
   boundTermPath,
   conjuncts,
   describeRule,
+  holds,
   isTerm,
   readOperand,
   selfTerm,
   sizeOf,
+  stepInto,
   termData,
 } from "./rule.js";
 import type {
@@ -67,6 +69,7 @@ export interface GuardPartition {
 interface Threshold {
   readonly path: string;
   readonly schema: AnySchema;
+  readonly inherited: readonly Rule[];
   readonly rule: CompareRule;
 }
 
@@ -82,7 +85,12 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
   const paths = [...new Set(thresholds.map(threshold => threshold.path))];
   return paths.flatMap(path => {
     const atPath = thresholds.filter(threshold => threshold.path === path);
-    const partition = partitionAt(path, atPath[0]!.schema, atPath.map(threshold => threshold.rule));
+    const partition = partitionAt(
+      path,
+      atPath[0]!.schema,
+      atPath[0]!.inherited,
+      atPath.map(threshold => threshold.rule),
+    );
     return partition === undefined ? [] : [partition];
   });
 }
@@ -114,7 +122,14 @@ function thresholdsIn(rule: Rule, scope: AnySchema, path: string): Threshold[] {
   const schema = schemaAt(scope, keys);
   return schema === undefined
     ? []
-    : [{ path: `${path}${keys.map(key => `.${key}`).join("")}`, schema, rule }];
+    : [
+        {
+          path: `${path}${keys.map(key => `.${key}`).join("")}`,
+          schema,
+          inherited: inheritedAt(scope, keys),
+          rule,
+        },
+      ];
 }
 
 interface Edge {
@@ -125,6 +140,7 @@ interface Edge {
 function partitionAt(
   path: string,
   schema: AnySchema,
+  inherited: readonly Rule[],
   rules: readonly CompareRule[],
 ): GuardPartition | undefined {
   const carrier = carrierOf(schema, "value");
@@ -150,7 +166,7 @@ function partitionAt(
         ) === index,
     )
     .sort((left, right) => carrier.compare(left.value, right.value));
-  const { lower, upper } = admittedRange(schema, carrier);
+  const { lower, upper } = admittedRange([...schema.invariants, ...inherited], carrier);
   const edges: (Edge | undefined)[] = [
     lower,
     ...unique.flatMap(cut => [
@@ -201,13 +217,31 @@ function partitionAt(
   return { path, classes };
 }
 
+function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {
+  const [key, ...rest] = keys;
+  const unwrapped =
+    scope.kind === "optional" ? (scope as OptionalSchema<unknown>).schema : scope;
+  if (key === undefined || unwrapped.kind !== "object") {
+    return [];
+  }
+  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
+  const here = unwrapped.invariants.flatMap(conjuncts).flatMap(rule => {
+    const stepped = keys.reduce<Rule | undefined>(
+      (current, next) => (current === undefined ? undefined : stepInto(current, next)),
+      rule,
+    );
+    return stepped === undefined ? [] : [stepped];
+  });
+  return field === undefined ? here : [...here, ...inheritedAt(field, rest)];
+}
+
 function admittedRange(
-  schema: AnySchema,
+  invariants: readonly Rule[],
   carrier: Carrier,
 ): { readonly lower: Edge | undefined; readonly upper: Edge | undefined } {
   let lower: Edge | undefined;
   let upper: Edge | undefined;
-  for (const rule of schema.invariants.flatMap(conjuncts)) {
+  for (const rule of invariants.flatMap(conjuncts)) {
     if (rule.kind !== "compare" || boundTermPath(rule)?.length !== 0) {
       continue;
     }
@@ -270,7 +304,10 @@ function walk(
   const borders = bordersOf([rule], found => carrierOf(schema, found), {
     source: "guard",
     describe: compared => describeRule(compared, label),
-    admits: coordinate => measure !== "value" || schema.parse(coordinate).success,
+    admits: coordinate =>
+      measure !== "value" ||
+      (schema.parse(coordinate).success &&
+        inheritedAt(scope, keys).every(inherited => holds(inherited, coordinate))),
   });
   const positionPath = `${path}${keys.map(key => `.${key}`).join("")}`;
   return borders.map(border => ({

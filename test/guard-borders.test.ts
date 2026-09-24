@@ -239,6 +239,108 @@ describe("a border between two positions", () => {
   });
 });
 
+describe("classes cut from a range an object invariant bounds", () => {
+  it("reads the admitted range from an invariant written on the object holding the field", async () => {
+    const 受け付ける = behavior({
+      name: "受け付ける",
+      input: sum("状態", {
+        入力済み: object({ 合計: integer() }).invariant(v => ge(v.合計, 0)),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const 上限 = implement(受け付ける, {
+      cases: {
+        入力済み: rules(
+          "上限",
+          入力 => [guard(le(入力.合計, 100), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "上限", examples: examples(受け付ける, []), implementation: 上限 }),
+    );
+
+    expect(report.partitions).toMatchObject([{ missing: ["0 <= v <= 100", "100 < v"] }]);
+  });
+  it("excludes a guard point an invariant on the object holding the field refuses", async () => {
+    const 受け付ける = behavior({
+      name: "受け付ける",
+      input: sum("状態", {
+        入力済み: object({ 合計: integer() }).invariant(v => ge(v.合計, 0)),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const 下限 = implement(受け付ける, {
+      cases: {
+        入力済み: rules(
+          "下限",
+          入力 => [guard(ge(入力.合計, 0), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "下限", examples: examples(受け付ける, []), implementation: 下限 }),
+    );
+
+    expect(report.borders[0]!.points.map(point => point.status)).toStrictEqual([
+      "gap",
+      "excluded",
+      "gap",
+      "excluded",
+    ]);
+  });
+});
+
+describe("elements a quantifier never reached", () => {
+  const 注文を確定する = behavior({
+    name: "注文を確定する",
+    input: sum("状態", {
+      商品あり: object({ 明細: array(object({ 数量: integer(), 在庫数: integer() })) }),
+    }),
+    result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    effects: sum("種類", {}),
+  });
+  const 在庫を確かめる = implement(注文を確定する, {
+    cases: {
+      商品あり: rules(
+        "在庫を確かめる",
+        カート => [
+          guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+            result: { 結果: "不可", 理由: "在庫不足" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "確定" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("does not let an element after the first one all() failed on meet a point", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "確定",
+        examples: examples(注文を確定する, [
+          example(注文を確定する, "先頭の明細が在庫不足", {
+            given: { 状態: "商品あり", 明細: [{ 数量: 4, 在庫数: 3 }, { 数量: 1, 在庫数: 5 }] },
+            expect: { result: { 結果: "不可", 理由: "在庫不足" }, effects: [] },
+          }),
+        ]),
+        implementation: 在庫を確かめる,
+      }),
+    );
+
+    expect(report.borders[0]!.points.find(point => point.role === "IN")).toStrictEqual({
+      role: "IN",
+      relation: "< 0",
+      status: "gap",
+    });
+  });
+});
+
 describe("generateExamples for guard borders", () => {
   const 注文を確定する = behavior({
     name: "注文を確定する",
