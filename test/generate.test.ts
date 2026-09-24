@@ -8,7 +8,11 @@ import {
   eq,
   example,
   ge,
+  gt,
+  guard,
+  implement,
   le,
+  rules,
   examples,
   generateExamples,
   integer,
@@ -223,5 +227,37 @@ describe("rows generate cannot make valid", () => {
       rows: [],
       notComposed: ["数える: 入力済み: Invariant violated: not($.個数 == 0)"],
     });
+  });
+});
+
+describe("generateExamples below a length of zero", () => {
+  const 見出しを確かめる = behavior({
+    name: "見出しを確かめる",
+    input: sum("状態", { 入力済み: object({ 見出し: string("見出し") }) }),
+    result: sum("結果", { 受付: object({}), 空: object({}) }),
+    effects: sum("種類", {}),
+  });
+  const 空を断る = implement(見出しを確かめる, {
+    cases: {
+      入力済み: rules(
+        "空を断る",
+        入力 => [guard(gt(length(入力.見出し), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        () => ({ result: { 結果: "受付" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("offers no row for a guard's point below a length of zero", () => {
+    const existing = examples(見出しを確かめる, [
+      example(見出しを確かめる, "一文字", {
+        given: { 状態: "入力済み", 見出し: "a" },
+        expect: { result: { 結果: "受付" }, effects: [] },
+      }),
+    ]);
+
+    expect(generateExamples(existing, 空を断る).map(row => row.name)).toStrictEqual([
+      "見出しを確かめる: @入力済み.見出し OFF (= 0)",
+      "見出しを確かめる: @入力済み.見出し IN (> 1)",
+    ]);
   });
 });

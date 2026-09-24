@@ -12,6 +12,7 @@ import {
   bordersOf,
   instantCarrier,
   integerCarrier,
+  lengthCarrier,
   numberCarrier,
   stringCarrier,
 } from "./border.js";
@@ -230,7 +231,7 @@ function writer(focus: Focus): Position["write"] {
 
 export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
   if (measure === "length") {
-    return integerCarrier;
+    return lengthCarrier;
   }
   switch (schema.kind) {
     case "integer":

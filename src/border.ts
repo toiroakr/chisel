@@ -25,12 +25,18 @@ export interface Carrier {
   readonly step?: (value: unknown, direction: 1 | -1) => unknown;
   readonly past?: (value: unknown, direction: 1 | -1) => unknown;
   readonly format: (value: unknown) => string;
+  readonly floor?: { readonly value: unknown; readonly reason: string };
 }
 
 export const integerCarrier: Carrier = {
   compare: (left, right) => (left as number) - (right as number),
   step: (value, direction) => (value as number) + direction,
   format: String,
+};
+
+export const lengthCarrier: Carrier = {
+  ...integerCarrier,
+  floor: { value: 0, reason: "a length is never negative" },
 };
 
 export const numberCarrier: Carrier = {
@@ -233,13 +239,22 @@ function borderOf(
       contains: outside(outer),
     },
   ];
+  const floored = belowFloor(carrier);
+  const reaching: readonly [boolean, boolean, boolean, boolean] = [
+    on !== undefined && floored.at(on),
+    off !== undefined && floored.at(off),
+    !lower && floored.under(inner),
+    lower && floored.under(outer),
+  ];
   return {
     border: {
       source: drawing.source,
       measure,
       rule: `${drawing.source} ${drawing.describe(rule)}`,
       closed,
-      points,
+      points: points.map((point, index) =>
+        reaching[index] === true ? noPointBelow(point.role, carrier) : point,
+      ),
     },
     carrier,
     on: inner,
@@ -290,26 +305,35 @@ function namedValueBorder(
       contains: value => carrier.compare(value, edge) * direction > 0,
     };
   };
+  const floored = belowFloor(carrier);
+  const neighbourOrNone = (role: PointRole, edge: unknown, inside: boolean): BorderPoint =>
+    edge !== undefined && floored.at(edge)
+      ? noPointBelow(role, carrier)
+      : neighbour(role, edge, inside);
+  const runOrNone = (role: PointRole, direction: 1 | -1, inside: boolean): BorderPoint =>
+    direction === -1 && floored.under(below ?? bound)
+      ? noPointBelow(role, carrier)
+      : run(role, direction, inside);
   const points: BorderPoint[] = keeps
     ? [
-        neighbour("ON", bound, true),
-        neighbour("OFF", below, false),
-        neighbour("OFF", above, false),
+        neighbourOrNone("ON", bound, true),
+        neighbourOrNone("OFF", below, false),
+        neighbourOrNone("OFF", above, false),
         {
           role: "IN",
           relation: "none: the rule keeps a single value",
           status: "no point",
           contains: () => false,
         },
-        run("OUT", -1, false),
-        run("OUT", 1, false),
+        runOrNone("OUT", -1, false),
+        runOrNone("OUT", 1, false),
       ]
     : [
-        neighbour("ON", below, true),
-        neighbour("ON", above, true),
-        neighbour("OFF", bound, false),
-        run("IN", -1, true),
-        run("IN", 1, true),
+        neighbourOrNone("ON", below, true),
+        neighbourOrNone("ON", above, true),
+        neighbourOrNone("OFF", bound, false),
+        runOrNone("IN", -1, true),
+        runOrNone("IN", 1, true),
         {
           role: "OUT",
           relation: "none: the rule leaves out a single value",
@@ -330,6 +354,29 @@ function namedValueBorder(
     lower: true,
     namesValue: true,
     admits: value => at(bound)(value) === keeps,
+  };
+}
+
+function belowFloor(carrier: Carrier): {
+  readonly at: (value: unknown) => boolean;
+  readonly under: (edge: unknown) => boolean;
+} {
+  const { floor } = carrier;
+  if (floor === undefined) {
+    return { at: () => false, under: () => false };
+  }
+  return {
+    at: value => carrier.compare(value, floor.value) < 0,
+    under: edge => carrier.compare(edge, floor.value) <= 0,
+  };
+}
+
+function noPointBelow(role: PointRole, carrier: Carrier): BorderPoint {
+  return {
+    role,
+    relation: `none: ${carrier.floor?.reason ?? "no value lies there"}`,
+    status: "no point",
+    contains: () => false,
   };
 }
 

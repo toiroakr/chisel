@@ -281,6 +281,46 @@ describe("a border with nothing past it", () => {
   });
 });
 
+describe("a length border stops at zero", () => {
+  function pointsAt(schema: Parameters<typeof object>[0][string]) {
+    const [position] = positionsOf(sum("状態", { 入力済み: object({ 見出し: schema }) }));
+    return position!.borders[0]!.points.map(({ role, relation, status }) => ({
+      role,
+      relation,
+      status,
+    }));
+  }
+
+  it("names no OFF or OUT point below a lower bound of zero, since no length is negative", () => {
+    expect(pointsAt(string("見出し").invariant(v => ge(length(v), 0)))).toStrictEqual([
+      { role: "ON", relation: "= 0", status: "owed" },
+      { role: "OFF", relation: "none: a length is never negative", status: "no point" },
+      { role: "IN", relation: "> 0", status: "owed" },
+      { role: "OUT", relation: "none: a length is never negative", status: "no point" },
+    ]);
+  });
+
+  it("names no IN point below an upper bound of zero", () => {
+    expect(pointsAt(string("見出し").invariant(v => le(length(v), 0)))).toStrictEqual([
+      { role: "ON", relation: "= 0", status: "owed" },
+      { role: "OFF", relation: "= 1", status: "excluded" },
+      { role: "IN", relation: "none: a length is never negative", status: "no point" },
+      { role: "OUT", relation: "> 1", status: "excluded" },
+    ]);
+  });
+
+  it("names no neighbour or run below a length the rule keeps", () => {
+    expect(pointsAt(string("見出し").invariant(v => eq(length(v), 0)))).toStrictEqual([
+      { role: "ON", relation: "= 0", status: "owed" },
+      { role: "OFF", relation: "none: a length is never negative", status: "no point" },
+      { role: "OFF", relation: "= 1", status: "excluded" },
+      { role: "IN", relation: "none: the rule keeps a single value", status: "no point" },
+      { role: "OUT", relation: "none: a length is never negative", status: "no point" },
+      { role: "OUT", relation: "> 1", status: "excluded" },
+    ]);
+  });
+});
+
 describe("an invariant written as a conjunction", () => {
   it("draws a border for each part it requires", () => {
     const [position] = positionsOf(
