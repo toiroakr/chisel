@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 import {
   defineSpecification,
   evaluateSpecification,
@@ -25,14 +24,14 @@ describe("progressive specification demo", () => {
     const 段階3 = await evaluateSpecification(詳細化した仕様);
     const 段階4 = await evaluateSpecification(完成した仕様);
 
-    assert.equal(段階1.adequate, false);
-    assert.deepEqual(段階1.input.missing, [
+    expect(段階1.adequate).toBe(false);
+    expect(段階1.input.missing).toStrictEqual([
       "受付済み",
       "予約確定",
       "チェックイン済み",
       "キャンセル済み",
     ]);
-    assert.deepEqual(generateExamples(段階1の振る舞い).map(row => row.given), [
+    expect(generateExamples(段階1の振る舞い).map(row => row.given)).toStrictEqual([
       { 状態: "受付済み", 予約ID: "<予約ID>" },
       {
         状態: "予約確定",
@@ -43,15 +42,15 @@ describe("progressive specification demo", () => {
       { 状態: "キャンセル済み", 予約ID: "<予約ID>" },
     ]);
 
-    assert.equal(段階2.adequate, false);
-    assert.deepEqual(段階2.input.missing, []);
-    assert.equal(段階2.implementation, "missing");
+    expect(段階2.adequate).toBe(false);
+    expect(段階2.input.missing).toStrictEqual([]);
+    expect(段階2.implementation).toBe("missing");
 
-    assert.equal(段階3.adequate, false);
-    assert.deepEqual(段階3.input.missing, ["予約確定"]);
-    assert.equal(段階3.implementation, "missing");
+    expect(段階3.adequate).toBe(false);
+    expect(段階3.input.missing).toStrictEqual(["予約確定"]);
+    expect(段階3.implementation).toBe("missing");
 
-    assert.equal(段階4.adequate, true);
+    expect(段階4.adequate).toBe(true);
   });
 
   it("derives refund eligibility from timestamps at the 24-hour boundary", () => {
@@ -59,8 +58,7 @@ describe("progressive specification demo", () => {
       row => (row.given as { readonly 状態: string }).状態 === "予約確定",
     );
 
-    assert.deepEqual(
-      予約確定の具体例.map(row => {
+    expect(予約確定の具体例.map(row => {
         const given = row.given as {
           readonly 状態: "予約確定";
           readonly 予約ID: string;
@@ -73,8 +71,7 @@ describe("progressive specification demo", () => {
           宿泊開始日時: given.宿泊開始日時.toString(),
           キャンセル要求日時: given.キャンセル要求日時.toString(),
         };
-      }),
-      [
+      })).toStrictEqual([
         {
           状態: "予約確定",
           予約ID: "予約-2",
@@ -96,20 +93,16 @@ describe("progressive specification demo", () => {
           宿泊開始日時: "2026-10-10T15:00:00Z",
           キャンセル要求日時: "2026-10-09T15:00:01Z",
         },
-      ],
-    );
-    assert.deepEqual(
-      予約確定の具体例.map(row =>
+      ]);
+    expect(予約確定の具体例.map(row =>
         "effects" in row.expect
           ? row.expect.effects.map(effect => effect.種類)
           : [],
-      ),
-      [
+      )).toStrictEqual([
         ["返金", "部屋を解放"],
         ["返金", "部屋を解放"],
         ["部屋を解放"],
-      ],
-    );
+      ]);
   });
 
   it("accepts Temporal.Instant timestamps and rejects strings", () => {
@@ -128,7 +121,7 @@ describe("progressive specification demo", () => {
       キャンセル要求日時: "2026-10-09T15:00:00Z",
     });
 
-    assert.equal(valid.success, true);
-    assert.equal(invalid.success, false);
+    expect(valid.success).toBe(true);
+    expect(invalid.success).toBe(false);
   });
 });

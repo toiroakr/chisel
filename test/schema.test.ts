@@ -1,6 +1,18 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { array, number, object, optional, record, string } from "../src/index.js";
+import { describe, expect, it } from "vitest";
+import {
+  array,
+  boolean,
+  instant,
+  isSumSchema,
+  literal,
+  number,
+  object,
+  optional,
+  record,
+  string,
+  sum,
+  tagOf,
+} from "../src/index.js";
 import type { Infer } from "../src/index.js";
 
 describe("array", () => {
@@ -9,7 +21,7 @@ describe("array", () => {
 
     const result = Tags.parse(["a", "b"]);
 
-    assert.deepEqual(result, { success: true, value: ["a", "b"] });
+    expect(result).toStrictEqual({ success: true, value: ["a", "b"] });
   });
 
   it("rejects a value that is not an array", () => {
@@ -17,7 +29,7 @@ describe("array", () => {
 
     const result = Tags.parse("not-an-array");
 
-    assert.equal(result.success, false);
+    expect(result.success).toBe(false);
   });
 
   it("reports the index of the first invalid item in the path", () => {
@@ -25,17 +37,14 @@ describe("array", () => {
 
     const result = Tags.parse(["a", 1, "c"]);
 
-    assert.equal(result.success, false);
-    assert.deepEqual(
-      result.success ? [] : result.issues.map(issue => issue.path),
-      ["$[1]"],
-    );
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$[1]"]);
   });
 
   it("uses an empty array as its placeholder", () => {
     const Tags = array(string("Tag"));
 
-    assert.deepEqual(Tags.placeholder(), []);
+    expect(Tags.placeholder()).toStrictEqual([]);
   });
 });
 
@@ -45,7 +54,7 @@ describe("optional", () => {
 
     const result = Note.parse("hello");
 
-    assert.deepEqual(result, { success: true, value: "hello" });
+    expect(result).toStrictEqual({ success: true, value: "hello" });
   });
 
   it("accepts undefined even though the wrapped schema would reject it", () => {
@@ -53,7 +62,7 @@ describe("optional", () => {
 
     const result = Note.parse(undefined);
 
-    assert.deepEqual(result, { success: true, value: undefined });
+    expect(result).toStrictEqual({ success: true, value: undefined });
   });
 
   it("still rejects a value of the wrong type", () => {
@@ -61,7 +70,7 @@ describe("optional", () => {
 
     const result = Note.parse(42);
 
-    assert.equal(result.success, false);
+    expect(result.success).toBe(false);
   });
 
   it("lets an object omit an optional field entirely", () => {
@@ -72,8 +81,8 @@ describe("optional", () => {
 
     const result = Order.parse({ id: "o-1" });
 
-    assert.deepEqual(result, { success: true, value: { id: "o-1" } });
-    assert.equal(result.success && "note" in result.value, false);
+    expect(result).toStrictEqual({ success: true, value: { id: "o-1" } });
+    expect(result.success && "note" in result.value).toBe(false);
   });
 
   it("omits optional fields from the generated placeholder", () => {
@@ -84,7 +93,7 @@ describe("optional", () => {
 
     const placeholder = Order.placeholder();
 
-    assert.deepEqual(placeholder, { id: "<OrderId>" });
+    expect(placeholder).toStrictEqual({ id: "<OrderId>" });
   });
 
   it("types an optional field as an omittable key, not a required T | undefined", () => {
@@ -98,8 +107,8 @@ describe("optional", () => {
     const withoutNote: Infer<typeof Order> = { id: "o-1" };
     const withNote: Infer<typeof Order> = { id: "o-1", note: "handle with care" };
 
-    assert.deepEqual(withoutNote, { id: "o-1" });
-    assert.deepEqual(withNote, { id: "o-1", note: "handle with care" });
+    expect(withoutNote).toStrictEqual({ id: "o-1" });
+    expect(withNote).toStrictEqual({ id: "o-1", note: "handle with care" });
   });
 });
 
@@ -109,7 +118,7 @@ describe("record", () => {
 
     const result = Prices.parse({ apple: 1, banana: 2 });
 
-    assert.deepEqual(result, { success: true, value: { apple: 1, banana: 2 } });
+    expect(result).toStrictEqual({ success: true, value: { apple: 1, banana: 2 } });
   });
 
   it("rejects a value that is not an object", () => {
@@ -117,7 +126,7 @@ describe("record", () => {
 
     const result = Prices.parse("not-a-record");
 
-    assert.equal(result.success, false);
+    expect(result.success).toBe(false);
   });
 
   it("reports the offending key in the path", () => {
@@ -125,16 +134,197 @@ describe("record", () => {
 
     const result = Prices.parse({ apple: "not-a-number" });
 
-    assert.equal(result.success, false);
-    assert.deepEqual(
-      result.success ? [] : result.issues.map(issue => issue.path),
-      ["$.apple"],
-    );
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.apple"]);
   });
 
   it("uses an empty object as its placeholder", () => {
     const Prices = record(number());
 
-    assert.deepEqual(Prices.placeholder(), {});
+    expect(Prices.placeholder()).toStrictEqual({});
+  });
+});
+
+describe("string", () => {
+  it("rejects a non-string value", () => {
+    const Id = string("Id");
+
+    const result = Id.parse(42);
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("number", () => {
+  it("rejects a non-number value", () => {
+    const result = number().parse("42");
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects NaN and Infinity, which are not finite", () => {
+    expect(number().parse(Number.NaN).success).toBe(false);
+    expect(number().parse(Number.POSITIVE_INFINITY).success).toBe(false);
+  });
+
+  it("uses 0 as its placeholder", () => {
+    expect(number().placeholder()).toBe(0);
+  });
+});
+
+describe("boolean", () => {
+  it("accepts true and false", () => {
+    expect(boolean().parse(true)).toStrictEqual({ success: true, value: true });
+    expect(boolean().parse(false)).toStrictEqual({ success: true, value: false });
+  });
+
+  it("rejects a non-boolean value", () => {
+    const result = boolean().parse("true");
+
+    expect(result.success).toBe(false);
+  });
+
+  it("uses false as its placeholder", () => {
+    expect(boolean().placeholder()).toBe(false);
+  });
+});
+
+describe("instant", () => {
+  it("accepts a Temporal.Instant", () => {
+    const value = Temporal.Instant.from("2024-01-01T00:00:00Z");
+
+    expect(instant().parse(value)).toStrictEqual({ success: true, value });
+  });
+
+  it("rejects a value that is not a Temporal.Instant", () => {
+    const result = instant().parse("2024-01-01T00:00:00Z");
+
+    expect(result.success).toBe(false);
+  });
+
+  it("uses a fixed Temporal.Instant as its placeholder", () => {
+    const placeholder = instant().placeholder() as Temporal.Instant;
+
+    expect(placeholder.toString()).toBe("2000-01-01T00:00:00Z");
+  });
+});
+
+describe("literal", () => {
+  it("accepts only the exact expected value", () => {
+    const Status = literal("active");
+
+    expect(Status.parse("active")).toStrictEqual({ success: true, value: "active" });
+    expect(Status.parse("inactive").success).toBe(false);
+  });
+
+  it("supports null as a literal value", () => {
+    const Nothing = literal(null);
+
+    expect(Nothing.parse(null)).toStrictEqual({ success: true, value: null });
+    expect(Nothing.parse(undefined).success).toBe(false);
+  });
+
+  it("uses the literal value as its placeholder", () => {
+    expect(literal("active").placeholder()).toBe("active");
+  });
+});
+
+describe("object", () => {
+  it("rejects a non-object value", () => {
+    const Order = object({ id: string("Id") });
+
+    expect(Order.parse("not-an-object").success).toBe(false);
+    expect(Order.parse(null).success).toBe(false);
+    expect(Order.parse(["not", "an", "object"]).success).toBe(false);
+  });
+
+  it("collects issues from every invalid field, not just the first", () => {
+    const Order = object({ id: string("Id"), quantity: number() });
+
+    const result = Order.parse({ id: 42, quantity: "two" });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.id", "$.quantity"]);
+  });
+});
+
+describe("sum", () => {
+  const Shape = sum("state", {
+    draft: object({ id: string("Id") }),
+    published: object({ id: string("Id"), publishedAt: instant() }),
+  });
+
+  it("rejects a non-object value", () => {
+    expect(Shape.parse("not-an-object").success).toBe(false);
+    expect(Shape.parse(null).success).toBe(false);
+  });
+
+  it("rejects a value whose discriminant is not a known variant tag", () => {
+    const result = Shape.parse({ state: "archived", id: "a" });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.state"]);
+  });
+
+  it("rejects a value missing the discriminant field entirely", () => {
+    expect(Shape.parse({ id: "a" }).success).toBe(false);
+  });
+
+  it("merges the discriminant tag back into the parsed value", () => {
+    const result = Shape.parse({ state: "draft", id: "a" });
+
+    expect(result).toStrictEqual({ success: true, value: { state: "draft", id: "a" } });
+  });
+
+  it("propagates issues from the matched variant's own fields", () => {
+    const result = Shape.parse({ state: "draft", id: 42 });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("builds a placeholder for a given variant tag", () => {
+    expect(Shape.placeholderFor("draft")).toStrictEqual({ state: "draft", id: "<Id>" });
+  });
+
+  it("defaults its own placeholder to the first declared variant", () => {
+    expect(Shape.placeholder()).toStrictEqual(Shape.placeholderFor("draft"));
+  });
+
+  it("exposes every variant tag", () => {
+    expect(Shape.variantTags).toStrictEqual(["draft", "published"]);
+  });
+});
+
+describe("isSumSchema", () => {
+  it("is true for a schema built with sum()", () => {
+    const Shape = sum("state", { draft: object({ id: string("Id") }) });
+
+    expect(isSumSchema(Shape)).toBe(true);
+  });
+
+  it("is false for a non-sum schema", () => {
+    expect(isSumSchema(string("Id"))).toBe(false);
+    expect(isSumSchema(object({ id: string("Id") }))).toBe(false);
+  });
+});
+
+describe("tagOf", () => {
+  const Shape = sum("state", {
+    draft: object({ id: string("Id") }),
+    published: object({ id: string("Id") }),
+  });
+
+  it("returns the discriminant tag for a value belonging to a known variant", () => {
+    expect(tagOf(Shape, { state: "draft", id: "a" })).toBe("draft");
+  });
+
+  it("returns undefined for a value whose discriminant is unknown", () => {
+    expect(tagOf(Shape, { state: "archived", id: "a" })).toBe(undefined);
+  });
+
+  it("returns undefined for a non-object value", () => {
+    expect(tagOf(Shape, "not-an-object")).toBe(undefined);
+    expect(tagOf(Shape, null)).toBe(undefined);
+    expect(tagOf(Shape, ["not", "an", "object"])).toBe(undefined);
   });
 });

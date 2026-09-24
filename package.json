@@ -18,8 +18,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test",
+    "test": "vitest run",
     "check": "npm run typecheck && npm test",
+    "coverage": "vitest run --coverage",
     "demo": "tsx examples/progressive-demo/run.ts",
     "demo:type-break": "tsc -p examples/progressive-demo/type-break/tsconfig.json --pretty false",
     "example:check": "tsx src/cli.ts check examples/order-cancellation.spec.ts",
@@ -36,6 +37,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.1",
-    "typescript": "^7.0.2"
+    "@vitest/coverage-v8": "^5.0.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }
