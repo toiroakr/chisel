@@ -5,6 +5,8 @@ import type {
   Tags,
   VariantOf,
 } from "./schema.js";
+import type { Rule, TermOf } from "./rule.js";
+import { holds, selfTerm } from "./rule.js";
 import { tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
@@ -22,6 +24,20 @@ export interface Decision<Input, Result, Effect> {
   readonly id: string;
   readonly dependsOn?: readonly string[];
   run(input: Input): Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
+}
+
+export interface Guard<Input, Result, Effect> {
+  readonly kind: "guard";
+  readonly condition: Rule;
+  orElse(input: Input): Execution<Result, Effect>;
+}
+
+export interface RulesDecision<Input, Result, Effect> {
+  readonly kind: "rules";
+  readonly id: string;
+  readonly dependsOn?: readonly string[];
+  readonly guards: readonly Guard<Input, Result, Effect>[];
+  otherwise(input: Input): Execution<Result, Effect>;
 }
 
 export interface ControlPolicy {
@@ -75,6 +91,7 @@ export type BehaviorEffect<B> = B extends Behavior<
 export type ImplementationCases<B extends AnyBehavior> = {
   readonly [Tag in Tags<B["input"]>]:
     | Decision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>>
+    | RulesDecision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>>
     | Pending;
 };
 
@@ -92,6 +109,23 @@ export class SpecificationError extends Error {
     super(message);
     this.name = "SpecificationError";
   }
+}
+
+export function guard<Input, Result, Effect>(
+  condition: Rule,
+  orElse: (input: Input) => Execution<Result, Effect>,
+): Guard<Input, Result, Effect> {
+  return { kind: "guard", condition, orElse };
+}
+
+export function rules<Input, Result, Effect>(
+  id: string,
+  build: (
+    input: TermOf<NoInfer<Input>>,
+  ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>>[],
+  otherwise: (input: NoInfer<Input>) => Execution<NoInfer<Result>, NoInfer<Effect>>,
+): RulesDecision<Input, Result, Effect> {
+  return { kind: "rules", id, guards: build(selfTerm<NoInfer<Input>>()), otherwise };
 }
 
 export function pending(reason: string): Pending {
@@ -167,7 +201,10 @@ export async function runImplementation<B extends AnyBehavior>(
     throw new SpecificationError(`Pending decision for ${tag}: ${selected.reason}`);
   }
 
-  const execution = await selected.run(parsedInput.value as never);
+  const execution =
+    selected.kind === "rules"
+      ? decide(selected, parsedInput.value)
+      : await selected.run(parsedInput.value as never);
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
     throw new SpecificationError(formatIssues("Invalid result", parsedResult.issues));
@@ -188,6 +225,14 @@ export async function runImplementation<B extends AnyBehavior>(
     result: parsedResult.value as BehaviorResult<B>,
     effects: parsedEffects as BehaviorEffect<B>[],
   };
+}
+
+function decide<Result, Effect>(
+  decision: RulesDecision<unknown, Result, Effect>,
+  input: unknown,
+): Execution<Result, Effect> {
+  const failed = decision.guards.find(candidate => !holds(candidate.condition, input));
+  return failed === undefined ? decision.otherwise(input) : failed.orElse(input);
 }
 
 function formatIssues(

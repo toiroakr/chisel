@@ -217,6 +217,9 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
 function normalize(
   rule: Rule,
 ): { operator: Operator; bound: unknown; measure: Border["measure"] } | undefined {
+  if (rule.kind !== "compare") {
+    return undefined;
+  }
   if (isTerm(rule.left) && !isTerm(rule.right)) {
     return { operator: rule.operator, bound: rule.right, measure: termData(rule.left).measure };
   }

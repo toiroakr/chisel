@@ -38,7 +38,20 @@ export interface CompareRule {
   readonly right: Operand<unknown>;
 }
 
-export type Rule = CompareRule;
+export interface AllRule {
+  readonly kind: "all";
+  readonly of: Term<readonly unknown[]>;
+  readonly each: Rule;
+}
+
+export type Rule = CompareRule | AllRule;
+
+export function all<E>(
+  of: Term<readonly E[]>,
+  each: (element: TermOf<E>) => Rule,
+): Rule {
+  return { kind: "all", of: of as Term<readonly unknown[]>, each: each(selfTerm<E>()) };
+}
 
 export function lt<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
   return compare("<", left, right);
@@ -93,6 +106,9 @@ export function termData(term: Term<unknown>): TermData {
 }
 
 export function boundTermPath(rule: Rule): readonly string[] | undefined {
+  if (rule.kind !== "compare") {
+    return undefined;
+  }
   if (isTerm(rule.left) !== isTerm(rule.right)) {
     return termData((isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>).path;
   }
@@ -101,7 +117,7 @@ export function boundTermPath(rule: Rule): readonly string[] | undefined {
 
 export function stepInto(rule: Rule, key: string): Rule | undefined {
   const path = boundTermPath(rule);
-  if (path === undefined || path[0] !== key) {
+  if (rule.kind !== "compare" || path === undefined || path[0] !== key) {
     return undefined;
   }
   const shift = (operand: unknown): unknown => {
@@ -115,6 +131,10 @@ export function stepInto(rule: Rule, key: string): Rule | undefined {
 }
 
 export function holds(rule: Rule, value: unknown): boolean {
+  if (rule.kind === "all") {
+    const elements = read(rule.of, value);
+    return !Array.isArray(elements) || elements.every(element => holds(rule.each, element));
+  }
   const left = read(rule.left, value);
   const right = read(rule.right, value);
   if (left === undefined || right === undefined) {
@@ -138,7 +158,7 @@ export function holds(rule: Rule, value: unknown): boolean {
 }
 
 export function satisfy(rule: Rule, value: unknown): unknown {
-  if (holds(rule, value)) {
+  if (rule.kind !== "compare" || holds(rule, value)) {
     return value;
   }
   const [term, bound, operator] = isTerm(rule.left)
@@ -160,6 +180,9 @@ export function satisfy(rule: Rule, value: unknown): unknown {
 }
 
 export function describeRule(rule: Rule, path = "$"): string {
+  if (rule.kind === "all") {
+    return `all(${describeOperand(rule.of, path)}, ${describeRule(rule.each, `${describeOperand(rule.of, path)}[]`)})`;
+  }
   return `${describeOperand(rule.left, path)} ${rule.operator} ${describeOperand(rule.right, path)}`;
 }
 
