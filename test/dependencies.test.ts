@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   behavior,
+  boolean,
   defineSpecification,
   dependency,
   evaluateSpecification,
   example,
   examples,
+  fake,
   implement,
+  integer,
   instant,
   object,
   string,
@@ -71,5 +74,73 @@ describe("a value dependency", () => {
     expect(report.failures).toStrictEqual([
       { name: "時刻を書き忘れた", message: "No stand-in for dependency 現在時刻" },
     ]);
+  });
+});
+
+describe("a function dependency", () => {
+  const 在庫を確かめる = behavior({
+    name: "在庫を確かめる",
+    input: sum("状態", { 注文済み: object({ 商品ID: string("商品ID") }) }),
+    result: object({ 在庫あり: boolean() }),
+    effects: sum("種類", {}),
+    requires: { 在庫を照会する: dependency(string("商品ID"), integer()) },
+  });
+  const 照会して答える = implement(在庫を確かめる, {
+    cases: {
+      注文済み: {
+        kind: "decision",
+        id: "照会して答える",
+        run: (注文, 依存) => ({
+          result: { 在庫あり: 依存.在庫を照会する(注文.商品ID) > 0 },
+          effects: [],
+        }),
+      },
+    },
+  });
+  const 商品で = (商品ID: string, 在庫あり: boolean) =>
+    example(在庫を確かめる, `${商品ID}の在庫`, {
+      given: { 状態: "注文済み", 商品ID },
+      expect: { result: { 在庫あり }, effects: [] },
+    });
+
+  it("is stood in for by a fake table matched on the input it is asked", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "在庫",
+        examples: examples(在庫を確かめる, [商品で("商品-A", true), 商品で("商品-B", false)]),
+        implementation: 照会して答える,
+        fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10], ["商品-B", 0]])],
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+
+  it("reports an input a fake table has no row and no default for", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "在庫",
+        examples: examples(在庫を確かめる, [商品で("商品-C", false)]),
+        implementation: 照会して答える,
+        fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10]])],
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([
+      { name: "商品-Cの在庫", message: 'Fake 在庫を照会する has no answer for "商品-C"' },
+    ]);
+  });
+
+  it("answers an input no row states with the table's default", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "在庫",
+        examples: examples(在庫を確かめる, [商品で("商品-C", false)]),
+        implementation: 照会して答える,
+        fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10]], { otherwise: 0 })],
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
   });
 });

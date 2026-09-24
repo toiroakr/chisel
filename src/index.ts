@@ -40,10 +40,12 @@ export type { Comparable, InvariantRule, Operand, Operator, Rule, Term, TermOf }
 
 export { formatTypeScriptValue } from "./codegen.js";
 
-export { dependency } from "./dependency.js";
+export { dependency, fake, FakeMiss } from "./dependency.js";
 export type {
   AnyDependency,
+  FakeTable,
   FunctionDependency,
+  FunctionDependencyNames,
   Requirements,
   Resolved,
   ValueDependencies,

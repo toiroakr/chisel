@@ -11,7 +11,8 @@ import type {
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
-import type { ValueDependencies } from "./dependency.js";
+import type { FakeTable, ValueDependencies } from "./dependency.js";
+import { answerFrom } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
@@ -89,6 +90,7 @@ export interface Specification<B extends AnyBehavior = AnyBehavior> {
   readonly name: string;
   readonly examples: ExampleSet<B>;
   readonly implementation: Implementation<B> | undefined;
+  readonly fakes: readonly FakeTable[];
 }
 
 export interface ExampleFailure {
@@ -288,12 +290,14 @@ export function defineSpecification<B extends AnyBehavior>(options: {
   readonly name: string;
   readonly examples: ExampleSet<B>;
   readonly implementation?: Implementation<B>;
+  readonly fakes?: readonly FakeTable[];
 }): Specification<B> {
   return {
     kind: "specification",
     name: options.name,
     examples: options.examples,
     implementation: options.implementation,
+    fakes: options.fakes ?? [],
   };
 }
 
@@ -328,10 +332,17 @@ export async function evaluateSpecification(
   const reached: ComparisonReached[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
-  const standIns = (row: Example<AnyBehavior>): unknown => ({ ...(row.with ?? {}) });
+  const tables = new Map(
+    specification.fakes.map(table => [table.dependency, answerFrom(table)] as const),
+  );
+  const standIns = (row: Example<AnyBehavior>): unknown => ({
+    ...Object.fromEntries(tables),
+    ...(row.with ?? {}),
+  });
   const unstoodFor = (row: Example<AnyBehavior>): string | undefined =>
     Object.keys(definition.requires).find(
-      name => !(name in ((row.with ?? {}) as Readonly<Record<string, unknown>>)),
+      name =>
+        !(name in ((row.with ?? {}) as Readonly<Record<string, unknown>>)) && !tables.has(name),
     );
   const observe = (
     inputTag: string,
