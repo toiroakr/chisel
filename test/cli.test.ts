@@ -87,6 +87,16 @@ describe("chisel check", () => {
   });
 });
 
+describe("chisel check with a position the invariants leave empty", () => {
+  it("prints the position as a model error", async () => {
+    const result = await run(["check", fixture("test/fixtures/empty-position.ts")]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^  ! モデルの誤り: @入力済み\.数量: 不変条件を満たす値がありません \(invariant \$ >= 10, invariant \$ <= 5\)$/m,
+    );
+  });
+});
+
 describe("chisel generate", () => {
   it("prints ready-to-paste example rows for uncovered input variants", async () => {
     const result = await run([

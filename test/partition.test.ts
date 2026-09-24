@@ -281,6 +281,42 @@ describe("a border with nothing past it", () => {
   });
 });
 
+describe("bounds that leave nothing admitted", () => {
+  it("excludes every point of two bounds that admit no value between them", () => {
+    const [position] = positionsOf(
+      sum("状態", {
+        入力済み: object({
+          数量: integer()
+            .invariant(v => ge(v, 10))
+            .invariant(v => le(v, 5)),
+        }),
+      }),
+    );
+
+    expect(
+      position!.borders.flatMap(border => border.points.map(point => point.status)),
+    ).toStrictEqual(Array.from({ length: 8 }, () => "excluded"));
+  });
+
+  it("excludes a point of one bound that another bound refuses", () => {
+    const [position] = positionsOf(
+      sum("状態", {
+        入力済み: object({
+          数量: integer()
+            .invariant(v => ge(v, 1))
+            .invariant(v => ne(v, 1)),
+        }),
+      }),
+    );
+
+    expect(position!.borders[0]!.points[0]).toMatchObject({
+      role: "ON",
+      relation: "= 1",
+      status: "excluded",
+    });
+  });
+});
+
 describe("a length border stops at zero", () => {
   function pointsAt(schema: Parameters<typeof object>[0][string]) {
     const [position] = positionsOf(sum("状態", { 入力済み: object({ 見出し: schema }) }));

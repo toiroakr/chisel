@@ -98,6 +98,7 @@ export interface GuardClass {
 export interface GuardPartition {
   readonly path: string;
   readonly classes: readonly GuardClass[];
+  readonly excluded: readonly string[];
 }
 
 interface Threshold {
@@ -210,6 +211,7 @@ function partitionAt(
     upper,
   ];
   const classes: GuardClass[] = [];
+  const excluded: string[] = [];
   for (let index = 0; index < edges.length; index += 2) {
     const from = edges[index];
     const to = edges[index + 1];
@@ -230,9 +232,6 @@ function partitionAt(
         : from.inclusive
           ? from.value
           : (carrier.step?.(from.value, 1) ?? carrier.past?.(from.value, 1));
-    if (witness === undefined || !contains(witness)) {
-      continue;
-    }
     const single =
       from !== undefined &&
       to !== undefined &&
@@ -246,9 +245,13 @@ function partitionAt(
           "v",
           to === undefined ? "" : ` ${to.inclusive ? "<=" : "<"} ${carrier.format(to.value)}`,
         ].join("");
+    if (witness === undefined || !contains(witness)) {
+      excluded.push(name);
+      continue;
+    }
     classes.push({ name, witness, contains });
   }
-  return { path, classes };
+  return { path, classes, excluded };
 }
 
 function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {

@@ -28,6 +28,7 @@ import {
 } from "./behavior.js";
 import { describeRule, describeTerm, termData } from "./rule.js";
 import type { PointRole } from "./border.js";
+import { emptiedBy } from "./border.js";
 import type { GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
@@ -131,6 +132,7 @@ export interface AdequacyReport {
   readonly pendingDecisions: readonly PendingDecision[];
   readonly controlGaps: readonly ControlGap[];
   readonly dependencyIssues: readonly DependencyIssue[];
+  readonly modelIssues: readonly string[];
   readonly failures: readonly ExampleFailure[];
   readonly partitions: readonly PartitionCoverage[];
   readonly borders: readonly BorderCoverage[];
@@ -559,6 +561,16 @@ export async function evaluateSpecification(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
+  const modelIssues = positions.flatMap(position => {
+    const emptied = emptiedBy(position.borders);
+    return emptied === undefined
+      ? []
+      : [
+          `${position.path}: 不変条件を満たす値がありません (${emptied
+            .map(border => border.rule)
+            .join(", ")})`,
+        ];
+  });
   const guardPartitions =
     specification.implementation === undefined
       ? []
@@ -574,7 +586,13 @@ export async function evaluateSpecification(
           .map(item => item.name),
       );
       const { covered, missing } = coverage(names, reached);
-      return { path: position.path, kind: "divided", covered, missing, excluded: [] };
+      return {
+        path: position.path,
+        kind: "divided",
+        covered,
+        missing,
+        excluded: drawn.excluded,
+      };
     }
     if (position.kind !== "divided") {
       return { path: position.path, kind: position.kind };
@@ -662,6 +680,7 @@ export async function evaluateSpecification(
     pendingDecisions.length === 0 &&
     controlGaps.length === 0 &&
     dependencyIssues.length === 0 &&
+    modelIssues.length === 0 &&
     input.missing.length === 0 &&
     result.missing.length === 0 &&
     effects.missing.length === 0 &&
@@ -706,6 +725,7 @@ export async function evaluateSpecification(
     pendingDecisions,
     controlGaps,
     dependencyIssues,
+    modelIssues,
     failures,
     partitions,
     borders,

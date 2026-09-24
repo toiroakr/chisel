@@ -184,6 +184,9 @@ function formatReport(report: AdequacyReport): string {
     const scope = issue.variant === undefined ? "behavior" : issue.variant;
     lines.push(`  ! 依存関係の誤り (${scope}): ${issue.reason}`);
   }
+  for (const issue of report.modelIssues) {
+    lines.push(`  ! モデルの誤り: ${issue}`);
+  }
   for (const issue of report.fakeIssues) {
     lines.push(`  ! fake の誤り: ${issue}`);
   }

@@ -557,3 +557,79 @@ describe("pairs of classes", () => {
     expect(report.pairs).toStrictEqual([]);
   });
 });
+
+describe("a position the invariants leave empty", () => {
+  const 数量を決める = behavior({
+    name: "数量を決める",
+    input: sum("状態", {
+      入力済み: object({
+        数量: integer()
+          .invariant(v => ge(v, 10))
+          .invariant(v => le(v, 5)),
+      }),
+    }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+
+  async function report() {
+    return evaluateSpecification(
+      defineSpecification({ name: "数量", examples: examples(数量を決める, []) }),
+    );
+  }
+
+  it("reports the position as a model error", async () => {
+    expect((await report()).modelIssues).toStrictEqual([
+      "@入力済み.数量: 不変条件を満たす値がありません (invariant $ >= 10, invariant $ <= 5)",
+    ]);
+  });
+
+  it("owes no point of its borders", async () => {
+    expect(
+      (await report()).borders.flatMap(border => border.points.map(point => point.status)),
+    ).not.toContain("gap");
+  });
+});
+
+describe("a guard threshold interval the invariants leave empty", () => {
+  it("lists the interval as excluded instead of dropping it", async () => {
+    const 受け付ける = behavior({
+      name: "受け付ける",
+      input: sum("状態", {
+        入力済み: object({
+          合計: integer()
+            .invariant(v => ge(v, 0))
+            .invariant(v => le(v, 50)),
+        }),
+      }),
+      result: sum("結果", { 受付: object({}), 要承認: object({}) }),
+      effects: sum("種類", {}),
+    });
+    const 上限で分ける = implement(受け付ける, {
+      cases: {
+        入力済み: rules(
+          "上限で分ける",
+          注文 => [guard(le(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          () => ({ result: { 結果: "受付" }, effects: [] }),
+        ),
+      },
+    });
+    const result = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(受け付ける, []),
+        implementation: 上限で分ける,
+      }),
+    );
+
+    expect(result.partitions).toStrictEqual([
+      {
+        path: "@入力済み.合計",
+        kind: "divided",
+        covered: [],
+        missing: ["0 <= v <= 100000"],
+        excluded: ["100000 < v <= 50"],
+      },
+    ]);
+  });
+});

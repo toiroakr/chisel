@@ -90,19 +90,46 @@ export function bordersOf(
     return border === undefined ? [] : [border];
   });
   return drawn.map(current => {
-    if (current.namesValue === true) {
-      return current.border;
-    }
-    const others = drawn.filter(
-      other =>
-        other !== current &&
-        other.namesValue !== true &&
-        other.border.measure === current.border.measure,
+    const sameMeasure = drawn.filter(
+      other => other !== current && other.border.measure === current.border.measure,
     );
-    return oneValueWide(current, others)
+    if (current.namesValue === true) {
+      return withoutRefusedPoints(current.border, sameMeasure);
+    }
+    const others = sameMeasure.filter(other => other.namesValue !== true);
+    const border = oneValueWide(current, others)
       ? withoutInPoint(current.border)
       : withAdmittedInWitness(current, others);
+    return withoutRefusedPoints(border, sameMeasure);
   });
+}
+
+function withoutRefusedPoints(border: Border, others: readonly Drawn[]): Border {
+  return {
+    ...border,
+    points: border.points.map(point =>
+      point.status === "owed" &&
+      point.witness !== undefined &&
+      !others.every(other => other.admits(point.witness))
+        ? { ...point, status: "excluded" as const }
+        : point,
+    ),
+  };
+}
+
+export function emptiedBy(borders: readonly Border[]): readonly Border[] | undefined {
+  for (const measure of ["value", "length"] as const) {
+    const invariants = borders.filter(
+      border => border.source === "invariant" && border.measure === measure,
+    );
+    if (
+      invariants.length > 0 &&
+      invariants.every(border => border.points.every(point => point.status !== "owed"))
+    ) {
+      return invariants;
+    }
+  }
+  return undefined;
 }
 
 function withAdmittedInWitness(current: Drawn, others: readonly Drawn[]): Border {
