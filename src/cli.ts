@@ -16,6 +16,7 @@ import {
   generationReport,
   isSpecification,
 } from "./specification.js";
+import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import type {
   AdequacyReport,
   BorderCoverage,
@@ -173,6 +174,7 @@ function formatReport(report: AdequacyReport): string {
         ? "すべて読めた (complete)"
         : `一部のみ (partial); 読めない比較: ${report.measures.comparisons.notRead.join(", ")}`
     }`,
+    ...formatEnsures(report.ensures),
   ];
 
   for (const row of report.unanswered) {
@@ -339,6 +341,30 @@ function formatRules(measure: RulesMeasure): string[] {
     return [];
   }
   return formatLines(measure.rules, rule => `${rule.decision}: ${rule.way}`);
+}
+
+const classificationLabels: Readonly<Record<EnsuresClassification, string>> = {
+  derivable: "導出可能 (derivable)",
+  "exact match": "完全一致 (exact match)",
+  "always holds": "常に成立 (always holds)",
+  "never holds": "決して成立しない (never holds)",
+  "runtime only": "実行時のみ (runtime only)",
+};
+
+function formatEnsures(ensures: EnsuresReport): string[] {
+  if (ensures.rules.length === 0) {
+    return [];
+  }
+  return [
+    "  ensures",
+    ...ensures.rules.map(
+      rule =>
+        `    ${rule.clause}: ${rule.conjunct} — ${classificationLabels[rule.classification]}`,
+    ),
+    ...(ensures.unstated.length === 0
+      ? []
+      : [`    述べられていない結果: ${ensures.unstated.join(", ")}`]),
+  ];
 }
 
 function formatMeasure(measure: Measure | RulesMeasure): string {

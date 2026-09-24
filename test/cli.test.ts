@@ -115,6 +115,19 @@ describe("chisel check with an input case the input sum refuses", () => {
   });
 });
 
+describe("chisel check with ensures clauses", () => {
+  it("prints how much of each rule the check reads and the cases no rule states", async () => {
+    const result = await run(["check", fixture("test/fixtures/ensures-readings.ts")]);
+    const stdout = stdoutOf(result);
+
+    expect([
+      /^    入力を写す: value\.数量 >= input\.数量 — 導出可能 \(derivable\)$/m.test(stdout),
+      /^    商品は同じ: value\.商品ID == input\.商品ID — 完全一致 \(exact match\)$/m.test(stdout),
+      /^    述べられていない結果: 保留$/m.test(stdout),
+    ]).toStrictEqual([true, true, true]);
+  });
+});
+
 describe("chisel generate", () => {
   it("prints ready-to-paste example rows for uncovered input variants", async () => {
     const result = await run([

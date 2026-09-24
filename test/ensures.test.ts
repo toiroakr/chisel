@@ -9,6 +9,7 @@ import {
   example,
   examples,
   and,
+  ge,
   gt,
   le,
   or,
@@ -220,5 +221,90 @@ describe("an ensures clause over every element of the answer", () => {
     expect(() => 明細を返す(行 => le(行 as never, 3))).toThrow(
       new SpecificationError("Ensures 明細 must relate the input to the answer"),
     );
+  });
+});
+
+describe("ensures clause names", () => {
+  it("refuses two clauses with one name", () => {
+    expect(() =>
+      behavior({
+        name: "二重",
+        input: sum("状態", { 入力済み: object({ 数量: integer() }) }),
+        result: object({ 数量: integer() }),
+        effects: sum("種類", {}),
+        ensures: clause => [
+          clause.always("数量を保つ", (入力, 答え) => eq(答え.数量, 入力.数量)),
+          clause.always("数量を保つ", (入力, 答え) => gt(答え.数量, 入力.数量)),
+        ],
+      }),
+    ).toThrow(new SpecificationError("Ensures 数量を保つ is declared more than once"));
+  });
+});
+
+describe("how much of an ensures rule the check reads", () => {
+  const 見積もる = behavior({
+    name: "見積もる",
+    input: sum("状態", { 入力済み: object({ 数量: integer(), 商品ID: string("商品ID") }) }),
+    result: sum("結果", {
+      見積: object({ 数量: integer(), 商品ID: string("商品ID"), 明細: array(integer()) }),
+      不可: object({ 理由: string("理由") }),
+      保留: object({}),
+    }),
+    effects: sum("種類", {}),
+    ensures: clause => [
+      clause.when("入力を写す", ["見積"], (入力, 答え) =>
+        and(ge(答え.数量, 入力.数量), eq(答え.商品ID, 入力.商品ID)),
+      ),
+      clause.when("明細は数量以下", ["見積"], (入力, 答え) =>
+        all(答え.明細, 行 => le(行, 入力.数量)),
+      ),
+      clause.when("自明", ["不可"], (入力, 答え) => and(eq(答え.理由, 答え.理由), gt(入力.数量, -1))),
+    ],
+  });
+
+  async function readings() {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "見積", examples: examples(見積もる, []) }),
+    );
+    return report.ensures;
+  }
+
+  it("classifies each conjunct of each rule by how much of it the check can carry", async () => {
+    expect((await readings()).rules).toStrictEqual([
+      {
+        clause: "入力を写す",
+        cases: ["見積"],
+        conjunct: "value.数量 >= input.数量",
+        classification: "derivable",
+      },
+      {
+        clause: "入力を写す",
+        cases: ["見積"],
+        conjunct: "value.商品ID == input.商品ID",
+        classification: "exact match",
+      },
+      {
+        clause: "明細は数量以下",
+        cases: ["見積"],
+        conjunct: "all(value.明細, value.明細[] <= input.数量)",
+        classification: "runtime only",
+      },
+      {
+        clause: "自明",
+        cases: ["不可"],
+        conjunct: "value.理由 == value.理由",
+        classification: "always holds",
+      },
+      {
+        clause: "自明",
+        cases: ["不可"],
+        conjunct: "input.数量 > -1",
+        classification: "derivable",
+      },
+    ]);
+  });
+
+  it("names the answer cases no rule states anything about", async () => {
+    expect((await readings()).unstated).toStrictEqual(["保留"]);
   });
 });

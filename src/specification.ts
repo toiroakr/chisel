@@ -32,6 +32,8 @@ import type { Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
 import { feasibilityOf } from "./feasibility.js";
+import { readEnsures } from "./ensures.js";
+import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
@@ -138,6 +140,7 @@ export interface AdequacyReport {
   readonly controlGaps: readonly ControlGap[];
   readonly dependencyIssues: readonly DependencyIssue[];
   readonly modelIssues: readonly string[];
+  readonly ensures: EnsuresReport;
   readonly failures: readonly ExampleFailure[];
   readonly partitions: readonly PartitionCoverage[];
   readonly borders: readonly BorderCoverage[];
@@ -742,6 +745,7 @@ export async function evaluateSpecification(
     controlGaps,
     dependencyIssues,
     modelIssues,
+    ensures: readEnsures(definition),
     failures,
     partitions,
     borders,

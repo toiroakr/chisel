@@ -114,6 +114,7 @@ export type {
   BorderCoverage,
   ComparisonsMeasure,
   ConformanceSubject,
+  CoverageStatus,
   ControlGap,
   Coverage,
   DependencyIssue,
@@ -135,3 +136,4 @@ export type {
   UnansweredExample,
   Verdict,
 } from "./specification.js";
+export type { EnsuresClassification, EnsuresReading, EnsuresReport } from "./ensures.js";

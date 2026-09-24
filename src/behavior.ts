@@ -217,6 +217,12 @@ export function behavior<
   ) => readonly EnsuresClause[];
 }): Behavior<InputSchema, ResultSchema, EffectSchema, Requires> {
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
+  const repeated = clauses.find(
+    (clause, index) => clauses.findIndex(other => other.name === clause.name) !== index,
+  );
+  if (repeated !== undefined) {
+    throw new SpecificationError(`Ensures ${repeated.name} is declared more than once`);
+  }
   for (const clause of clauses) {
     const roots = rootsRead(clause.rule);
     if (!roots.has("input") || !roots.has("value")) {
