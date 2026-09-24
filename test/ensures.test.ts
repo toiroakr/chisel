@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  all,
+  array,
   behavior,
   defineSpecification,
   eq,
@@ -8,6 +10,7 @@ import {
   examples,
   and,
   gt,
+  le,
   or,
   implement,
   integer,
@@ -165,5 +168,57 @@ describe("borders an ensures clause draws", () => {
     );
 
     expect(report.borders).toStrictEqual([]);
+  });
+});
+
+describe("an ensures clause over every element of the answer", () => {
+  const 明細を返す = (rule: Parameters<typeof all>[1]) =>
+    behavior({
+      name: "明細を返す",
+      input: sum("状態", { 入力済み: object({ 数量: integer() }) }),
+      result: object({ 明細: array(integer()) }),
+      effects: sum("種類", {}),
+      ensures: clause => [clause.always("明細", (_, 答え) => all(答え.明細, rule))],
+    });
+
+  it("relates the input to the answer when it reads the input inside all", () => {
+    expect(() =>
+      behavior({
+        name: "明細を返す",
+        input: sum("状態", { 入力済み: object({ 数量: integer() }) }),
+        result: object({ 明細: array(integer()) }),
+        effects: sum("種類", {}),
+        ensures: clause => [
+          clause.always("明細は数量以下", (入力, 答え) => all(答え.明細, 行 => le(行, 入力.数量))),
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("holds each element to the input it reads", async () => {
+    const 明細を返す = behavior({
+      name: "明細を返す",
+      input: sum("状態", { 入力済み: object({ 数量: integer() }) }),
+      result: object({ 明細: array(integer()) }),
+      effects: sum("種類", {}),
+      ensures: clause => [
+        clause.always("明細は数量以下", (入力, 答え) => all(答え.明細, 行 => le(行, 入力.数量))),
+      ],
+    });
+    const 多すぎる = implement(明細を返す, {
+      cases: {
+        入力済み: rules("多すぎる", () => [], () => ({ result: { 明細: [5] }, effects: [] })),
+      },
+    });
+
+    await expect(runImplementation(多すぎる, { 状態: "入力済み", 数量: 1 })).rejects.toThrow(
+      SpecificationError,
+    );
+  });
+
+  it("is still refused when all reads only the element", () => {
+    expect(() => 明細を返す(行 => le(行 as never, 3))).toThrow(
+      new SpecificationError("Ensures 明細 must relate the input to the answer"),
+    );
   });
 });

@@ -23,7 +23,7 @@ import {
   depsTerm,
   withDeps,
   termData,
-  termPaths,
+  rootsRead,
 } from "./rule.js";
 import { isSumSchema, schemaAtPath, tagOf } from "./schema.js";
 
@@ -218,7 +218,7 @@ export function behavior<
 }): Behavior<InputSchema, ResultSchema, EffectSchema, Requires> {
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
   for (const clause of clauses) {
-    const roots = new Set(termPaths(clause.rule).map(path => path[0]));
+    const roots = rootsRead(clause.rule);
     if (!roots.has("input") || !roots.has("value")) {
       throw new SpecificationError(
         `Ensures ${clause.name} must relate the input to the answer`,

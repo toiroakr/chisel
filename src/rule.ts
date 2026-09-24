@@ -201,6 +201,22 @@ export function termPaths(rule: Rule): readonly (readonly string[])[] {
   }
 }
 
+export function rootsRead(rule: Rule): ReadonlySet<string | undefined> {
+  const roots = new Set(termPaths(rule).map(path => path[0]));
+  if (rule.kind === "all" || rule.kind === "any") {
+    for (const root of rootsRead(rule.each)) {
+      roots.add(root);
+    }
+  }
+  if (rule.kind === "and" || rule.kind === "or") {
+    rule.rules.forEach(part => rootsRead(part).forEach(root => roots.add(root)));
+  }
+  if (rule.kind === "not") {
+    rootsRead(rule.rule).forEach(root => roots.add(root));
+  }
+  return roots;
+}
+
 export function selfTerm<T>(): TermOf<T> {
   return termAt([], "value") as TermOf<T>;
 }
