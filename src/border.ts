@@ -53,6 +53,15 @@ function epochNanoseconds(value: unknown): bigint {
   return (value as { readonly epochNanoseconds: bigint }).epochNanoseconds;
 }
 
+export const nanosecondCarrier: Carrier = {
+  compare: (left, right) => {
+    const difference = (left as bigint) - (right as bigint);
+    return difference < 0n ? -1 : difference > 0n ? 1 : 0;
+  },
+  step: (value, direction) => (value as bigint) + BigInt(direction),
+  format: String,
+};
+
 export const stringCarrier: Carrier = {
   compare: (left, right) =>
     (left as string) < (right as string) ? -1 : (left as string) > (right as string) ? 1 : 0,

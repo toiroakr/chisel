@@ -205,6 +205,10 @@ describe("cli run() with a rules decision", () => {
     ]).toStrictEqual([true, true]);
   });
 
+  it("says every comparison in the guards could be read", async () => {
+    expect(await output("check")).toMatch(/^  比較 +すべて読めた \(complete\)$/m);
+  });
+
   it("generates rows at the points of a guard border", async () => {
     expect(await output("generate")).toMatch(/在庫数 OFF \(= 1\)/);
   });

@@ -10,7 +10,7 @@ import type {
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
-import { guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
+import { comparisonsNotReadOf, guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
 import { comparisonsReached, runImplementation, runTraced } from "./behavior.js";
 import { describeRule } from "./rule.js";
 import type { PointRole } from "./border.js";
@@ -118,7 +118,11 @@ export interface AdequacyReport {
     readonly result: readonly ResultCaseEvidence[];
     readonly effects: readonly ResultCaseEvidence[];
   };
-  readonly measures: { readonly arms: Measure; readonly rules: RulesMeasure };
+  readonly measures: {
+    readonly arms: Measure;
+    readonly rules: RulesMeasure;
+    readonly comparisons: ComparisonsMeasure;
+  };
   readonly adequate: boolean;
   readonly verdict: Verdict;
 }
@@ -131,6 +135,10 @@ export interface ArmCoverage {
   readonly arm: "holds" | "else";
   readonly status: "met" | "gap" | "answer owed";
 }
+
+export type ComparisonsMeasure =
+  | { readonly status: "complete" }
+  | { readonly status: "partial"; readonly notRead: readonly string[] };
 
 export interface RuleCoverage {
   readonly decision: string;
@@ -569,10 +577,20 @@ export async function evaluateSpecification(
     (arms.status !== "unavailable" && arms.arms.some(arm => arm.status !== "met")) ||
     (rulesMeasure.status !== "unavailable" &&
       rulesMeasure.rules.some(rule => rule.status !== "met"));
+  const unreadComparisons =
+    specification.implementation === undefined
+      ? []
+      : comparisonsNotReadOf(specification.implementation);
+  const comparisons: ComparisonsMeasure =
+    unreadComparisons.length === 0
+      ? { status: "complete" }
+      : { status: "partial", notRead: unreadComparisons };
   const verdict: Verdict =
     !adequate || armGap
       ? "not_satisfied"
-      : arms.status === "complete" ||
+      : comparisons.status === "partial"
+        ? "undetermined"
+        : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")
         ? "satisfied"
         : "undetermined";
@@ -614,7 +632,7 @@ export async function evaluateSpecification(
         verified: verifiedEffects.has(tag),
       })),
     },
-    measures: { arms, rules: rulesMeasure },
+    measures: { arms, rules: rulesMeasure, comparisons },
     adequate: adequate && !armGap,
     verdict,
   };

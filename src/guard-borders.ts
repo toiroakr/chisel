@@ -1,7 +1,13 @@
 import type { AnyImplementation, ComparisonReached } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
-import { bordersOf, integerCarrier, normalize, numberCarrier } from "./border.js";
+import {
+  bordersOf,
+  integerCarrier,
+  nanosecondCarrier,
+  normalize,
+  numberCarrier,
+} from "./border.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf } from "./partition.js";
 import type { CompareRule, Rule, Term } from "./rule.js";
@@ -299,31 +305,29 @@ function between(
     };
   });
   const [first, second] = sides as [(typeof sides)[number], (typeof sides)[number]];
-  const carrier =
-    first.kind === "integer" && second.kind === "integer"
-      ? integerCarrier
-      : (first.kind === "integer" || first.kind === "number") &&
-          (second.kind === "integer" || second.kind === "number")
-        ? numberCarrier
-        : undefined;
-  if (carrier === undefined) {
+  const carrier = differenceCarrier(first.kind, second.kind);
+  if (carrier === undefined || rule.operator === "==" || rule.operator === "!=") {
     return [];
   }
+  const instants = carrier === nanosecondCarrier;
   const difference: CompareRule = {
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),
-    right: 0,
+    right: instants ? 0n : 0,
   };
   const borders = bordersOf([difference], () => carrier, {
     source: "guard",
     describe: () => describeRule(rule, label),
     admits: () => true,
   });
-  const read = (side: (typeof sides)[number], scopeValue: unknown): number | undefined => {
+  const read = (side: (typeof sides)[number], scopeValue: unknown): number | bigint | undefined => {
     const value = readOperand(side.term, scopeValue);
     if (value === undefined) {
       return undefined;
+    }
+    if (instants) {
+      return (value as { readonly epochNanoseconds: bigint }).epochNanoseconds;
     }
     return side.measure === "length" ? sizeOf(value) : (value as number);
   };
@@ -334,7 +338,7 @@ function between(
     coordinateOf: reached => {
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
-      return a === undefined || b === undefined ? undefined : a - b;
+      return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
     },
     compose: (given, coordinate) => {
       const moved = at(first.path);
@@ -342,10 +346,83 @@ function between(
       if (moved === undefined || other === undefined) {
         return undefined;
       }
+      if (instants) {
+        const shifted = (other as { add(duration: object): unknown }).add({
+          nanoseconds: Number(coordinate as bigint),
+        });
+        return moved.write(given, first.measure, shifted);
+      }
       const base = second.measure === "length" ? sizeOf(other) : (other as number);
       return moved.write(given, first.measure, base + (coordinate as number));
     },
   }));
+}
+
+function differenceCarrier(
+  first: string | undefined,
+  second: string | undefined,
+): Carrier | undefined {
+  const numeric = (kind: string | undefined) => kind === "integer" || kind === "number";
+  if (first === "integer" && second === "integer") {
+    return integerCarrier;
+  }
+  if (numeric(first) && numeric(second)) {
+    return numberCarrier;
+  }
+  return first === "instant" && second === "instant" ? nanosecondCarrier : undefined;
+}
+
+export function comparisonsNotReadOf(implementation: AnyImplementation): readonly string[] {
+  const input = implementation.behavior.input;
+  return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+    decision.kind !== "rules"
+      ? []
+      : decision.guards.flatMap(candidate =>
+          unreadIn(candidate.condition, input.variants[tag] as AnySchema, "$").map(
+            text => `${decision.id}: ${text}`,
+          ),
+        ),
+  );
+}
+
+function unreadIn(rule: Rule, scope: AnySchema, label: string): string[] {
+  switch (rule.kind) {
+    case "and":
+    case "or":
+      return rule.rules.flatMap(part => unreadIn(part, scope, label));
+    case "not":
+      return unreadIn(rule.rule, scope, label);
+    case "all":
+    case "any": {
+      const of = termData(rule.of).path;
+      const collection = schemaAt(scope, of);
+      return collection?.kind === "array"
+        ? unreadIn(
+            rule.each,
+            (collection as ArraySchema<unknown>).element,
+            `${label}${of.map(key => `.${key}`).join("")}[]`,
+          )
+        : [describeRule(rule, label)];
+    }
+    case "compare": {
+      const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
+      const kinds = terms.map(term => {
+        const { path, measure } = termData(term);
+        return measure === "length" ? "integer" : schemaAt(scope, path)?.kind;
+      });
+      const readable =
+        terms.length === 2
+          ? rule.operator === "==" ||
+            rule.operator === "!=" ||
+            differenceCarrier(kinds[0], kinds[1]) !== undefined
+          : kinds[0] === "boolean" ||
+            kinds[0] === "sum" ||
+            kinds[0] === "literal" ||
+            (kinds[0] !== undefined &&
+              carrierOf({ kind: kinds[0] } as AnySchema, "value") !== undefined);
+      return readable ? [] : [describeRule(rule, label)];
+    }
+  }
 }
 
 function schemaAt(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {

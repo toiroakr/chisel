@@ -13,8 +13,10 @@ import {
   gt,
   guard,
   implement,
+  instant,
   integer,
   le,
+  lt,
   ne,
   number,
   object,
@@ -444,5 +446,61 @@ describe("borders of a rule that names one value", () => {
     );
 
     expect(report.partitions).toMatchObject([{ missing: ["v < 10", "v = 10", "10 < v"] }]);
+  });
+});
+
+describe("comparisons Chisel could not read", () => {
+  it("reads two instants on their difference in nanoseconds", async () => {
+    const 比べる = behavior({
+      name: "比べる",
+      input: sum("状態", { 入力済み: object({ 開始: instant(), 終了: instant() }) }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const 順序 = implement(比べる, {
+      cases: {
+        入力済み: rules(
+          "順序",
+          入力 => [guard(lt(入力.開始, 入力.終了), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "順序", examples: examples(比べる, []), implementation: 順序 }),
+    );
+
+    expect(report.borders[0]!.points.map(point => point.relation)).toStrictEqual([
+      "= -1",
+      "= 0",
+      "< -1",
+      "> 0",
+    ]);
+  });
+
+  it("names a comparison it drew no border for and leaves the verdict undetermined", async () => {
+    const 比べる = behavior({
+      name: "比べる",
+      input: sum("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const 並び = implement(比べる, {
+      cases: {
+        入力済み: rules(
+          "並び",
+          入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "並び", examples: examples(比べる, []), implementation: 並び }),
+    );
+
+    expect(report.measures.comparisons).toStrictEqual({
+      status: "partial",
+      notRead: ["並び: $.姓 < $.名"],
+    });
   });
 });

@@ -140,6 +140,11 @@ function formatReport(report: AdequacyReport): string {
     ...formatArms(report.measures.arms),
     `  道筋                 ${formatMeasure(report.measures.rules)}`,
     ...formatRules(report.measures.rules),
+    `  比較                 ${
+      report.measures.comparisons.status === "complete"
+        ? "すべて読めた (complete)"
+        : `一部のみ (partial); 読めない比較: ${report.measures.comparisons.notRead.join(", ")}`
+    }`,
   ];
 
   for (const row of report.unanswered) {

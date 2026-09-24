@@ -92,6 +92,7 @@ export type {
   AdequacyReport,
   ArmCoverage,
   BorderCoverage,
+  ComparisonsMeasure,
   ConformanceSubject,
   ControlGap,
   Coverage,
