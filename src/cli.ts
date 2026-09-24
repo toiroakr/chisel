@@ -135,6 +135,7 @@ function formatReport(report: AdequacyReport): string {
     formatCoverage("作用variant", report.effects),
     ...formatPartitions(report.partitions),
     ...formatBorders(report.borders),
+    ...formatPairs(report.pairs),
     ...formatEvidence("証拠（入力）", report.evidence.input, ["specified", "executed", "verified"]),
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
     ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
@@ -228,6 +229,16 @@ function formatBorders(borders: readonly BorderCoverage[]): string[] {
       ),
     ]),
   ];
+}
+
+function formatPairs(pairs: AdequacyReport["pairs"]): string[] {
+  if (pairs.length === 0) {
+    return [];
+  }
+  const counts = pairs.map(
+    pair => `${pair.positions[0]} × ${pair.positions[1]} ${pair.reached}/${pair.total}`,
+  );
+  return [`  ${padDisplay("組み合わせ (pairs)", 21)} ${counts.join(", ")}`];
 }
 
 function formatEvidence<Grade extends string>(

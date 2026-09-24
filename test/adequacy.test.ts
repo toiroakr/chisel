@@ -468,3 +468,53 @@ describe("excluded classes in the adequacy report", () => {
     ]);
   });
 });
+
+describe("pairs of classes", () => {
+  const 配送を選ぶ = behavior({
+    name: "配送を選ぶ",
+    input: sum("状態", {
+      確定済み: object({
+        ギフト: boolean(),
+        配送: sum("方法", { 宅配: object({ 置き配: boolean() }), 店頭受取: object({}) }),
+      }),
+    }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+
+  it("counts the combinations of two positions' classes the answered rows reach without asking for more", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "配送",
+        examples: examples(配送を選ぶ, [
+          example(配送を選ぶ, "ギフトを宅配で置き配", {
+            given: { 状態: "確定済み", ギフト: true, 配送: { 方法: "宅配", 置き配: true } },
+            expect: { result: {}, effects: [] },
+          }),
+        ]),
+      }),
+    );
+
+    expect(report.pairs).toStrictEqual([
+      { positions: ["@確定済み.ギフト", "@確定済み.配送"], reached: 1, total: 4 },
+      { positions: ["@確定済み.ギフト", "@確定済み.配送@宅配.置き配"], reached: 1, total: 4 },
+    ]);
+  });
+
+  it("makes no pair of positions under two different cases", async () => {
+    const 二つの状態 = behavior({
+      name: "二つの状態",
+      input: sum("状態", {
+        下書き: object({ 公開予約: boolean() }),
+        公開済み: object({ 固定表示: boolean() }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "状態", examples: examples(二つの状態, []) }),
+    );
+
+    expect(report.pairs).toStrictEqual([]);
+  });
+});

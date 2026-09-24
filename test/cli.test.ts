@@ -149,6 +149,14 @@ describe("cli run() check with classes", () => {
     );
   });
 
+  it("prints the combinations of classes as counts without asking for rows", async () => {
+    const result = await run(["check", fixture("test/fixtures/pairs.ts")]);
+
+    expect(result.stdout.join("\n")).toMatch(
+      /^  組み合わせ \(pairs\) +@入力済み\.ギフト × @入力済み\.速達 1\/4$/m,
+    );
+  });
+
   it("prints the verdict in both words", async () => {
     expect(await report()).toMatch(/^充足度: 不完全 \(not_satisfied\)$/m);
   });

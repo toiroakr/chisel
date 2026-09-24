@@ -110,6 +110,7 @@ export type {
   GenerationReport,
   InputCaseEvidence,
   Measure,
+  PairCount,
   PartitionCoverage,
   PendingDecision,
   ResultCaseEvidence,

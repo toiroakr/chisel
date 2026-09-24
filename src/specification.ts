@@ -125,6 +125,7 @@ export interface AdequacyReport {
   readonly failures: readonly ExampleFailure[];
   readonly partitions: readonly PartitionCoverage[];
   readonly borders: readonly BorderCoverage[];
+  readonly pairs: readonly PairCount[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -198,6 +199,12 @@ export interface ResultCaseEvidence {
   readonly specified: boolean;
   readonly observed: boolean;
   readonly verified: boolean;
+}
+
+export interface PairCount {
+  readonly positions: readonly [string, string];
+  readonly reached: number;
+  readonly total: number;
 }
 
 export interface BorderCoverage {
@@ -650,6 +657,7 @@ export async function evaluateSpecification(
     failures,
     partitions,
     borders,
+    pairs: countPairs(positions, answeredGivens),
     evidence: {
       input: definition.input.variantTags.map(tag => ({
         case: tag,
@@ -882,6 +890,52 @@ export async function verifyConformance<B extends AnyBehavior>(
     }
   }
   return failures;
+}
+
+function countPairs(positions: readonly Position[], givens: readonly unknown[]): PairCount[] {
+  const divided = positions.flatMap(position =>
+    position.kind === "divided" ? [position] : [],
+  );
+  const pairs: PairCount[] = [];
+  divided.forEach((left, index) => {
+    for (const right of divided.slice(index + 1)) {
+      if (!combine(left.path, right.path)) {
+        continue;
+      }
+      const reached = new Set(
+        givens.flatMap(given =>
+          left
+            .classify(given)
+            .flatMap(first => right.classify(given).map(second => `${first}\u0000${second}`)),
+        ),
+      );
+      const usable = (position: typeof left) =>
+        position.classes.filter(name => !position.excluded.includes(name)).length;
+      pairs.push({
+        positions: [left.path, right.path],
+        reached: reached.size,
+        total: usable(left) * usable(right),
+      });
+    }
+  });
+  return pairs;
+}
+
+function combine(left: string, right: string): boolean {
+  if (right.startsWith(`${left}@`) || left.startsWith(`${right}@`)) {
+    return false;
+  }
+  const narrowings = (path: string) =>
+    [...path.matchAll(/@([^.@\[\]{}?]+)/g)].map(found => ({
+      before: path.slice(0, found.index),
+      tag: found[1],
+    }));
+  const rightNarrowings = narrowings(right);
+  return narrowings(left).every(narrowing =>
+    rightNarrowings.every(
+      other => other.before !== narrowing.before || other.tag === narrowing.tag,
+    ),
+  );
 }
 
 function measureRules(
