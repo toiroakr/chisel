@@ -107,6 +107,14 @@ describe("chisel check with a way no row can take", () => {
   });
 });
 
+describe("chisel check with an input case the input sum refuses", () => {
+  it("prints the case as excluded beside the input coverage", async () => {
+    const result = await run(["check", fixture("test/fixtures/refused-case.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/^  入力variant +0\/1; 未網羅 入力済み; 除外 廃止 \(excluded\)$/m);
+  });
+});
+
 describe("chisel generate", () => {
   it("prints ready-to-paste example rows for uncovered input variants", async () => {
     const result = await run([

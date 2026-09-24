@@ -82,7 +82,9 @@ function underCases(
   path: string,
   focus: Focus,
   reading: Reading,
+  inherited: readonly Rule[] = [],
 ): Position[] {
+  const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
   return schema.variantTags.flatMap(tag =>
     fieldsOf(schema.variants[tag] as ObjectSchema<ObjectShape>, `${path}@${tag}`, {
       reach: given => focus.reach(given).filter(value => tagOf(schema, value) === tag),
@@ -90,7 +92,17 @@ function underCases(
         focus.update(given, value =>
           change(tagOf(schema, value) === tag ? value : schema.placeholderFor(tag)),
         ),
-    }, reading),
+    }, reading, rules),
+  );
+}
+
+export function excludedCases(schema: AnySumSchema, inherited: readonly Rule[] = []): string[] {
+  const rules = [...schema.invariants.flatMap(conjuncts), ...inherited].filter(rule => {
+    const termPath = boundTermPath(rule);
+    return termPath?.length === 1 && termPath[0] === schema.discriminant;
+  });
+  return schema.variantTags.filter(tag =>
+    rules.some(rule => !holds(rule, { [schema.discriminant]: tag })),
   );
 }
 
@@ -222,7 +234,7 @@ function positionAt(
           sample: className => ({ [schema.discriminant]: className }),
         },
       ),
-      ...underCases(schema, path, focus, reading),
+      ...underCases(schema, path, focus, reading, inherited),
     ];
   }
   return [

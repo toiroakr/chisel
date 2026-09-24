@@ -34,7 +34,7 @@ import { feasibilityOf } from "./feasibility.js";
 import type { Feasibility } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
-import { coordinatesIn, positionsOf } from "./partition.js";
+import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
 import type { AnySchema } from "./schema.js";
 
@@ -251,6 +251,7 @@ export type PartitionCoverage =
 export interface Coverage {
   readonly covered: readonly string[];
   readonly missing: readonly string[];
+  readonly excluded: readonly string[];
   readonly total: number;
 }
 
@@ -565,7 +566,8 @@ export async function evaluateSpecification(
         )),
   ];
 
-  const input = coverage(definition.input.variantTags, coveredInputs);
+  const refusedInputs = excludedCases(definition.input);
+  const input = coverage(definition.input.variantTags, coveredInputs, refusedInputs);
   const result = isSumSchema(definition.result)
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
@@ -745,7 +747,7 @@ export async function evaluateSpecification(
     pairs: countPairs(pairablesOf(positions, guardPartitions), answeredGivens),
     fakeIssues: fakeIssues.map(item => item.issue),
     evidence: {
-      input: definition.input.variantTags.map(tag => ({
+      input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,
         specified: coveredInputs.has(tag),
         executed: executedInputs.has(tag),
@@ -816,7 +818,10 @@ export function generationReport(
       notComposed.push(`${row.name}: ${parsed.issues[0]!.message}`);
     }
   };
-  for (const tag of definition.input.variantTags.filter(tag => !existing.has(tag))) {
+  const refused = excludedCases(definition.input);
+  for (const tag of definition.input.variantTags.filter(
+    tag => !existing.has(tag) && !refused.includes(tag),
+  )) {
     offer({
       name: `${definition.name}: ${tag}`,
       given: definition.input.placeholderFor(tag),
@@ -1234,10 +1239,16 @@ function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnyS
   return implementation.behavior.input.variants[tag] as AnySchema;
 }
 
-function coverage(all: readonly string[], covered: ReadonlySet<string>): Coverage {
+function coverage(
+  all: readonly string[],
+  covered: ReadonlySet<string>,
+  excluded: readonly string[] = [],
+): Coverage {
+  const counted = all.filter(value => !excluded.includes(value));
   return {
-    covered: all.filter(value => covered.has(value)),
-    missing: all.filter(value => !covered.has(value)),
-    total: all.length,
+    covered: counted.filter(value => covered.has(value)),
+    missing: counted.filter(value => !covered.has(value)),
+    excluded: all.filter(value => excluded.includes(value)),
+    total: counted.length,
   };
 }

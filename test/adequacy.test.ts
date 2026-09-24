@@ -8,11 +8,13 @@ import {
   eq,
   examples,
   ge,
+  generationReport,
   guard,
   implement,
   integer,
   le,
   length,
+  ne,
   object,
   optional,
   rules,
@@ -631,5 +633,39 @@ describe("a guard threshold interval the invariants leave empty", () => {
         excluded: ["100000 < v <= 50"],
       },
     ]);
+  });
+});
+
+describe("an input case the invariants of the input sum refuse", () => {
+  const 注文を処理する = behavior({
+    name: "注文を処理する",
+    input: sum("状態", {
+      入力済み: object({}),
+      廃止: object({}),
+    }).invariant(v => ne(v.状態, "廃止")),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+
+  it("is excluded from the input cases, neither covered nor missing", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "処理", examples: examples(注文を処理する, []) }),
+    );
+
+    expect(report.input).toStrictEqual({
+      covered: [],
+      missing: ["入力済み"],
+      excluded: ["廃止"],
+      total: 1,
+    });
+  });
+
+  it("is neither offered a row nor named as a row generate could not compose", () => {
+    const report = generationReport(注文を処理する);
+
+    expect({
+      rows: report.rows.map(row => row.name),
+      notComposed: report.notComposed,
+    }).toStrictEqual({ rows: ["注文を処理する: 入力済み"], notComposed: [] });
   });
 });

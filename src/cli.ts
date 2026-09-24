@@ -358,11 +358,11 @@ function formatCoverage(
   label: string,
   coverage: AdequacyReport["input"],
 ): string {
-  const suffix =
-    coverage.missing.length === 0
-      ? ""
-      : `; 未網羅 ${coverage.missing.join(", ")}`;
-  return `  ${label.padEnd(19)} ${coverage.covered.length}/${coverage.total}${suffix}`;
+  const missing =
+    coverage.missing.length === 0 ? "" : `; 未網羅 ${coverage.missing.join(", ")}`;
+  const excluded =
+    coverage.excluded.length === 0 ? "" : `; 除外 ${coverage.excluded.join(", ")} (excluded)`;
+  return `  ${label.padEnd(19)} ${coverage.covered.length}/${coverage.total}${missing}${excluded}`;
 }
 
 function formatGeneratedExamples(

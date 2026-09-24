@@ -791,7 +791,7 @@ describe("coverage-driven adequacy vetoes", () => {
 
     const report = await evaluateSpecification(specification);
 
-    expect(report.result).toStrictEqual({ covered: [], missing: [], total: 0 });
+    expect(report.result).toStrictEqual({ covered: [], missing: [], excluded: [], total: 0 });
     expect(report.adequate).toBe(true);
   });
 
@@ -851,6 +851,7 @@ describe("coverage-driven adequacy vetoes", () => {
     expect(report.result).toStrictEqual({
       covered: ["accepted"],
       missing: ["rejected"],
+      excluded: [],
       total: 2,
     });
     expect(report.failures).toStrictEqual([]);
@@ -927,6 +928,7 @@ describe("coverage-driven adequacy vetoes", () => {
     expect(report.effects).toStrictEqual({
       covered: ["notify"],
       missing: ["audit"],
+      excluded: [],
       total: 2,
     });
     expect(report.controlGaps).toStrictEqual([]);

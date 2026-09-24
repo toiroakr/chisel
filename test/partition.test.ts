@@ -281,6 +281,42 @@ describe("a border with nothing past it", () => {
   });
 });
 
+describe("invariants written on the input sum", () => {
+  it("draw their border on the field they name, under every case that has it", () => {
+    const 注文 = sum("状態", {
+      入力済み: object({ 数量: integer() }),
+      確定済み: object({ 数量: integer() }),
+    }).invariant(v => ge(v.数量, 1));
+
+    expect(
+      positionsOf(注文).map(position => ({
+        path: position.path,
+        rules: position.borders.map(border => border.rule),
+      })),
+    ).toStrictEqual([
+      { path: "@入力済み.数量", rules: ["invariant $ >= 1"] },
+      { path: "@確定済み.数量", rules: ["invariant $ >= 1"] },
+    ]);
+  });
+
+  it("are read on a sum field as well", () => {
+    const 注文 = sum("状態", {
+      入力済み: object({
+        配送: sum("方法", {
+          宅配: object({ 個数: integer() }),
+          店頭: object({ 個数: integer() }),
+        }).invariant(v => ge(v.個数, 1)),
+      }),
+    });
+
+    expect(
+      positionsOf(注文)
+        .filter(position => position.borders.length > 0)
+        .map(position => position.path),
+    ).toStrictEqual(["@入力済み.配送@宅配.個数", "@入力済み.配送@店頭.個数"]);
+  });
+});
+
 describe("bounds that leave nothing admitted", () => {
   it("excludes every point of two bounds that admit no value between them", () => {
     const [position] = positionsOf(
