@@ -54,6 +54,7 @@ export {
   guard,
   implement,
   isBehavior,
+  match,
   pending,
   rules,
   runImplementation,
@@ -73,6 +74,8 @@ export type {
   Guard,
   Implementation,
   ImplementationCases,
+  Match,
+  Otherwise,
   Pending,
   RulesDecision,
 } from "./behavior.js";

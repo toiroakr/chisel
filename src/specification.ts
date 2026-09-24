@@ -12,7 +12,7 @@ import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
 import { comparisonsNotReadOf, guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
 import { comparisonsReached, runImplementation, runTraced } from "./behavior.js";
-import { describeRule } from "./rule.js";
+import { describeRule, describeTerm } from "./rule.js";
 import type { PointRole } from "./border.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
@@ -132,7 +132,7 @@ export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 export interface ArmCoverage {
   readonly decision: string;
   readonly guard: string;
-  readonly arm: "holds" | "else";
+  readonly arm: string;
   readonly status: "met" | "gap" | "answer owed";
 }
 
@@ -823,24 +823,40 @@ function measureArms(
   );
   const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
-  const arms = decisions.flatMap(decision =>
-    decision.kind !== "rules"
-      ? []
-      : decision.guards.flatMap((candidate, index) =>
-          (["holds", "else"] as const).map(
+  const arms = decisions.flatMap(decision => {
+    if (decision.kind !== "rules") {
+      return [];
+    }
+    const statusOf = (index: number, arm: string): ArmCoverage["status"] =>
+      took(met, decision.id, index, arm)
+        ? "met"
+        : took(owed, decision.id, index, arm)
+          ? "answer owed"
+          : "gap";
+    const guarded = decision.guards.flatMap((candidate, index) =>
+      (["holds", "else"] as const).map(
+        (arm): ArmCoverage => ({
+          decision: decision.id,
+          guard: describeRule(candidate.condition),
+          arm,
+          status: statusOf(index, arm),
+        }),
+      ),
+    );
+    const { otherwise } = decision;
+    const matched =
+      typeof otherwise === "function"
+        ? []
+        : Object.keys(otherwise.cases).map(
             (arm): ArmCoverage => ({
               decision: decision.id,
-              guard: describeRule(candidate.condition),
+              guard: `match ${describeTerm(otherwise.on)}`,
               arm,
-              status: took(met, decision.id, index, arm)
-                ? "met"
-                : took(owed, decision.id, index, arm)
-                  ? "answer owed"
-                  : "gap",
+              status: statusOf(decision.guards.length, arm),
             }),
-          ),
-        ),
-  );
+          );
+    return [...guarded, ...matched];
+  });
   if (notRead.length === 0) {
     return { status: "complete", arms };
   }

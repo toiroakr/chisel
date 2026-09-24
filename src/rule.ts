@@ -393,6 +393,10 @@ function ordering(left: unknown, right: unknown): number {
   return Number.NaN;
 }
 
+export function describeTerm(term: Term<unknown>, path = "$"): string {
+  return describeOperand(term, path);
+}
+
 function describeOperand(operand: unknown, path: string): string {
   if (!isTerm(operand)) {
     return typeof operand === "string" ? JSON.stringify(operand) : String(operand);

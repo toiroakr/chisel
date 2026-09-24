@@ -12,6 +12,7 @@ import {
   integer,
   ge,
   le,
+  match,
   object,
   or,
   rules,
@@ -265,5 +266,67 @@ describe("rules of a decision", () => {
     );
 
     expect(report.measures.rules).toMatchObject({ rules: [{ way: "otherwise" }] });
+  });
+});
+
+describe("match over a sum field", () => {
+  const 送料を決める = behavior({
+    name: "送料を決める",
+    input: sum("状態", {
+      確定済み: object({
+        配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
+      }),
+    }),
+    result: object({ 送料: integer() }),
+    effects: sum("種類", {}),
+  });
+  const 方法で決める = implement(送料を決める, {
+    cases: {
+      確定済み: rules(
+        "方法で決める",
+        () => [],
+        match(注文 => 注文.配送.方法, {
+          宅配: () => ({ result: { 送料: 500 }, effects: [] }),
+          店頭受取: () => ({ result: { 送料: 0 }, effects: [] }),
+        }),
+      ),
+    },
+  });
+  const 宅配 = example(送料を決める, "宅配", {
+    given: { 状態: "確定済み", 配送: { 方法: "宅配" } },
+    expect: { result: { 送料: 500 }, effects: [] },
+  });
+
+  it("answers with the case the matched value is", async () => {
+    expect(
+      await runImplementation(方法で決める, { 状態: "確定済み", 配送: { 方法: "店頭受取" } }),
+    ).toStrictEqual({ result: { 送料: 0 }, effects: [] });
+  });
+
+  it("counts every case of a match as an arm", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "送料", examples: examples(送料を決める, [宅配]), implementation: 方法で決める }),
+    );
+
+    expect(report.measures.arms).toStrictEqual({
+      status: "complete",
+      arms: [
+        { decision: "方法で決める", guard: "match $.配送.方法", arm: "宅配", status: "met" },
+        { decision: "方法で決める", guard: "match $.配送.方法", arm: "店頭受取", status: "gap" },
+      ],
+    });
+  });
+
+  it("ends a way at the case it went to", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "送料", examples: examples(送料を決める, [宅配]), implementation: 方法で決める }),
+    );
+
+    expect(report.measures.rules).toMatchObject({
+      rules: [
+        { way: "$.配送.方法 is 宅配", status: "met" },
+        { way: "$.配送.方法 is 店頭受取", status: "gap" },
+      ],
+    });
   });
 });

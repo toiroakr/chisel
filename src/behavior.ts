@@ -9,11 +9,11 @@ import type {
   CompareRule,
   ComparisonObserver,
   Distinction,
-  DistinctionObserver,
   Rule,
+  Term,
   TermOf,
 } from "./rule.js";
-import { holds, selfTerm } from "./rule.js";
+import { holds, readOperand, selfTerm } from "./rule.js";
 import { tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
@@ -39,13 +39,29 @@ export interface Guard<Input, Result, Effect> {
   orElse(input: Input): Execution<Result, Effect>;
 }
 
+export type Handler<Input, Result, Effect> = {
+  bivariant(input: Input): Execution<Result, Effect>;
+}["bivariant"];
+
+export interface Match<Input, Result, Effect> {
+  readonly kind: "match";
+  readonly on: Term<string>;
+  readonly cases: Readonly<Record<string, Handler<Input, Result, Effect>>>;
+}
+
+export type Otherwise<Input, Result, Effect> =
+  | Handler<Input, Result, Effect>
+  | Match<Input, Result, Effect>;
+
 export interface RulesDecision<Input, Result, Effect> {
   readonly kind: "rules";
   readonly id: string;
   readonly dependsOn?: readonly string[];
   readonly guards: readonly Guard<Input, Result, Effect>[];
-  otherwise(input: Input): Execution<Result, Effect>;
+  readonly otherwise: Otherwise<Input, Result, Effect>;
 }
+
+export type Branch = Distinction | Match<unknown, unknown, unknown>;
 
 export interface ControlPolicy {
   readonly execution: "direct" | "outbox" | "queue";
@@ -125,12 +141,19 @@ export function guard<Input, Result, Effect>(
   return { kind: "guard", condition, orElse };
 }
 
+export function match<Input, Result, Effect>(
+  select: (input: TermOf<Input>) => Term<string>,
+  cases: Readonly<Record<string, (input: Input) => Execution<Result, Effect>>>,
+): Match<Input, Result, Effect> {
+  return { kind: "match", on: select(selfTerm<Input>()), cases };
+}
+
 export function rules<Input, Result, Effect>(
   id: string,
   build: (
     input: TermOf<NoInfer<Input>>,
   ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>>[],
-  otherwise: (input: NoInfer<Input>) => Execution<NoInfer<Result>, NoInfer<Effect>>,
+  otherwise: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>>,
 ): RulesDecision<Input, Result, Effect> {
   return { kind: "rules", id, guards: build(selfTerm<NoInfer<Input>>()), otherwise };
 }
@@ -190,13 +213,13 @@ export interface ComparisonReached {
 
 export interface WayTaken {
   readonly decision: string;
-  readonly steps: readonly { readonly distinction: Distinction; readonly outcome: boolean }[];
+  readonly steps: readonly { readonly distinction: Branch; readonly outcome: boolean | string }[];
 }
 
 export interface ArmTaken {
   readonly decision: string;
   readonly guard: number;
-  readonly arm: "holds" | "else";
+  readonly arm: string;
 }
 
 export async function runImplementation<B extends AnyBehavior>(
@@ -238,7 +261,7 @@ export async function runTraced<B extends AnyBehavior>(
 
   const arms: ArmTaken[] = [];
   const comparisons: ComparisonReached[] = [];
-  const steps: { distinction: Distinction; outcome: boolean }[] = [];
+  const steps: { distinction: Branch; outcome: boolean | string }[] = [];
   const execution =
     selected.kind === "rules"
       ? decide(
@@ -300,7 +323,7 @@ function decide<Result, Effect>(
   input: unknown,
   arms: ArmTaken[],
   observe: ComparisonObserver,
-  distinguish: DistinctionObserver,
+  distinguish: (distinction: Branch, outcome: boolean | string) => void,
 ): Execution<Result, Effect> {
   for (const [index, candidate] of decision.guards.entries()) {
     if (!holds(candidate.condition, input, observe, distinguish)) {
@@ -309,7 +332,18 @@ function decide<Result, Effect>(
     }
     arms.push({ decision: decision.id, guard: index, arm: "holds" });
   }
-  return decision.otherwise(input);
+  const { otherwise } = decision;
+  if (typeof otherwise === "function") {
+    return otherwise(input);
+  }
+  const tag = readOperand(otherwise.on, input);
+  const selected = typeof tag === "string" ? otherwise.cases[tag] : undefined;
+  if (selected === undefined) {
+    throw new SpecificationError(`No case of ${decision.id} for ${String(tag)}`);
+  }
+  arms.push({ decision: decision.id, guard: decision.guards.length, arm: tag as string });
+  distinguish(otherwise as Match<unknown, unknown, unknown>, tag as string);
+  return selected(input);
 }
 
 function formatIssues(

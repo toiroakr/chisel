@@ -1,15 +1,15 @@
-import type { RulesDecision } from "./behavior.js";
-import type { Distinction, Rule } from "./rule.js";
-import { describeRule } from "./rule.js";
+import type { Branch, RulesDecision } from "./behavior.js";
+import type { Rule } from "./rule.js";
+import { describeRule, describeTerm } from "./rule.js";
 
 export interface Step {
-  readonly distinction: Distinction;
-  readonly outcome: boolean;
+  readonly distinction: Branch;
+  readonly outcome: boolean | string;
 }
 
 export interface Way {
   readonly steps: readonly Step[];
-  readonly exit: number | "otherwise";
+  readonly exit: number | "otherwise" | "case";
 }
 
 interface Outcome {
@@ -21,7 +21,13 @@ export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): read
   const from = (index: number, before: readonly Step[]): readonly Way[] => {
     const candidate = decision.guards[index];
     if (candidate === undefined) {
-      return [{ steps: before, exit: "otherwise" }];
+      const { otherwise } = decision;
+      return typeof otherwise === "function"
+        ? [{ steps: before, exit: "otherwise" }]
+        : Object.keys(otherwise.cases).map(tag => ({
+            steps: [...before, { distinction: otherwise, outcome: tag }],
+            exit: "case" as const,
+          }));
     }
     return outcomesOf(candidate.condition).flatMap(outcome => {
       const steps = [...before, ...outcome.steps];
@@ -43,8 +49,15 @@ export function sameSteps(left: readonly Step[], right: readonly Step[]): boolea
 
 export function describeWay(way: Way): string {
   const steps = way.steps
-    .map(step => `${describeRule(step.distinction)} ${step.outcome ? "holds" : "fails"}`)
+    .map(step =>
+      step.distinction.kind === "match"
+        ? `${describeTerm(step.distinction.on)} is ${String(step.outcome)}`
+        : `${describeRule(step.distinction)} ${step.outcome ? "holds" : "fails"}`,
+    )
     .join(", ");
+  if (way.exit === "case") {
+    return steps;
+  }
   const exit = way.exit === "otherwise" ? "otherwise" : `else of guard ${way.exit + 1}`;
   return steps === "" ? exit : `${steps} → ${exit}`;
 }
