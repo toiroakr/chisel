@@ -248,7 +248,7 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
   "!=": "!=",
 };
 
-function normalize(
+export function normalize(
   rule: Rule,
 ): { operator: Operator; bound: unknown; measure: Border["measure"] } | undefined {
   if (rule.kind !== "compare") {

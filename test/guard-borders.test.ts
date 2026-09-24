@@ -9,6 +9,7 @@ import {
   examples,
   ge,
   generateExamples,
+  gt,
   guard,
   implement,
   integer,
@@ -19,6 +20,7 @@ import {
   string,
   sum,
 } from "../src/index.js";
+import type { Rule, TermOf } from "../src/index.js";
 
 const 注文を受け付ける = behavior({
   name: "注文を受け付ける",
@@ -280,6 +282,92 @@ describe("generateExamples for guard borders", () => {
         name: "注文を確定する: @商品あり.明細[].数量 − @商品あり.明細[].在庫数 OUT (> 1)",
         given: { 状態: "商品あり", 明細: [{ 数量: 5, 在庫数: 3 }] },
       },
+    ]);
+  });
+});
+
+describe("classes a guard's threshold divides a position into", () => {
+  it("cuts the range the invariants admit at the guard's threshold", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(注文を受け付ける, [合計で(100000)]),
+        implementation: 上限で分ける,
+      }),
+    );
+
+    expect(report.partitions).toStrictEqual([
+      {
+        path: "@入力済み.合計",
+        kind: "divided",
+        covered: ["0 <= v <= 100000"],
+        missing: ["100000 < v"],
+        excluded: [],
+      },
+    ]);
+  });
+
+  const 点数を判定する = behavior({
+    name: "点数を判定する",
+    input: sum("状態", { 採点済み: object({ 点数: integer() }) }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+  const 判定 = (guards: (入力: TermOf<{ readonly 点数: number }>) => readonly Rule[]) =>
+    implement(点数を判定する, {
+      cases: {
+        採点済み: rules(
+          "判定",
+          入力 => guards(入力).map(condition => guard(condition, () => ({ result: {}, effects: [] }))),
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+  const partitionsOf = async (implementation: ReturnType<typeof 判定>) =>
+    (
+      await evaluateSpecification(
+        defineSpecification({ name: "判定", examples: examples(点数を判定する, []), implementation }),
+      )
+    ).partitions;
+
+  it("leaves a side open where no invariant bounds it", async () => {
+    expect(await partitionsOf(判定(入力 => [le(入力.点数, 59)]))).toMatchObject([
+      { missing: ["v <= 59", "59 < v"] },
+    ]);
+  });
+
+  it("merges the thresholds of several guards on one position into one partition", async () => {
+    expect(
+      await partitionsOf(判定(入力 => [gt(入力.点数, 10), gt(入力.点数, 20)])),
+    ).toMatchObject([{ missing: ["v <= 10", "10 < v <= 20", "20 < v"] }]);
+  });
+
+  it("divides neither position a guard compares with each other", async () => {
+    const 比べる = behavior({
+      name: "比べる",
+      input: sum("状態", { 入力済み: object({ 数量: integer(), 在庫数: integer() }) }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "比較",
+        examples: examples(比べる, []),
+        implementation: implement(比べる, {
+          cases: {
+            入力済み: rules(
+              "在庫内か",
+              入力 => [guard(le(入力.数量, 入力.在庫数), () => ({ result: {}, effects: [] }))],
+              () => ({ result: {}, effects: [] }),
+            ),
+          },
+        }),
+      }),
+    );
+
+    expect(report.partitions.map(partition => partition.kind)).toStrictEqual([
+      "not-derivable",
+      "not-derivable",
     ]);
   });
 });

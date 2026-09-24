@@ -9,7 +9,7 @@ import type {
   Implementation,
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached } from "./behavior.js";
-import { guardBordersOf } from "./guard-borders.js";
+import { guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
 import { comparisonsReached, runImplementation, runTraced } from "./behavior.js";
 import { describeRule } from "./rule.js";
 import type { PointRole } from "./border.js";
@@ -444,7 +444,23 @@ export async function evaluateSpecification(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
+  const guardPartitions =
+    specification.implementation === undefined
+      ? []
+      : guardPartitionsOf(specification.implementation);
   const partitions = positions.map((position, index): PartitionCoverage => {
+    const drawn = guardPartitions.find(partition => partition.path === position.path);
+    if (drawn !== undefined && position.kind !== "divided") {
+      const values = answeredGivens.flatMap(given => position.valuesIn(given));
+      const names = drawn.classes.map(item => item.name);
+      const reached = new Set(
+        drawn.classes
+          .filter(item => values.some(value => value !== undefined && item.contains(value)))
+          .map(item => item.name),
+      );
+      const { covered, missing } = coverage(names, reached);
+      return { path: position.path, kind: "divided", covered, missing, excluded: [] };
+    }
     if (position.kind !== "divided") {
       return { path: position.path, kind: position.kind };
     }
