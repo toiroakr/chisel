@@ -142,3 +142,17 @@ describe("combined conditions", () => {
     ]);
   });
 });
+
+describe("placeholder under a combined invariant", () => {
+  it("satisfies one side of an or()", () => {
+    const 端 = integer().invariant(v => or(ge(v, 5), le(v, -5)));
+
+    expect(端.parse(端.placeholder()).success).toBe(true);
+  });
+
+  it("moves one field to satisfy a rule relating it to another", () => {
+    const 期間 = object({ 開始: instant(), 終了: instant() }).invariant(v => lt(v.開始, v.終了));
+
+    expect(期間.parse(期間.placeholder()).success).toBe(true);
+  });
+});

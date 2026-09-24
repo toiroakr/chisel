@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  generationReport,
+  not,
   array,
   behavior,
   boolean,
@@ -205,5 +207,21 @@ describe("generateExamples and excluded classes", () => {
       { 状態: "入力済み", 見出し: "m" },
       { 状態: "入力済み", 見出し: "ma" },
     ]);
+  });
+});
+
+describe("rows generate cannot make valid", () => {
+  it("names a row whose composed value the input schema refuses instead of offering it", () => {
+    const 数える = behavior({
+      name: "数える",
+      input: sum("状態", { 入力済み: object({ 個数: integer().invariant(v => not(eq(v, 0))) }) }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+
+    expect(generationReport(数える)).toStrictEqual({
+      rows: [],
+      notComposed: ["数える: 入力済み: Invariant violated: not($.個数 == 0)"],
+    });
   });
 });

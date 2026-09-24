@@ -772,13 +772,23 @@ export function generationReport(
     origins.find(given => position.valuesIn(given).length > 0) ??
     definition.input.placeholder();
 
-  const generated: GeneratedExample[] = definition.input.variantTags
-    .filter(tag => !existing.has(tag))
-    .map(tag => ({
+  const generated: GeneratedExample[] = [];
+  const notComposed: string[] = [];
+  const offer = (row: GeneratedExample): void => {
+    const parsed = definition.input.parse(row.given);
+    if (parsed.success) {
+      generated.push(row);
+    } else {
+      notComposed.push(`${row.name}: ${parsed.issues[0]!.message}`);
+    }
+  };
+  for (const tag of definition.input.variantTags.filter(tag => !existing.has(tag))) {
+    offer({
       name: `${definition.name}: ${tag}`,
       given: definition.input.placeholderFor(tag),
       reason: `${tag}の期待結果を人間が決める必要があります`,
-    }));
+    });
+  }
 
   for (const position of positionsOf(definition.input)) {
     if (position.kind !== "divided") {
@@ -793,7 +803,7 @@ export function generationReport(
       );
       if (!standsIn) {
         const origin = originFor(position);
-        generated.push({
+        offer({
           name: `${definition.name}: ${position.path} = ${className}`,
           given: position.place(origin, className),
           reason: `${position.path}が${className}の期待結果を人間が決める必要があります`,
@@ -814,7 +824,7 @@ export function generationReport(
         );
         if (!standsAt) {
           const origin = originFor(position);
-          generated.push({
+          offer({
             name: `${definition.name}: ${position.path} ${point.role} (${point.relation})`,
             given: position.write(origin, border.measure, point.witness),
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
@@ -839,7 +849,7 @@ export function generationReport(
       );
       if (!standsIn) {
         const origin = originFor(position);
-        generated.push({
+        offer({
           name: `${definition.name}: ${drawn.path} = ${item.name}`,
           given: position.write(origin, "value", item.witness),
           reason: `${drawn.path}が${item.name}の期待結果を人間が決める必要があります`,
@@ -866,7 +876,7 @@ export function generationReport(
         origins.find(given => reachedBy(given).length > 0) ?? definition.input.placeholder();
       const given = drawn.compose(origin, point.witness);
       if (given !== undefined) {
-        generated.push({
+        offer({
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
           given,
           reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
@@ -876,7 +886,6 @@ export function generationReport(
     }
   }
 
-  const notComposed: string[] = [];
   for (const [tag, decision] of Object.entries(implementation?.cases ?? {})) {
     if (decision.kind !== "rules") {
       continue;
@@ -892,7 +901,7 @@ export function generationReport(
       }
       const composed = composeForWay(way, tag);
       if (composed !== undefined && takes(composed.given, way)) {
-        generated.push({
+        offer({
           name: `${definition.name}: ${decision.id} ${describeWay(way)}`,
           given: composed.given,
           reason: `${decision.id}の道筋（${describeWay(way)}）の期待結果を人間が決める必要があります`,

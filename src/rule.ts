@@ -268,13 +268,37 @@ function compares(rule: CompareRule, value: unknown, observe?: ComparisonObserve
 }
 
 export function satisfy(rule: Rule, value: unknown): unknown {
-  if (rule.kind !== "compare" || holds(rule, value)) {
+  if (holds(rule, value)) {
     return value;
   }
-  const [term, bound, operator] = isTerm(rule.left)
+  switch (rule.kind) {
+    case "and":
+      return rule.rules.reduce<unknown>((current, part) => satisfy(part, current), value);
+    case "or": {
+      for (const part of rule.rules) {
+        const moved = satisfy(part, value);
+        if (holds(rule, moved)) {
+          return moved;
+        }
+      }
+      return value;
+    }
+    case "compare":
+      return satisfyComparison(rule, value);
+    default:
+      return value;
+  }
+}
+
+function satisfyComparison(rule: CompareRule, value: unknown): unknown {
+  const [term, other, operator] = isTerm(rule.left)
     ? [rule.left, rule.right, rule.operator]
     : [rule.right, rule.left, mirrored[rule.operator]];
-  if (!isTerm(term) || isTerm(bound)) {
+  if (!isTerm(term)) {
+    return value;
+  }
+  const bound = read(other, value);
+  if (bound === undefined) {
     return value;
   }
   const target =
