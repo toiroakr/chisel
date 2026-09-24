@@ -68,7 +68,9 @@ export function ne<T extends Comparable | boolean>(
   return compare("!=", left, right);
 }
 
-export function length(of: Term<string | readonly unknown[]>): Term<number> {
+export function length(
+  of: Term<string | readonly unknown[] | Readonly<Record<string, unknown>>>,
+): Term<number> {
   return termAt(of[TERM].path, "length");
 }
 
@@ -192,6 +194,12 @@ function writeAt(
   return { ...record, [key]: writeAt(record[key], rest, change) };
 }
 
+export function sizeOf(value: unknown): number {
+  return typeof value === "string" || Array.isArray(value)
+    ? value.length
+    : Object.keys(value as object).length;
+}
+
 export function resize(current: unknown, size: number): unknown {
   if (typeof current === "string") {
     return current.length >= size ? current.slice(0, size) : current.padEnd(size, "_");
@@ -199,6 +207,16 @@ export function resize(current: unknown, size: number): unknown {
   if (Array.isArray(current)) {
     const filler = current[current.length - 1];
     return Array.from({ length: Math.max(size, 0) }, (_, index) => current[index] ?? filler);
+  }
+  if (typeof current === "object" && current !== null) {
+    const entries = Object.entries(current);
+    const filler = entries[entries.length - 1]?.[1];
+    return Object.fromEntries(
+      Array.from(
+        { length: Math.max(size, 0) },
+        (_, index) => entries[index] ?? [`<key${index + 1}>`, filler],
+      ),
+    );
   }
   return current;
 }
@@ -235,7 +253,7 @@ function read(operand: unknown, value: unknown): unknown {
   if (found === undefined || measure === "value") {
     return found;
   }
-  return (found as string | readonly unknown[]).length;
+  return sizeOf(found);
 }
 
 function ordering(left: unknown, right: unknown): number {

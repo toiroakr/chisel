@@ -79,6 +79,16 @@ describe("positionsOf", () => {
     ]);
   });
 
+  it("takes the values of a record apart as one position", () => {
+    const Cart = sum("状態", {
+      商品あり: object({ ギフト指定: record(boolean()) }),
+    });
+
+    expect(positionsOf(Cart).map(summary)).toStrictEqual([
+      { path: "@商品あり.ギフト指定{}", classes: ["true", "false"] },
+    ]);
+  });
+
   it("reports a field no rule draws a line through as not derivable", () => {
     const Cart = sum("状態", {
       商品あり: object({
@@ -93,7 +103,7 @@ describe("positionsOf", () => {
       { path: "@商品あり.カートID", kind: "not-derivable" },
       { path: "@商品あり.単価", kind: "not-derivable" },
       { path: "@商品あり.作成日時", kind: "not-derivable" },
-      { path: "@商品あり.メモ", kind: "not-derivable" },
+      { path: "@商品あり.メモ{}", kind: "not-derivable" },
     ]);
   });
 
@@ -303,5 +313,31 @@ describe("classes an invariant refuses", () => {
     ) as [DividedPosition];
 
     expect(position.excluded).toStrictEqual(["店頭受取"]);
+  });
+
+  it("draws a border on the size of a record", () => {
+    const Cart = sum("状態", {
+      商品あり: object({ 数量表: record(integer()).invariant(v => ge(length(v), 1)) }),
+    });
+
+    expect(
+      positionsOf(Cart).map(p => ({ path: p.path, rules: p.borders.map(b => b.rule) })),
+    ).toStrictEqual([
+      { path: "@商品あり.数量表", rules: ["invariant length($) >= 1"] },
+      { path: "@商品あり.数量表{}", rules: [] },
+    ]);
+  });
+
+  it("draws a border on the length of an array beside its element positions", () => {
+    const Cart = sum("状態", {
+      商品あり: object({ 明細: array(boolean()).invariant(v => ge(length(v), 1)) }),
+    });
+
+    expect(
+      positionsOf(Cart).map(p => ({ path: p.path, rules: p.borders.map(b => b.rule) })),
+    ).toStrictEqual([
+      { path: "@商品あり.明細", rules: ["invariant length($) >= 1"] },
+      { path: "@商品あり.明細[]", rules: [] },
+    ]);
   });
 });

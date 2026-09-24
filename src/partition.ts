@@ -5,6 +5,7 @@ import type {
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
+  RecordSchema,
 } from "./schema.js";
 import type { Border, Carrier } from "./border.js";
 import {
@@ -15,7 +16,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, holds, resize, stepInto } from "./rule.js";
+import { boundTermPath, holds, resize, sizeOf, stepInto } from "./rule.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -40,9 +41,7 @@ export function coordinatesIn(
   return position
     .valuesIn(given)
     .filter(value => value !== undefined)
-    .map(value =>
-      measure === "length" ? (value as string | readonly unknown[]).length : value,
-    );
+    .map(value => (measure === "length" ? sizeOf(value) : value));
 }
 
 export interface UndividedPosition {
@@ -144,7 +143,7 @@ function positionAt(
   }
   if (schema.kind === "array") {
     const element = (schema as ArraySchema<unknown>).element;
-    return positionAt(element, `${path}[]`, {
+    const elements = positionAt(element, `${path}[]`, {
       reach: given => focus.reach(given).flatMap(value => (Array.isArray(value) ? value : [])),
       update: (given, change) =>
         focus.update(given, value => {
@@ -152,6 +151,27 @@ function positionAt(
           return items.map(change);
         }),
     });
+    return withOwnBorders(path, borders, focus, elements);
+  }
+  if (schema.kind === "record") {
+    const values = positionAt((schema as RecordSchema<unknown>).value, `${path}{}`, {
+      reach: given =>
+        focus
+          .reach(given)
+          .flatMap(value =>
+            typeof value === "object" && value !== null ? Object.values(value) : [],
+          ),
+      update: (given, change) =>
+        focus.update(given, value => {
+          const entries = Object.entries((value ?? {}) as Readonly<Record<string, unknown>>);
+          const present =
+            entries.length > 0
+              ? entries
+              : [["<key>", (schema as RecordSchema<unknown>).value.placeholder()] as const];
+          return Object.fromEntries(present.map(([key, item]) => [key, change(item)]));
+        }),
+    });
+    return withOwnBorders(path, borders, focus, values);
   }
   if (schema.kind === "object") {
     return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, inherited);
@@ -184,6 +204,17 @@ function positionAt(
       write: writer(focus),
     },
   ];
+}
+
+function withOwnBorders(
+  path: string,
+  borders: readonly Border[],
+  focus: Focus,
+  inner: readonly Position[],
+): Position[] {
+  return borders.length === 0
+    ? [...inner]
+    : [{ kind: "bounded", path, borders, valuesIn: focus.reach, write: writer(focus) }, ...inner];
 }
 
 function writer(focus: Focus): Position["write"] {
