@@ -1,15 +1,20 @@
 import {
+  all,
   array,
   behavior,
   defineSpecification,
   example,
   examples,
   ge,
+  guard,
+  implement,
   integer,
+  le,
   length,
   number,
   object,
   optional,
+  rules,
   string,
   sum,
 } from "../../src/index.js";
@@ -103,7 +108,51 @@ const 具体例 = examples(注文を確定する, [
   }),
 ]);
 
+const 実装 = implement(注文を確定する, {
+  cases: {
+    空: rules(
+      "空のカートは確定しない",
+      () => [],
+      () => ({ result: { 結果: "不可", 理由: "カートが空" }, effects: [] }),
+    ),
+    商品あり: rules(
+      "在庫を確かめて確定する",
+      カート => [
+        guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+          result: { 結果: "不可", 理由: "在庫不足" },
+          effects: [],
+        })),
+      ],
+      カート => {
+        const 合計金額 = カート.明細.reduce((合計, 明細) => 合計 + 明細.数量 * 明細.単価, 0);
+        return {
+          result: { 結果: "確定", カートID: カート.カートID, 合計金額 },
+          effects: [
+            ...カート.明細.map(明細 => ({
+              種類: "在庫引当" as const,
+              商品ID: 明細.商品ID,
+              数量: 明細.数量,
+            })),
+            { 種類: "決済要求", カートID: カート.カートID, 金額: 合計金額 },
+          ],
+        };
+      },
+    ),
+    確定済み: rules(
+      "確定済みは二重に確定しない",
+      () => [],
+      () => ({ result: { 結果: "不可", 理由: "確定済み" }, effects: [] }),
+    ),
+  },
+  controls: {
+    在庫引当: { execution: "outbox", idempotency: "required", compensation: "automatic" },
+    決済要求: { execution: "queue", idempotency: "required", compensation: "manual" },
+    クーポン消費: { execution: "outbox", idempotency: "required", compensation: "automatic" },
+  },
+});
+
 export const 注文確定の仕様 = defineSpecification({
   name: "注文確定",
   examples: 具体例,
+  implementation: 実装,
 });
