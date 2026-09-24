@@ -92,9 +92,13 @@ function fieldsOf(
           focus.reach(given).map(value => (value as Readonly<Record<string, unknown>>)[key]),
         update: (given, change) =>
           focus.update(given, value => {
-            const { [key]: current, ...rest } = value as Readonly<Record<string, unknown>>;
-            const next = change(current);
-            return next === undefined ? rest : { ...rest, [key]: next };
+            const record = value as Readonly<Record<string, unknown>>;
+            const next = change(record[key]);
+            if (next === undefined) {
+              const { [key]: _removed, ...rest } = record;
+              return rest;
+            }
+            return { ...record, [key]: next };
           }),
       },
       rules.flatMap(rule => {

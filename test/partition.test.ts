@@ -341,3 +341,15 @@ describe("classes an invariant refuses", () => {
     ]);
   });
 });
+
+describe("Position.write", () => {
+  it("keeps the order of the fields it does not move", () => {
+    const [, 単価] = positionsOf(
+      sum("状態", { 商品あり: object({ 数量: integer(), 単価: integer(), 在庫数: integer() }) }),
+    );
+
+    expect(
+      Object.keys(単価!.write({ 状態: "商品あり", 数量: 1, 単価: 2, 在庫数: 3 }, "value", 0) as object),
+    ).toStrictEqual(["状態", "数量", "単価", "在庫数"]);
+  });
+});
