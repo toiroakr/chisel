@@ -2,7 +2,9 @@ import type { Temporal as TemporalTypes } from "temporal-spec";
 
 export type Comparable = number | string | TemporalTypes.Instant;
 
-const TERM = Symbol("chisel.term");
+// Symbol.for, not Symbol(): the CLI loads spec files through tsImport in a
+// separate module graph, and a per-module symbol would not recognise their terms.
+const TERM = Symbol.for("chisel.term");
 
 export interface TermData {
   readonly path: readonly string[];
