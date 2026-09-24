@@ -16,6 +16,7 @@ import {
 } from "./specification.js";
 import type {
   AdequacyReport,
+  ArmCoverage,
   BorderCoverage,
   GeneratedExample,
   Measure,
@@ -135,6 +136,7 @@ function formatReport(report: AdequacyReport): string {
     ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
     `  実装                 ${implementation}`,
     `  分岐                 ${formatMeasure(report.measures.arms)}`,
+    ...formatArms(report.measures.arms),
   ];
 
   for (const row of report.unanswered) {
@@ -237,6 +239,21 @@ function padDisplay(value: string, width: number): string {
     0,
   );
   return value + " ".repeat(Math.max(width - displayWidth, 0));
+}
+
+const armStatusLabels: Readonly<Record<ArmCoverage["status"], string>> = {
+  met: "met",
+  gap: "! 行がない (gap)",
+  "answer owed": "! 期待結果が未回答 (answer owed)",
+};
+
+function formatArms(measure: Measure): string[] {
+  if (measure.status === "unavailable") {
+    return [];
+  }
+  return measure.arms.map(
+    arm => `    ${arm.decision}: guard ${arm.guard} ${arm.arm.padEnd(5)} ${armStatusLabels[arm.status]}`,
+  );
 }
 
 function formatMeasure(measure: Measure): string {

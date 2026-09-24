@@ -90,6 +90,7 @@ export {
 } from "./specification.js";
 export type {
   AdequacyReport,
+  ArmCoverage,
   BorderCoverage,
   ConformanceSubject,
   ControlGap,

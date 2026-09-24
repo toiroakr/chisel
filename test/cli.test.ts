@@ -179,3 +179,24 @@ describe("cli run() check with borders", () => {
     ]).toStrictEqual([true, true, true, true]);
   });
 });
+
+describe("cli run() with a rules decision", () => {
+  async function output(command: "check" | "generate"): Promise<string> {
+    const result = await run([command, fixture("test/fixtures/rules.ts")]);
+    return result.stdout.join("\n");
+  }
+
+  it("prints the arms as measured and marks each one", async () => {
+    const text = await output("check");
+
+    expect([
+      /^  分岐 +計測済み \(complete\)$/m.test(text),
+      /^    在庫を確かめる: guard all\(\$\.明細, \$\.明細\[\]\.数量 <= \$\.明細\[\]\.在庫数\) holds +met$/m.test(text),
+      /^    在庫を確かめる: guard all\(\$\.明細, \$\.明細\[\]\.数量 <= \$\.明細\[\]\.在庫数\) else +! 行がない \(gap\)$/m.test(text),
+    ]).toStrictEqual([true, true, true]);
+  });
+
+  it("generates rows at the points of a guard border", async () => {
+    expect(await output("generate")).toMatch(/在庫数 OFF \(= 1\)/);
+  });
+});
