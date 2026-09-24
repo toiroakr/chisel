@@ -618,3 +618,64 @@ describe("ways no row can take", () => {
     ]);
   });
 });
+
+describe("a term from outside all read inside each", () => {
+  const 上限を守る = behavior({
+    name: "上限を守る",
+    input: sum("状態", {
+      入力済み: object({ 上限: integer(), 明細: array(object({ 数量: integer() })) }),
+    }),
+    result: sum("結果", { 受付: object({}), 超過: object({}) }),
+    effects: sum("種類", {}),
+  });
+  const 上限で断る = implement(上限を守る, {
+    cases: {
+      入力済み: rules(
+        "上限で断る",
+        注文 => [
+          guard(all(注文.明細, 行 => le(行.数量, 注文.上限)), () => ({
+            result: { 結果: "超過" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "受付" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("is read against the scope it was written in, not against the element", async () => {
+    expect(
+      await runImplementation(上限で断る, { 状態: "入力済み", 上限: 1, 明細: [{ 数量: 5 }] }),
+    ).toStrictEqual({ result: { 結果: "超過" }, effects: [] });
+  });
+
+  it("is described from the scope it was written in", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "上限", examples: examples(上限を守る, []), implementation: 上限で断る }),
+    );
+
+    expect(
+      report.measures.arms.status === "unavailable"
+        ? []
+        : report.measures.arms.arms.map(arm => arm.guard),
+    ).toStrictEqual(["all($.明細, $.明細[].数量 <= $.上限)", "all($.明細, $.明細[].数量 <= $.上限)"]);
+  });
+
+  it("draws the border between the element and the outer position", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "上限", examples: examples(上限を守る, []), implementation: 上限で断る }),
+    );
+
+    expect(
+      report.borders.filter(border => border.rule.startsWith("guard")).map(border => border.path),
+    ).toStrictEqual(["@入力済み.明細[].数量 − @入力済み.上限"]);
+  });
+
+  it("is enforced in an invariant", () => {
+    const 注文 = object({ 上限: integer(), 明細: array(integer()) }).invariant(v =>
+      all(v.明細, 行 => le(行, v.上限)),
+    );
+
+    expect(注文.parse({ 上限: 1, 明細: [5] }).success).toBe(false);
+  });
+});

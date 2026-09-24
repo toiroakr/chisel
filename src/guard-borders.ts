@@ -10,7 +10,7 @@ import {
 } from "./border.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf } from "./partition.js";
-import type { CompareRule, Rule, Term } from "./rule.js";
+import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
 import {
   DEPS,
   boundTermPath,
@@ -59,17 +59,6 @@ export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
   return { ...variant, shape: { ...variant.shape, [DEPS]: deps } } as AnySchema;
 }
 
-function elementScope(scope: AnySchema, element: AnySchema): AnySchema {
-  const deps =
-    scope.kind === "object" ? (scope as ObjectSchema<ObjectShape>).shape[DEPS] : undefined;
-  return deps === undefined || element.kind !== "object"
-    ? element
-    : ({
-        ...element,
-        shape: { ...(element as ObjectSchema<ObjectShape>).shape, [DEPS]: deps },
-      } as AnySchema);
-}
-
 export function guardBordersOf(implementation: AnyImplementation): readonly GuardBorder[] {
   const input = implementation.behavior.input;
   const positions = positionsOf(input, { containers: true });
@@ -79,7 +68,12 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          walk(candidate.condition, guardScope(implementation.behavior, tag), `@${tag}`, "$", at, asGuard).map(
+          walk(
+            candidate.condition,
+            framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$"),
+            at,
+            asGuard,
+          ).map(
             drawn => ({
               ...drawn,
               origin: { decision, scope: guardScope(implementation.behavior, tag) },
@@ -103,7 +97,7 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
         return [];
       }
       return input.variantTags.flatMap(tag =>
-        walk(onInput, input.variants[tag] as AnySchema, `@${tag}`, "$", at, {
+        walk(onInput, framesAt(input.variants[tag] as AnySchema, `@${tag}`, "$"), at, {
           source: "ensures",
           describe: () => `${clause.name}: ${describeRule(part, "")}`,
         }),
@@ -148,7 +142,10 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          thresholdsIn(candidate.condition, guardScope(implementation.behavior, tag), `@${tag}`),
+          thresholdsIn(
+            candidate.condition,
+            framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$"),
+          ),
         ),
   );
   const paths = [...new Set(thresholds.map(threshold => threshold.path))];
@@ -164,38 +161,87 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
   });
 }
 
-function thresholdsIn(rule: Rule, scope: AnySchema, path: string): Threshold[] {
+interface Frame {
+  readonly scope: AnySchema;
+  readonly path: string;
+  readonly label: string;
+}
+
+interface Frames {
+  readonly root: Frame;
+  readonly elements: Readonly<Record<string, Frame>>;
+}
+
+function framesAt(scope: AnySchema, path: string, label: string): Frames {
+  return { root: { scope, path, label }, elements: {} };
+}
+
+function locate(
+  term: Term<unknown>,
+  frames: Frames,
+): { readonly frame: Frame; readonly keys: readonly string[] } {
+  const keys = termData(term).path;
+  const element = keys[0] === undefined ? undefined : frames.elements[keys[0]];
+  return element === undefined
+    ? { frame: frames.root, keys }
+    : { frame: element, keys: keys.slice(1) };
+}
+
+function enter(rule: Rule & { readonly kind: "all" | "any" }, frames: Frames): Frames | undefined {
+  const { frame, keys } = locate(rule.of, frames);
+  const collection = schemaAt(frame.scope, keys);
+  if (collection?.kind !== "array") {
+    return undefined;
+  }
+  const suffix = keys.map(key => `.${key}`).join("");
+  return {
+    root: frames.root,
+    elements: {
+      ...frames.elements,
+      [rule.element]: {
+        scope: (collection as ArraySchema<unknown>).element,
+        path: `${frame.path}${suffix}[]`,
+        label: `${frame.label}${suffix}[]`,
+      },
+    },
+  };
+}
+
+function labelsOf(frames: Frames): ElementLabels {
+  return Object.fromEntries(
+    Object.entries(frames.elements).map(([name, frame]) => [name, frame.label]),
+  );
+}
+
+function pathOf(frame: Frame, keys: readonly string[]): string {
+  return `${frame.path}${keys.map(key => `.${key}`).join("")}`;
+}
+
+function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
   if (rule.kind === "and" || rule.kind === "or") {
-    return rule.rules.flatMap(part => thresholdsIn(part, scope, path));
+    return rule.rules.flatMap(part => thresholdsIn(part, frames));
   }
   if (rule.kind === "not") {
-    return thresholdsIn(rule.rule, scope, path);
+    return thresholdsIn(rule.rule, frames);
   }
   if (rule.kind === "all" || rule.kind === "any") {
-    const of = termData(rule.of).path;
-    const collection = schemaAt(scope, of);
-    return collection?.kind === "array"
-      ? thresholdsIn(
-          rule.each,
-          elementScope(scope, (collection as ArraySchema<unknown>).element),
-          `${path}${of.map(key => `.${key}`).join("")}[]`,
-        )
-      : [];
+    const inner = enter(rule, frames);
+    return inner === undefined ? [] : thresholdsIn(rule.each, inner);
   }
   const normalized = normalize(rule);
   if (rule.kind !== "compare" || normalized === undefined || normalized.measure !== "value") {
     return [];
   }
   const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
-  const keys = termData(term).path;
-  const schema = schemaAt(scope, keys);
+  const { frame, keys } = locate(term, frames);
+  const schema = schemaAt(frame.scope, keys);
   return schema === undefined
     ? []
     : [
         {
-          path: `${path}${keys.map(key => `.${key}`).join("")}`,
+          path: pathOf(frame, keys),
           schema,
-          inherited: inheritedAt(scope, keys),
+          inherited: inheritedAt(frame.scope, keys),
           rule,
         },
       ];
@@ -339,58 +385,47 @@ function admittedRange(
 
 interface Reading {
   readonly source: "guard" | "ensures";
-  describe(rule: CompareRule, label: string): string;
+  describe(rule: CompareRule, frames: Frames): string;
 }
 
-const asGuard: Reading = { source: "guard", describe: (rule, label) => describeRule(rule, label) };
+const asGuard: Reading = {
+  source: "guard",
+  describe: (rule, frames) => describeRule(rule, frames.root.label, labelsOf(frames)),
+};
 
-function walk(
-  rule: Rule,
-  scope: AnySchema,
-  path: string,
-  label: string,
-  at: PositionAt,
-  reading: Reading,
-): GuardBorder[] {
+function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): GuardBorder[] {
   if (rule.kind === "and" || rule.kind === "or") {
-    return rule.rules.flatMap(part => walk(part, scope, path, label, at, reading));
+    return rule.rules.flatMap(part => walk(part, frames, at, reading));
   }
   if (rule.kind === "not") {
-    return walk(rule.rule, scope, path, label, at, reading);
+    return walk(rule.rule, frames, at, reading);
   }
   if (rule.kind === "all" || rule.kind === "any") {
-    const of = termData(rule.of).path;
-    const collection = schemaAt(scope, of);
-    const element =
-      collection?.kind === "array"
-        ? elementScope(scope, (collection as ArraySchema<unknown>).element)
-        : undefined;
-    const suffix = of.map(key => `.${key}`).join("");
-    return element === undefined
-      ? []
-      : walk(rule.each, element, `${path}${suffix}[]`, `${label}${suffix}[]`, at, reading);
+    const inner = enter(rule, frames);
+    return inner === undefined ? [] : walk(rule.each, inner, at, reading);
   }
   if (isTerm(rule.left) && isTerm(rule.right)) {
-    return between(rule, rule.left, rule.right, scope, path, label, at, reading);
+    return between(rule, rule.left, rule.right, frames, at, reading);
   }
   const term = isTerm(rule.left) ? rule.left : isTerm(rule.right) ? rule.right : undefined;
   if (term === undefined) {
     return [];
   }
-  const { path: keys, measure } = termData(term);
-  const schema = schemaAt(scope, keys);
+  const { frame, keys } = locate(term, frames);
+  const { measure } = termData(term);
+  const schema = schemaAt(frame.scope, keys);
   if (schema === undefined) {
     return [];
   }
   const borders = bordersOf([rule], found => carrierOf(schema, found), {
     source: reading.source,
-    describe: () => reading.describe(rule, label),
+    describe: () => reading.describe(rule, frames),
     admits: coordinate =>
       measure !== "value" ||
       (schema.parse(coordinate).success &&
-        inheritedAt(scope, keys).every(inherited => holds(inherited, coordinate))),
+        inheritedAt(frame.scope, keys).every(inherited => holds(inherited, coordinate))),
   });
-  const positionPath = `${path}${keys.map(key => `.${key}`).join("")}`;
+  const positionPath = pathOf(frame, keys);
   return borders.map(border => ({
     path: positionPath,
     comparison: rule,
@@ -404,23 +439,20 @@ function between(
   rule: CompareRule,
   left: Term<unknown>,
   right: Term<unknown>,
-  scope: AnySchema,
-  path: string,
-  label: string,
+  frames: Frames,
   at: PositionAt,
   reading: Reading,
 ): GuardBorder[] {
   const sides = [left, right].map(term => {
-    const { path: keys, measure } = termData(term);
-    const schema = schemaAt(scope, keys);
-    const standsIn = keys[0] === DEPS;
+    const { frame, keys } = locate(term, frames);
+    const { measure } = termData(term);
+    const schema = schemaAt(frame.scope, keys);
+    const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
       term,
       measure,
       standsIn,
-      path: standsIn
-        ? ["deps", ...keys.slice(1)].join(".")
-        : `${path}${keys.map(key => `.${key}`).join("")}`,
+      path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
       kind: measure === "length" ? "integer" : schema?.kind,
     };
   });
@@ -438,7 +470,7 @@ function between(
   };
   const borders = bordersOf([difference], () => carrier, {
     source: reading.source,
-    describe: () => reading.describe(rule, label),
+    describe: () => reading.describe(rule, frames),
     admits: () => true,
   });
   const read = (side: (typeof sides)[number], scopeValue: unknown): number | bigint | undefined => {
@@ -502,37 +534,32 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          unreadIn(candidate.condition, guardScope(implementation.behavior, tag), "$").map(
+          unreadIn(candidate.condition, framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$")).map(
             text => `${decision.id}: ${text}`,
           ),
         ),
   );
 }
 
-function unreadIn(rule: Rule, scope: AnySchema, label: string): string[] {
+function unreadIn(rule: Rule, frames: Frames): string[] {
   switch (rule.kind) {
     case "and":
     case "or":
-      return rule.rules.flatMap(part => unreadIn(part, scope, label));
+      return rule.rules.flatMap(part => unreadIn(part, frames));
     case "not":
-      return unreadIn(rule.rule, scope, label);
+      return unreadIn(rule.rule, frames);
     case "all":
     case "any": {
-      const of = termData(rule.of).path;
-      const collection = schemaAt(scope, of);
-      return collection?.kind === "array"
-        ? unreadIn(
-            rule.each,
-            elementScope(scope, (collection as ArraySchema<unknown>).element),
-            `${label}${of.map(key => `.${key}`).join("")}[]`,
-          )
-        : [describeRule(rule, label)];
+      const inner = enter(rule, frames);
+      return inner === undefined
+        ? [describeRule(rule, frames.root.label, labelsOf(frames))]
+        : unreadIn(rule.each, inner);
     }
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       const kinds = terms.map(term => {
-        const { path, measure } = termData(term);
-        return measure === "length" ? "integer" : schemaAt(scope, path)?.kind;
+        const { frame, keys } = locate(term, frames);
+        return termData(term).measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
       });
       const readable =
         terms.length === 2
@@ -544,7 +571,7 @@ function unreadIn(rule: Rule, scope: AnySchema, label: string): string[] {
             kinds[0] === "literal" ||
             (kinds[0] !== undefined &&
               carrierOf({ kind: kinds[0] } as AnySchema, "value") !== undefined);
-      return readable ? [] : [describeRule(rule, label)];
+      return readable ? [] : [describeRule(rule, frames.root.label, labelsOf(frames))];
     }
   }
 }

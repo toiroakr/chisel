@@ -41,12 +41,14 @@ export interface CompareRule {
 export interface AllRule {
   readonly kind: "all";
   readonly of: Term<readonly unknown[]>;
+  readonly element: string;
   readonly each: Rule;
 }
 
 export interface AnyRule {
   readonly kind: "any";
   readonly of: Term<readonly unknown[]>;
+  readonly element: string;
   readonly each: Rule;
 }
 
@@ -77,7 +79,31 @@ export function any<E>(
   of: Term<readonly E[]>,
   each: (element: TermOf<E>) => Rule,
 ): Rule {
-  return { kind: "any", of: of as Term<readonly unknown[]>, each: each(selfTerm<E>()) };
+  return quantified("any", of, each);
+}
+
+let quantifiedDepth = 0;
+
+// The element is named by nesting depth, not by a fresh symbol: a term from an
+// enclosing all/any must keep a path the analysis can resolve to that
+// enclosing element, and a depth reads the same in every module graph.
+function quantified<E>(
+  kind: "all" | "any",
+  of: Term<readonly E[]>,
+  each: (element: TermOf<E>) => Rule,
+): Rule {
+  const element = `#each${quantifiedDepth}`;
+  quantifiedDepth += 1;
+  try {
+    return {
+      kind,
+      of: of as Term<readonly unknown[]>,
+      element,
+      each: each(termAt([element], "value") as TermOf<E>),
+    };
+  } finally {
+    quantifiedDepth -= 1;
+  }
 }
 
 export function and(...rules: readonly Rule[]): Rule {
@@ -96,7 +122,7 @@ export function all<E>(
   of: Term<readonly E[]>,
   each: (element: TermOf<E>) => Rule,
 ): Rule {
-  return { kind: "all", of: of as Term<readonly unknown[]>, each: each(selfTerm<E>()) };
+  return quantified("all", of, each);
 }
 
 export function lt<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
@@ -142,6 +168,12 @@ export const DEPS = "#deps";
 
 export function depsTerm<T>(): TermOf<T> {
   return termAt([DEPS], "value") as TermOf<T>;
+}
+
+export function bindElement(scope: unknown, name: string, element: unknown): unknown {
+  return typeof scope === "object" && scope !== null && !Array.isArray(scope)
+    ? { ...scope, [name]: element }
+    : { [name]: element };
 }
 
 export function withDeps(input: unknown, deps: unknown): unknown {
@@ -241,11 +273,8 @@ export function holds(
     case "all":
     case "any": {
       const elements = read(rule.of, value);
-      const deps =
-        typeof value === "object" && value !== null
-          ? (value as Readonly<Record<string, unknown>>)[DEPS]
-          : undefined;
-      const each = (element: unknown) => holds(rule.each, withDeps(element, deps), observe);
+      const each = (element: unknown) =>
+        holds(rule.each, bindElement(value, rule.element, element), observe);
       const outcome = !Array.isArray(elements)
         ? rule.kind === "all"
         : rule.kind === "all"
@@ -332,20 +361,24 @@ function satisfyComparison(rule: CompareRule, value: unknown): unknown {
   );
 }
 
-export function describeRule(rule: Rule, path = "$"): string {
+export type ElementLabels = Readonly<Record<string, string>>;
+
+export function describeRule(rule: Rule, path = "$", elements: ElementLabels = {}): string {
   switch (rule.kind) {
     case "all":
-    case "any":
-      return `${rule.kind}(${describeOperand(rule.of, path)}, ${describeRule(rule.each, `${describeOperand(rule.of, path)}[]`)})`;
+    case "any": {
+      const of = describeOperand(rule.of, path, elements);
+      return `${rule.kind}(${of}, ${describeRule(rule.each, path, { ...elements, [rule.element]: `${of}[]` })})`;
+    }
     case "and":
     case "or":
-      return `${rule.kind}(${rule.rules.map(part => describeRule(part, path)).join(", ")})`;
+      return `${rule.kind}(${rule.rules.map(part => describeRule(part, path, elements)).join(", ")})`;
     case "not":
-      return `not(${describeRule(rule.rule, path)})`;
+      return `not(${describeRule(rule.rule, path, elements)})`;
     case "compare":
       break;
   }
-  return `${describeOperand(rule.left, path)} ${rule.operator} ${describeOperand(rule.right, path)}`;
+  return `${describeOperand(rule.left, path, elements)} ${rule.operator} ${describeOperand(rule.right, path, elements)}`;
 }
 
 const mirrored: Readonly<Record<Operator, Operator>> = {
@@ -470,13 +503,18 @@ export function describeTerm(term: Term<unknown>, path = "$"): string {
   return describeOperand(term, path);
 }
 
-function describeOperand(operand: unknown, path: string): string {
+function describeOperand(operand: unknown, path: string, elements: ElementLabels = {}): string {
   if (!isTerm(operand)) {
     return typeof operand === "string" ? JSON.stringify(operand) : String(operand);
   }
   const { path: keys, measure } = termData(operand);
+  const [first = "", ...rest] = keys;
   const location = (
-    keys[0] === DEPS ? ["deps", ...keys.slice(1)] : [path, ...keys]
+    first === DEPS
+      ? ["deps", ...rest]
+      : elements[first] !== undefined
+        ? [elements[first], ...rest]
+        : [path, ...keys]
   )
     .filter(part => part !== "")
     .join(".");
