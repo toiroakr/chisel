@@ -33,6 +33,21 @@ const 注文を確定する = behavior({
   effects: sum("種類", {}),
 });
 
+describe("generateExamples starts from what the rows already say", () => {
+  it("moves one position of an existing row rather than composing from placeholders", () => {
+    const existing = examples(注文を確定する, [
+      example(注文を確定する, "クーポンなし", {
+        given: { 状態: "商品あり", カートID: "カート-7" },
+        expect: { result: {}, effects: [] },
+      }),
+    ]);
+
+    expect(generateExamples(existing).map(row => row.given)).toStrictEqual([
+      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
+    ]);
+  });
+});
+
 describe("generateExamples for classes", () => {
   it("offers a row for a class no row is in under a case some row already covers", () => {
     const existing = examples(注文を確定する, [

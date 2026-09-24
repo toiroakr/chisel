@@ -4,6 +4,9 @@ import {
   defineSpecification,
   example,
   examples,
+  ge,
+  integer,
+  length,
   number,
   object,
   optional,
@@ -17,16 +20,16 @@ const クーポンコード = string("クーポンコード");
 
 const 明細 = object({
   商品ID,
-  数量: number(),
-  単価: number(),
-  在庫数: number(),
+  数量: integer().invariant(v => ge(v, 1)),
+  単価: integer().invariant(v => ge(v, 0)),
+  在庫数: integer().invariant(v => ge(v, 0)),
 });
 
 const カート = sum("状態", {
   空: object({ カートID }),
   商品あり: object({
     カートID,
-    明細: array(明細),
+    明細: array(明細).invariant(v => ge(length(v), 1)),
     クーポン: optional(クーポンコード),
   }),
   確定済み: object({ カートID }),

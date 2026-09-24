@@ -9,6 +9,7 @@ import type {
 } from "./behavior.js";
 import { runImplementation } from "./behavior.js";
 import type { PointRole } from "./border.js";
+import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
@@ -538,6 +539,11 @@ export function generateExamples(
       .filter((tag): tag is string => tag !== undefined),
   );
 
+  const origins = rows.filter(row => !isUnanswered(row.expect)).map(row => row.given);
+  const originFor = (position: Position): unknown =>
+    origins.find(given => position.valuesIn(given).length > 0) ??
+    definition.input.placeholder();
+
   const generated: GeneratedExample[] = definition.input.variantTags
     .filter(tag => !existing.has(tag))
     .map(tag => ({
@@ -560,7 +566,7 @@ export function generateExamples(
       if (!standsIn) {
         generated.push({
           name: `${definition.name}: ${position.path} = ${className}`,
-          given: position.place(definition.input.placeholder(), className),
+          given: position.place(originFor(position), className),
           reason: `${position.path}が${className}の期待結果を人間が決める必要があります`,
         });
       }
@@ -579,7 +585,7 @@ export function generateExamples(
         if (!standsAt) {
           generated.push({
             name: `${definition.name}: ${position.path} ${point.role} (${point.relation})`,
-            given: position.write(definition.input.placeholder(), border.measure, point.witness),
+            given: position.write(originFor(position), border.measure, point.witness),
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
           });
         }
