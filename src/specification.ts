@@ -28,6 +28,7 @@ import {
 } from "./behavior.js";
 import { describeRule, describeTerm, termData } from "./rule.js";
 import type { PointRole } from "./border.js";
+import type { GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
@@ -708,7 +709,7 @@ export async function evaluateSpecification(
     failures,
     partitions,
     borders,
-    pairs: countPairs(positions, answeredGivens),
+    pairs: countPairs(pairablesOf(positions, guardPartitions), answeredGivens),
     fakeIssues: fakeIssues.map(item => item.issue),
     evidence: {
       input: definition.input.variantTags.map(tag => ({
@@ -969,13 +970,51 @@ export async function verifyConformance<B extends AnyBehavior>(
   return failures;
 }
 
-function countPairs(positions: readonly Position[], givens: readonly unknown[]): PairCount[] {
-  const divided = positions.flatMap(position =>
-    position.kind === "divided" ? [position] : [],
-  );
+interface Pairable {
+  readonly path: string;
+  readonly classes: readonly string[];
+  classify(given: unknown): readonly string[];
+}
+
+function pairablesOf(
+  positions: readonly Position[],
+  guardPartitions: readonly GuardPartition[],
+): Pairable[] {
+  return positions.flatMap((position): Pairable[] => {
+    if (position.kind === "divided") {
+      return [
+        {
+          path: position.path,
+          classes: position.classes.filter(name => !position.excluded.includes(name)),
+          classify: given => position.classify(given),
+        },
+      ];
+    }
+    const drawn = guardPartitions.find(partition => partition.path === position.path);
+    if (drawn === undefined) {
+      return [];
+    }
+    return [
+      {
+        path: position.path,
+        classes: drawn.classes.map(item => item.name),
+        classify: given =>
+          position
+            .valuesIn(given)
+            .flatMap(value =>
+              value === undefined
+                ? []
+                : drawn.classes.filter(item => item.contains(value)).map(item => item.name),
+            ),
+      },
+    ];
+  });
+}
+
+function countPairs(pairables: readonly Pairable[], givens: readonly unknown[]): PairCount[] {
   const pairs: PairCount[] = [];
-  divided.forEach((left, index) => {
-    for (const right of divided.slice(index + 1)) {
+  pairables.forEach((left, index) => {
+    for (const right of pairables.slice(index + 1)) {
       if (!combine(left.path, right.path)) {
         continue;
       }
@@ -986,12 +1025,10 @@ function countPairs(positions: readonly Position[], givens: readonly unknown[]):
             .flatMap(first => right.classify(given).map(second => `${first}\u0000${second}`)),
         ),
       );
-      const usable = (position: typeof left) =>
-        position.classes.filter(name => !position.excluded.includes(name)).length;
       pairs.push({
         positions: [left.path, right.path],
         reached: reached.size,
-        total: usable(left) * usable(right),
+        total: left.classes.length * right.classes.length,
       });
     }
   });

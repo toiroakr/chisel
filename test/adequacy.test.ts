@@ -8,11 +8,14 @@ import {
   eq,
   examples,
   ge,
+  guard,
   implement,
   integer,
+  le,
   length,
   object,
   optional,
+  rules,
   string,
   sum,
   unanswered,
@@ -498,6 +501,42 @@ describe("pairs of classes", () => {
     expect(report.pairs).toStrictEqual([
       { positions: ["@確定済み.ギフト", "@確定済み.配送"], reached: 1, total: 4 },
       { positions: ["@確定済み.ギフト", "@確定済み.配送@宅配.置き配"], reached: 1, total: 4 },
+    ]);
+  });
+
+  it("pairs the classes a guard threshold draws with the classes of another position", async () => {
+    const 注文を受け付ける = behavior({
+      name: "注文を受け付ける",
+      input: sum("状態", {
+        入力済み: object({ ギフト: boolean(), 合計: integer().invariant(v => ge(v, 0)) }),
+      }),
+      result: sum("結果", { 受付: object({}), 要承認: object({}) }),
+      effects: sum("種類", {}),
+    });
+    const 上限で分ける = implement(注文を受け付ける, {
+      cases: {
+        入力済み: rules(
+          "上限で分ける",
+          注文 => [guard(le(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          () => ({ result: { 結果: "受付" }, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(注文を受け付ける, [
+          example(注文を受け付ける, "ギフトで少額", {
+            given: { 状態: "入力済み", ギフト: true, 合計: 100 },
+            expect: { result: { 結果: "受付" }, effects: [] },
+          }),
+        ]),
+        implementation: 上限で分ける,
+      }),
+    );
+
+    expect(report.pairs).toStrictEqual([
+      { positions: ["@入力済み.ギフト", "@入力済み.合計"], reached: 1, total: 4 },
     ]);
   });
 
