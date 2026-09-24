@@ -7,6 +7,7 @@ import { carrierOf, positionsOf } from "./partition.js";
 import type { CompareRule, Rule, Term } from "./rule.js";
 import {
   boundTermPath,
+  conjuncts,
   describeRule,
   isTerm,
   readOperand,
@@ -81,7 +82,13 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
 }
 
 function thresholdsIn(rule: Rule, scope: AnySchema, path: string): Threshold[] {
-  if (rule.kind === "all") {
+  if (rule.kind === "and" || rule.kind === "or") {
+    return rule.rules.flatMap(part => thresholdsIn(part, scope, path));
+  }
+  if (rule.kind === "not") {
+    return thresholdsIn(rule.rule, scope, path);
+  }
+  if (rule.kind === "all" || rule.kind === "any") {
     const of = termData(rule.of).path;
     const collection = schemaAt(scope, of);
     return collection?.kind === "array"
@@ -93,7 +100,7 @@ function thresholdsIn(rule: Rule, scope: AnySchema, path: string): Threshold[] {
       : [];
   }
   const normalized = normalize(rule);
-  if (normalized === undefined || normalized.measure !== "value") {
+  if (rule.kind !== "compare" || normalized === undefined || normalized.measure !== "value") {
     return [];
   }
   const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
@@ -183,7 +190,7 @@ function admittedRange(
 ): { readonly lower: Edge | undefined; readonly upper: Edge | undefined } {
   let lower: Edge | undefined;
   let upper: Edge | undefined;
-  for (const rule of schema.invariants) {
+  for (const rule of schema.invariants.flatMap(conjuncts)) {
     if (rule.kind !== "compare" || boundTermPath(rule)?.length !== 0) {
       continue;
     }
@@ -215,7 +222,13 @@ function walk(
   label: string,
   at: PositionAt,
 ): GuardBorder[] {
-  if (rule.kind === "all") {
+  if (rule.kind === "and" || rule.kind === "or") {
+    return rule.rules.flatMap(part => walk(part, scope, path, label, at));
+  }
+  if (rule.kind === "not") {
+    return walk(rule.rule, scope, path, label, at);
+  }
+  if (rule.kind === "all" || rule.kind === "any") {
     const of = termData(rule.of).path;
     const collection = schemaAt(scope, of);
     const element =

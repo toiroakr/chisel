@@ -44,7 +44,53 @@ export interface AllRule {
   readonly each: Rule;
 }
 
-export type Rule = CompareRule | AllRule;
+export interface AnyRule {
+  readonly kind: "any";
+  readonly of: Term<readonly unknown[]>;
+  readonly each: Rule;
+}
+
+export interface AndRule {
+  readonly kind: "and";
+  readonly rules: readonly Rule[];
+}
+
+export interface OrRule {
+  readonly kind: "or";
+  readonly rules: readonly Rule[];
+}
+
+export interface NotRule {
+  readonly kind: "not";
+  readonly rule: Rule;
+}
+
+export type Rule = CompareRule | AllRule | AnyRule | AndRule | OrRule | NotRule;
+
+export type Distinction = CompareRule | AllRule | AnyRule;
+
+export function conjuncts(rule: Rule): readonly Rule[] {
+  return rule.kind === "and" ? rule.rules.flatMap(conjuncts) : [rule];
+}
+
+export function any<E>(
+  of: Term<readonly E[]>,
+  each: (element: TermOf<E>) => Rule,
+): Rule {
+  return { kind: "any", of: of as Term<readonly unknown[]>, each: each(selfTerm<E>()) };
+}
+
+export function and(...rules: readonly Rule[]): Rule {
+  return { kind: "and", rules };
+}
+
+export function or(...rules: readonly Rule[]): Rule {
+  return { kind: "or", rules };
+}
+
+export function not(rule: Rule): Rule {
+  return { kind: "not", rule };
+}
 
 export function all<E>(
   of: Term<readonly E[]>,
@@ -132,13 +178,42 @@ export function stepInto(rule: Rule, key: string): Rule | undefined {
 
 export type ComparisonObserver = (rule: CompareRule, scope: unknown) => void;
 
-export function holds(rule: Rule, value: unknown, observe?: ComparisonObserver): boolean {
-  if (rule.kind === "all") {
-    const elements = read(rule.of, value);
-    return (
-      !Array.isArray(elements) || elements.every(element => holds(rule.each, element, observe))
-    );
+export type DistinctionObserver = (distinction: Distinction, outcome: boolean) => void;
+
+export function holds(
+  rule: Rule,
+  value: unknown,
+  observe?: ComparisonObserver,
+  decide?: DistinctionObserver,
+): boolean {
+  switch (rule.kind) {
+    case "and":
+      return rule.rules.every(part => holds(part, value, observe, decide));
+    case "or":
+      return rule.rules.some(part => holds(part, value, observe, decide));
+    case "not":
+      return !holds(rule.rule, value, observe, decide);
+    case "all":
+    case "any": {
+      const elements = read(rule.of, value);
+      const each = (element: unknown) => holds(rule.each, element, observe);
+      const outcome = !Array.isArray(elements)
+        ? rule.kind === "all"
+        : rule.kind === "all"
+          ? elements.every(each)
+          : elements.some(each);
+      decide?.(rule, outcome);
+      return outcome;
+    }
+    case "compare": {
+      const outcome = compares(rule, value, observe);
+      decide?.(rule, outcome);
+      return outcome;
+    }
   }
+}
+
+function compares(rule: CompareRule, value: unknown, observe?: ComparisonObserver): boolean {
   observe?.(rule, value);
   const left = read(rule.left, value);
   const right = read(rule.right, value);
@@ -185,8 +260,17 @@ export function satisfy(rule: Rule, value: unknown): unknown {
 }
 
 export function describeRule(rule: Rule, path = "$"): string {
-  if (rule.kind === "all") {
-    return `all(${describeOperand(rule.of, path)}, ${describeRule(rule.each, `${describeOperand(rule.of, path)}[]`)})`;
+  switch (rule.kind) {
+    case "all":
+    case "any":
+      return `${rule.kind}(${describeOperand(rule.of, path)}, ${describeRule(rule.each, `${describeOperand(rule.of, path)}[]`)})`;
+    case "and":
+    case "or":
+      return `${rule.kind}(${rule.rules.map(part => describeRule(part, path)).join(", ")})`;
+    case "not":
+      return `not(${describeRule(rule.rule, path)})`;
+    case "compare":
+      break;
   }
   return `${describeOperand(rule.left, path)} ${rule.operator} ${describeOperand(rule.right, path)}`;
 }

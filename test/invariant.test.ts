@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  and,
+  any,
   array,
+  eq,
   ge,
   gt,
   instant,
@@ -8,8 +11,10 @@ import {
   le,
   length,
   lt,
+  not,
   object,
   optional,
+  or,
   string,
 } from "../src/index.js";
 
@@ -108,5 +113,32 @@ describe("placeholder under an invariant", () => {
     expect(
       object({ 在庫数: integer() }).invariant(v => ge(v.在庫数, 1)).placeholder(),
     ).toStrictEqual({ 在庫数: 1 });
+  });
+});
+
+describe("combined conditions", () => {
+  it("holds of and() only when every part holds", () => {
+    const 範囲 = integer().invariant(v => and(ge(v, 1), le(v, 9)));
+
+    expect([範囲.parse(5).success, 範囲.parse(10).success]).toStrictEqual([true, false]);
+  });
+
+  it("holds of or() when any part holds", () => {
+    const 端 = integer().invariant(v => or(le(v, 0), ge(v, 10)));
+
+    expect([端.parse(0).success, 端.parse(5).success]).toStrictEqual([true, false]);
+  });
+
+  it("holds of not() when its part does not", () => {
+    expect(integer().invariant(v => not(eq(v, 0))).parse(0).success).toBe(false);
+  });
+
+  it("holds of any() when some element holds", () => {
+    const 一つは正 = array(integer()).invariant(v => any(v, element => gt(element, 0)));
+
+    expect([一つは正.parse([0, 1]).success, 一つは正.parse([0, 0]).success]).toStrictEqual([
+      true,
+      false,
+    ]);
   });
 });

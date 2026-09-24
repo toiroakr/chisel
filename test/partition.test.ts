@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  and,
   array,
   boolean,
   eq,
@@ -277,6 +278,19 @@ describe("a border with nothing past it", () => {
     );
 
     expect(position!.borders[0]!.points[2]).toMatchObject({ role: "IN", status: "excluded" });
+  });
+});
+
+describe("an invariant written as a conjunction", () => {
+  it("draws a border for each part it requires", () => {
+    const [position] = positionsOf(
+      sum("状態", { 入力済み: object({ 点数: integer().invariant(v => and(ge(v, 0), le(v, 100))) }) }),
+    );
+
+    expect(position!.borders.map(border => border.rule)).toStrictEqual([
+      "invariant $ >= 0",
+      "invariant $ <= 100",
+    ]);
   });
 });
 

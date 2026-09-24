@@ -16,7 +16,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, holds, resize, sizeOf, stepInto } from "./rule.js";
+import { boundTermPath, conjuncts, holds, resize, sizeOf, stepInto } from "./rule.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -82,7 +82,7 @@ function fieldsOf(
   focus: Focus,
   inherited: readonly Rule[] = [],
 ): Position[] {
-  const rules = [...schema.invariants, ...inherited];
+  const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
   return Object.entries(schema.shape).flatMap(([key, field]) =>
     positionAt(
       field,
@@ -116,7 +116,7 @@ function positionAt(
   inherited: readonly Rule[] = [],
 ): Position[] {
   const borders = bordersOf(
-    [...schema.invariants, ...inherited].filter(rule => boundTermPath(rule)?.length === 0),
+    [...schema.invariants.flatMap(conjuncts), ...inherited].filter(rule => boundTermPath(rule)?.length === 0),
     measure => carrierOf(schema, measure),
   );
   if (schema.kind === "optional") {
@@ -136,7 +136,7 @@ function positionAt(
       }),
     ];
   }
-  const rules = [...schema.invariants, ...inherited];
+  const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
   if (schema.kind === "boolean") {
     return [
       divided(path, ["true", "false"], focus, String, className => className === "true", {
