@@ -8,24 +8,36 @@ import type {
   Implementation,
 } from "./behavior.js";
 import { runImplementation } from "./behavior.js";
+import { positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
+
+interface RunOutcome {
+  readonly actual: unknown;
+  readonly failure: ExampleFailure | undefined;
+}
 
 async function runAndCompare<B extends AnyBehavior>(
   name: string,
   given: BehaviorInput<B>,
   expected: Execution<BehaviorResult<B>, BehaviorEffect<B>>,
   subject: ConformanceSubject<B>,
-): Promise<ExampleFailure | undefined> {
+): Promise<RunOutcome> {
   try {
     const actual = await subject(given);
-    return isDeepStrictEqual(actual, expected)
-      ? undefined
-      : {
-          name,
-          message: `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
-        };
+    return {
+      actual,
+      failure: isDeepStrictEqual(actual, expected)
+        ? undefined
+        : {
+            name,
+            message: `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+          },
+    };
   } catch (error) {
-    return { name, message: error instanceof Error ? error.message : String(error) };
+    return {
+      actual: undefined,
+      failure: { name, message: error instanceof Error ? error.message : String(error) },
+    };
   }
 }
 
@@ -92,9 +104,37 @@ export interface AdequacyReport {
   readonly controlGaps: readonly ControlGap[];
   readonly dependencyIssues: readonly DependencyIssue[];
   readonly failures: readonly ExampleFailure[];
+  readonly partitions: readonly PartitionCoverage[];
+  readonly evidence: {
+    readonly input: readonly InputCaseEvidence[];
+    readonly result: readonly ResultCaseEvidence[];
+  };
   readonly internalDecisionCoverage: "undetermined";
   readonly adequate: boolean;
 }
+
+export interface InputCaseEvidence {
+  readonly case: string;
+  readonly specified: boolean;
+  readonly executed: boolean;
+  readonly verified: boolean;
+}
+
+export interface ResultCaseEvidence {
+  readonly case: string;
+  readonly specified: boolean;
+  readonly observed: boolean;
+  readonly verified: boolean;
+}
+
+export type PartitionCoverage =
+  | {
+      readonly path: string;
+      readonly kind: "divided";
+      readonly covered: readonly string[];
+      readonly missing: readonly string[];
+    }
+  | { readonly path: string; readonly kind: "not-derivable" };
 
 export interface Coverage {
   readonly covered: readonly string[];
@@ -176,6 +216,12 @@ export async function evaluateSpecification(
   const coveredEffects = new Set<string>();
   const failures: ExampleFailure[] = [];
   const unansweredRows: UnansweredExample[] = [];
+  const executedInputs = new Set<string>();
+  const verifiedInputs = new Set<string>();
+  const observedResults = new Set<string>();
+  const verifiedResults = new Set<string>();
+  const positions = positionsOf(definition.input);
+  const coveredClasses = positions.map(() => new Set<string>());
 
   for (const row of specification.examples.rows) {
     const inputValidation = definition.input.parse(row.given);
@@ -191,12 +237,41 @@ export async function evaluateSpecification(
         variant: inputTag,
         reason: row.expect.reason,
       });
+      const implementation = specification.implementation;
+      const decision =
+        implementation === undefined || inputTag === undefined
+          ? undefined
+          : implementation.cases[inputTag];
+      if (implementation !== undefined && decision?.kind === "decision") {
+        try {
+          const actual = await runImplementation(implementation, row.given);
+          executedInputs.add(inputTag!);
+          const observed = isSumSchema(definition.result)
+            ? tagOf(definition.result, actual.result)
+            : undefined;
+          if (observed !== undefined) {
+            observedResults.add(observed);
+          }
+        } catch (error) {
+          failures.push({
+            name: row.name,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       continue;
     }
 
     if (inputTag !== undefined) {
       coveredInputs.add(inputTag);
     }
+    positions.forEach((position, index) => {
+      if (position.kind === "divided") {
+        for (const found of position.classify(row.given)) {
+          coveredClasses[index]!.add(found);
+        }
+      }
+    });
 
     const resultValidation = definition.result.parse(row.expect.result);
     if (!resultValidation.success) {
@@ -220,9 +295,27 @@ export async function evaluateSpecification(
 
     const implementation = specification.implementation;
     if (implementation !== undefined) {
-      const failure = await runAndCompare(row.name, row.given, row.expect, input =>
-        runImplementation(implementation, input),
+      const { actual, failure } = await runAndCompare(
+        row.name,
+        row.given,
+        row.expect,
+        input => runImplementation(implementation, input),
       );
+      if (actual !== undefined && inputTag !== undefined) {
+        executedInputs.add(inputTag);
+        const observed = isSumSchema(definition.result)
+          ? tagOf(definition.result, (actual as Execution<unknown, unknown>).result)
+          : undefined;
+        if (observed !== undefined) {
+          observedResults.add(observed);
+          if (observed === resultTag) {
+            verifiedResults.add(observed);
+          }
+        }
+        if (failure === undefined) {
+          verifiedInputs.add(inputTag);
+        }
+      }
       if (failure !== undefined) {
         failures.push(failure);
       }
@@ -279,6 +372,13 @@ export async function evaluateSpecification(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
+  const partitions = positions.map((position, index): PartitionCoverage => {
+    if (position.kind === "not-derivable") {
+      return { path: position.path, kind: "not-derivable" };
+    }
+    const { covered, missing } = coverage(position.classes, coveredClasses[index]!);
+    return { path: position.path, kind: "divided", covered, missing };
+  });
   const adequate =
     specification.implementation !== undefined &&
     failures.length === 0 &&
@@ -288,7 +388,10 @@ export async function evaluateSpecification(
     dependencyIssues.length === 0 &&
     input.missing.length === 0 &&
     result.missing.length === 0 &&
-    effects.missing.length === 0;
+    effects.missing.length === 0 &&
+    partitions.every(
+      partition => partition.kind === "not-derivable" || partition.missing.length === 0,
+    );
 
   return {
     specification: specification.name,
@@ -303,6 +406,23 @@ export async function evaluateSpecification(
     controlGaps,
     dependencyIssues,
     failures,
+    partitions,
+    evidence: {
+      input: definition.input.variantTags.map(tag => ({
+        case: tag,
+        specified: coveredInputs.has(tag),
+        executed: executedInputs.has(tag),
+        verified: verifiedInputs.has(tag),
+      })),
+      result: isSumSchema(definition.result)
+        ? definition.result.variantTags.map(tag => ({
+            case: tag,
+            specified: coveredResults.has(tag),
+            observed: observedResults.has(tag),
+            verified: verifiedResults.has(tag),
+          }))
+        : [],
+    },
     internalDecisionCoverage: "undetermined",
     adequate,
   };
@@ -337,7 +457,7 @@ export async function verifyConformance<B extends AnyBehavior>(
     if (isUnanswered(row.expect)) {
       continue;
     }
-    const failure = await runAndCompare(row.name, row.given, row.expect, subject);
+    const { failure } = await runAndCompare(row.name, row.given, row.expect, subject);
     if (failure !== undefined) {
       failures.push(failure);
     }
