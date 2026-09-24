@@ -118,3 +118,34 @@ describe("cli entry point (subprocess)", () => {
     expect(result.stdout).toMatch(/充足度: 不完全/);
   });
 });
+
+describe("cli run() check with classes", () => {
+  async function report(): Promise<string> {
+    const result = await run(["check", fixture("test/fixtures/classes.ts")]);
+    return result.stdout.join("\n");
+  }
+
+  it("prints each divided position with the classes no row is in", async () => {
+    expect(await report()).toMatch(/^    @商品あり\.クーポン +1\/2; 未網羅 あり$/m);
+  });
+
+  it("prints the positions the model draws no line through as not derivable", async () => {
+    expect(await report()).toMatch(
+      /^  導出できない位置 +@商品あり\.カートID, @商品あり\.クーポン\? \(not derivable\)$/m,
+    );
+  });
+
+  it("prints how far the rows got for each input case", async () => {
+    expect(await report()).toMatch(/^  証拠（入力） +商品あり: specified・executed・verified$/m);
+  });
+
+  it("prints arms as not measured and names the decisions it could not read", async () => {
+    expect(await report()).toMatch(
+      /^  分岐 +計測不能 \(not measured\); 読めないdecision: 確定する$/m,
+    );
+  });
+
+  it("prints the verdict in both words", async () => {
+    expect(await report()).toMatch(/^充足度: 不完全 \(not_satisfied\)$/m);
+  });
+});

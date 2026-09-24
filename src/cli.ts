@@ -17,7 +17,10 @@ import {
 import type {
   AdequacyReport,
   GeneratedExample,
+  Measure,
+  PartitionCoverage,
   Specification,
+  Verdict,
 } from "./specification.js";
 
 interface LoadedTarget {
@@ -121,8 +124,11 @@ function formatReport(report: AdequacyReport): string {
     formatCoverage("入力variant", report.input),
     formatCoverage("結果variant", report.result),
     formatCoverage("作用variant", report.effects),
+    ...formatPartitions(report.partitions),
+    ...formatEvidence("証拠（入力）", report.evidence.input, ["specified", "executed", "verified"]),
+    ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
     `  実装                 ${implementation}`,
-    "  内部分岐             判定不能（自由記述のTypeScript）",
+    `  分岐                 ${formatMeasure(report.measures.arms)}`,
   ];
 
   for (const row of report.unanswered) {
@@ -142,8 +148,66 @@ function formatReport(report: AdequacyReport): string {
     lines.push(`  ✗ ${failure.name}: ${failure.message}`);
   }
 
-  lines.push(`充足度: ${report.adequate ? "完全" : "不完全"}`);
+  lines.push(`充足度: ${verdictLabels[report.verdict]} (${report.verdict})`);
   return lines.join("\n");
+}
+
+const verdictLabels: Readonly<Record<Verdict, string>> = {
+  satisfied: "完全",
+  not_satisfied: "不完全",
+  undetermined: "未確定",
+};
+
+function formatPartitions(partitions: readonly PartitionCoverage[]): string[] {
+  const lines: string[] = [];
+  const divided = partitions.flatMap(partition =>
+    partition.kind === "divided" ? [partition] : [],
+  );
+  if (divided.length > 0) {
+    lines.push("  クラス");
+    for (const partition of divided) {
+      const total = partition.covered.length + partition.missing.length;
+      const suffix =
+        partition.missing.length === 0 ? "" : `; 未網羅 ${partition.missing.join(", ")}`;
+      lines.push(`    ${padDisplay(partition.path, 19)} ${partition.covered.length}/${total}${suffix}`);
+    }
+  }
+  const undivided = partitions.filter(partition => partition.kind === "not-derivable");
+  if (undivided.length > 0) {
+    lines.push(
+      `  ${padDisplay("導出できない位置", 21)} ${undivided.map(partition => partition.path).join(", ")} (not derivable)`,
+    );
+  }
+  return lines;
+}
+
+function formatEvidence<Grade extends string>(
+  label: string,
+  evidence: readonly ({ readonly case: string } & Readonly<Record<Grade, boolean>>)[],
+  grades: readonly Grade[],
+): string[] {
+  if (evidence.length === 0) {
+    return [];
+  }
+  const cases = evidence.map(item => {
+    const reached = grades.filter(grade => item[grade]);
+    return `${item.case}: ${reached.length === 0 ? "なし" : reached.join("・")}`;
+  });
+  return [`  ${padDisplay(label, 21)} ${cases.join(", ")}`];
+}
+
+function padDisplay(value: string, width: number): string {
+  const displayWidth = [...value].reduce(
+    (sum, char) => sum + (/[\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef]/u.test(char) ? 2 : 1),
+    0,
+  );
+  return value + " ".repeat(Math.max(width - displayWidth, 0));
+}
+
+function formatMeasure(measure: Measure): string {
+  return measure.reason === "not applicable"
+    ? "対象なし (not applicable)"
+    : `計測不能 (not measured); 読めないdecision: ${measure.notRead.join(", ")}`;
 }
 
 function formatCoverage(
