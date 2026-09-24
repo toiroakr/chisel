@@ -356,10 +356,7 @@ function walk(
     path: positionPath,
     comparison: rule,
     border,
-    coordinateOf: reached => {
-      const value = readOperand(term, reached.scope);
-      return measure === "length" && value !== undefined ? sizeOf(value) : value;
-    },
+    coordinateOf: reached => readOperand(term, reached.scope),
     compose: (given, coordinate) => at(positionPath)?.write(given, measure, coordinate),
   }));
 }
@@ -409,7 +406,7 @@ function between(
     if (instants) {
       return (value as { readonly epochNanoseconds: bigint }).epochNanoseconds;
     }
-    return side.measure === "length" ? sizeOf(value) : (value as number);
+    return value as number;
   };
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,

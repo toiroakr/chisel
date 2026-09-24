@@ -16,6 +16,7 @@ import {
   instant,
   integer,
   le,
+  length,
   lt,
   ne,
   number,
@@ -601,5 +602,57 @@ describe("comparisons Chisel could not read", () => {
       status: "partial",
       notRead: ["並び: $.姓 < $.名"],
     });
+  });
+});
+
+describe("a guard on a length", () => {
+  const 明細を確かめる = behavior({
+    name: "明細を確かめる",
+    input: sum("状態", { 入力済み: object({ 明細: array(integer()), 上限: integer() }) }),
+    result: sum("結果", { 受付: object({}), 断る: object({}) }),
+    effects: sum("種類", {}),
+  });
+
+  async function pointsReached(
+    condition: (注文: TermOf<{ 状態: "入力済み"; 明細: number[]; 上限: number }>) => Rule,
+    given: { 明細: number[]; 上限: number },
+  ) {
+    const 確かめる = implement(明細を確かめる, {
+      cases: {
+        入力済み: rules(
+          "確かめる",
+          注文 => [guard(condition(注文), () => ({ result: { 結果: "断る" }, effects: [] }))],
+          () => ({ result: { 結果: "受付" }, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "明細",
+        examples: examples(明細を確かめる, [
+          example(明細を確かめる, "行", {
+            given: { 状態: "入力済み", ...given },
+            expect: { result: { 結果: "受付" }, effects: [] },
+          }),
+        ]),
+        implementation: 確かめる,
+      }),
+    );
+    return report.borders
+      .filter(border => border.rule.startsWith("guard"))
+      .flatMap(border => border.points.filter(point => point.status === "met"))
+      .map(point => point.role);
+  }
+
+  it("places a row at the length it reached", async () => {
+    expect(await pointsReached(注文 => gt(length(注文.明細), 0), { 明細: [1], 上限: 0 })).toStrictEqual([
+      "ON",
+    ]);
+  });
+
+  it("places a row at the difference between a length and another position", async () => {
+    expect(
+      await pointsReached(注文 => le(length(注文.明細), 注文.上限), { 明細: [1, 2, 3], 上限: 3 }),
+    ).toStrictEqual(["ON"]);
   });
 });
