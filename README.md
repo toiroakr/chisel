@@ -220,6 +220,27 @@ const implementation = implement(checkout, {
 
 A free-form `run` closure may contain branches Chisel cannot read, so its arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. The same holds for a comparison inside `rules` that Chisel cannot draw a line from.
 
+## Postconditions and dependencies
+
+A behavior can state what it ensures of its answer, and declare the outside world it needs:
+
+```ts
+const findMember = behavior({
+  name: "find-member",
+  input, result, effects,
+  requires: { now: dependency(instant()), lookup: dependency(string("MemberId"), boolean()) },
+  ensures: clause => [
+    clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
+      and(gt(asked.id, 0), eq(answer.id, asked.id)),
+    ),
+  ],
+});
+```
+
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`.
+
+`check` also counts the pairs of classes the rows reach (an observation, never an obligation), and `check --json` writes the whole report as one document.
+
 ## Conformance
 
 `verifyConformance` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model.
