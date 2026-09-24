@@ -199,7 +199,52 @@ describe("graded evidence in the adequacy report", () => {
         { case: "確定", specified: false, observed: false, verified: false },
         { case: "不可", specified: true, observed: true, verified: true },
       ],
+      effects: [{ case: "決済要求", specified: false, observed: false, verified: false }],
     });
+  });
+
+  it("verifies a result case by its case even when the row fails on its fields", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "判定",
+        examples: examples(判定する, [
+          example(判定する, "理由まで期待する", {
+            given: { 状態: "商品あり", カートID: "c-1" },
+            expect: { result: { 結果: "不可", 理由: "カートが空" }, effects: [] },
+          }),
+        ]),
+        implementation: 常に不可,
+      }),
+    );
+
+    expect(report.evidence.result[1]).toStrictEqual({
+      case: "不可",
+      specified: true,
+      observed: true,
+      verified: true,
+    });
+  });
+
+  it("grades an effect case the same way as a result case", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "判定",
+        examples: examples(判定する, [
+          example(判定する, "決済を期待する", {
+            given: { 状態: "商品あり", カートID: "c-1" },
+            expect: {
+              result: { 結果: "不可", 理由: "在庫不足" },
+              effects: [{ 種類: "決済要求", カートID: "c-1" }],
+            },
+          }),
+        ]),
+        implementation: 常に不可,
+      }),
+    );
+
+    expect(report.evidence.effects).toStrictEqual([
+      { case: "決済要求", specified: true, observed: false, verified: false },
+    ]);
   });
 
   it("runs a row whose answer is owed and records what it saw without specifying anything", async () => {
@@ -222,6 +267,7 @@ describe("graded evidence in the adequacy report", () => {
         { case: "確定", specified: false, observed: false, verified: false },
         { case: "不可", specified: false, observed: true, verified: false },
       ],
+      effects: [{ case: "決済要求", specified: false, observed: false, verified: false }],
     });
   });
 });

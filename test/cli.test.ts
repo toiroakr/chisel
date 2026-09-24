@@ -139,6 +139,10 @@ describe("cli run() check with classes", () => {
     expect(await report()).toMatch(/^  証拠（入力） +商品あり: specified・executed・verified$/m);
   });
 
+  it("prints how far the rows got for each effect case", async () => {
+    expect(await report()).toMatch(/^  証拠（作用） +決済要求: specified・observed・verified$/m);
+  });
+
   it("prints arms as not measured and names the decisions it could not read", async () => {
     expect(await report()).toMatch(
       /^  分岐 +計測不能 \(not measured\); 読めないdecision: 確定する$/m,

@@ -108,6 +108,7 @@ export interface AdequacyReport {
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
+    readonly effects: readonly ResultCaseEvidence[];
   };
   readonly measures: { readonly arms: Measure };
   readonly adequate: boolean;
@@ -231,17 +232,31 @@ export async function evaluateSpecification(
   const verifiedInputs = new Set<string>();
   const observedResults = new Set<string>();
   const verifiedResults = new Set<string>();
+  const observedEffects = new Set<string>();
+  const verifiedEffects = new Set<string>();
   const positions = positionsOf(definition.input);
   const coveredClasses = positions.map(() => new Set<string>());
-  const observe = (inputTag: string, actual: unknown): string | undefined => {
+  const observe = (
+    inputTag: string,
+    actual: unknown,
+  ): { readonly result: string | undefined; readonly effects: ReadonlySet<string> } => {
     executedInputs.add(inputTag);
-    const observed = isSumSchema(definition.result)
-      ? tagOf(definition.result, (actual as Execution<unknown, unknown>).result)
+    const execution = actual as Execution<unknown, unknown>;
+    const result = isSumSchema(definition.result)
+      ? tagOf(definition.result, execution.result)
       : undefined;
-    if (observed !== undefined) {
-      observedResults.add(observed);
+    if (result !== undefined) {
+      observedResults.add(result);
     }
-    return observed;
+    const effects = new Set(
+      execution.effects
+        .map(effect => tagOf(definition.effects, effect))
+        .filter((tag): tag is string => tag !== undefined),
+    );
+    for (const effect of effects) {
+      observedEffects.add(effect);
+    }
+    return { result, effects };
   };
 
   for (const row of specification.examples.rows) {
@@ -317,8 +332,14 @@ export async function evaluateSpecification(
       );
       if (actual !== undefined && inputTag !== undefined) {
         const observed = observe(inputTag, actual);
-        if (observed !== undefined && observed === resultTag) {
-          verifiedResults.add(observed);
+        if (observed.result !== undefined && observed.result === resultTag) {
+          verifiedResults.add(observed.result);
+        }
+        for (const effect of row.expect.effects) {
+          const effectTag = tagOf(definition.effects, effect);
+          if (effectTag !== undefined && observed.effects.has(effectTag)) {
+            verifiedEffects.add(effectTag);
+          }
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
@@ -446,6 +467,12 @@ export async function evaluateSpecification(
             verified: verifiedResults.has(tag),
           }))
         : [],
+      effects: definition.effects.variantTags.map(tag => ({
+        case: tag,
+        specified: coveredEffects.has(tag),
+        observed: observedEffects.has(tag),
+        verified: verifiedEffects.has(tag),
+      })),
     },
     measures: { arms },
     adequate,

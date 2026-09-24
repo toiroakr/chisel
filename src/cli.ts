@@ -127,6 +127,7 @@ function formatReport(report: AdequacyReport): string {
     ...formatPartitions(report.partitions),
     ...formatEvidence("証拠（入力）", report.evidence.input, ["specified", "executed", "verified"]),
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
+    ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
     `  実装                 ${implementation}`,
     `  分岐                 ${formatMeasure(report.measures.arms)}`,
   ];
