@@ -190,4 +190,20 @@ describe("generateExamples and excluded classes", () => {
       { 状態: "入力済み", 同意: true },
     ]);
   });
+
+  it("offers rows on both sides of a border on a string value, which has no step", () => {
+    const 並べる = behavior({
+      name: "並べる",
+      input: sum("状態", {
+        入力済み: object({ 見出し: string("見出し").invariant(v => ge(v, "m")) }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+
+    expect(generateExamples(並べる).map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 見出し: "m" },
+      { 状態: "入力済み", 見出し: "ma" },
+    ]);
+  });
 });

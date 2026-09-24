@@ -270,6 +270,16 @@ describe("borders an invariant draws", () => {
   });
 });
 
+describe("a border with nothing past it", () => {
+  it("excludes the IN point of an upper bound at the empty string, below which no string exists", () => {
+    const [position] = positionsOf(
+      sum("状態", { 入力済み: object({ 見出し: string("見出し").invariant(v => le(v, "")) }) }),
+    );
+
+    expect(position!.borders[0]!.points[2]).toMatchObject({ role: "IN", status: "excluded" });
+  });
+});
+
 describe("where an object invariant draws its border", () => {
   it("places the border on the one field it compares with a constant", () => {
     const Cart = sum("状態", {

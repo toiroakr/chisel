@@ -23,6 +23,7 @@ export interface Border {
 export interface Carrier {
   readonly compare: (left: unknown, right: unknown) => number;
   readonly step?: (value: unknown, direction: 1 | -1) => unknown;
+  readonly past?: (value: unknown, direction: 1 | -1) => unknown;
   readonly format: (value: unknown) => string;
 }
 
@@ -34,6 +35,7 @@ export const integerCarrier: Carrier = {
 
 export const numberCarrier: Carrier = {
   compare: (left, right) => (left as number) - (right as number),
+  past: (value, direction) => (value as number) + direction,
   format: String,
 };
 
@@ -54,6 +56,12 @@ function epochNanoseconds(value: unknown): bigint {
 export const stringCarrier: Carrier = {
   compare: (left, right) =>
     (left as string) < (right as string) ? -1 : (left as string) > (right as string) ? 1 : 0,
+  past: (value, direction) =>
+    direction === 1
+      ? `${value as string}a`
+      : (value as string).length > 0
+        ? (value as string).slice(0, -1)
+        : undefined,
   format: value => JSON.stringify(value),
 };
 
@@ -164,13 +172,7 @@ function borderOf(
     off === undefined
       ? { role: "OFF", relation: "neighbour not named", status: "not named", contains: () => false }
       : { role: "OFF", relation: `= ${carrier.format(off)}`, status: "excluded", contains: at(off) },
-    {
-      role: "IN",
-      relation: beyond(on),
-      status: "owed",
-      witness: step?.(on, inward) ?? (typeof on === "number" ? on + inward : undefined),
-      contains: inside(on),
-    },
+    inPoint(beyond(on), step?.(on, inward) ?? carrier.past?.(on, inward), inside(on)),
     {
       role: "OUT",
       relation: before(off ?? bound),
@@ -191,6 +193,16 @@ function borderOf(
     lower,
     admits: value => at(on)(value) || inside(on)(value),
   };
+}
+
+function inPoint(
+  relation: string,
+  witness: unknown,
+  contains: (value: unknown) => boolean,
+): BorderPoint {
+  return witness === undefined
+    ? { role: "IN", relation, status: "excluded", contains }
+    : { role: "IN", relation, status: "owed", witness, contains };
 }
 
 const mirrored: Readonly<Record<Operator, Operator>> = {
