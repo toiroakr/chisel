@@ -700,3 +700,39 @@ describe("a guard point no row can reach", () => {
     ).toStrictEqual([]);
   });
 });
+
+describe("an equality between two positions", () => {
+  const 照合する = behavior({
+    name: "照合する",
+    input: sum("状態", { 入力済み: object({ 請求額: integer(), 入金額: integer() }) }),
+    result: sum("結果", { 一致: object({}), 不一致: object({}) }),
+    effects: sum("種類", {}),
+  });
+
+  async function reportFor(condition: (入力: TermOf<{ 状態: "入力済み"; 請求額: number; 入金額: number }>) => Rule) {
+    const 照合 = implement(照合する, {
+      cases: {
+        入力済み: rules(
+          "照合",
+          入力 => [guard(condition(入力), () => ({ result: { 結果: "不一致" }, effects: [] }))],
+          () => ({ result: { 結果: "一致" }, effects: [] }),
+        ),
+      },
+    });
+    return evaluateSpecification(
+      defineSpecification({ name: "照合", examples: examples(照合する, []), implementation: 照合 }),
+    );
+  }
+
+  it("draws no border, since the arms already put a whole arm on each side of the line", async () => {
+    const report = await reportFor(入力 => eq(入力.請求額, 入力.入金額));
+
+    expect(report.borders.filter(border => border.rule.startsWith("guard"))).toStrictEqual([]);
+  });
+
+  it("counts an equality as read, not as a comparison Chisel cannot read", async () => {
+    const report = await reportFor(入力 => ne(入力.請求額, 入力.入金額));
+
+    expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
+  });
+});
