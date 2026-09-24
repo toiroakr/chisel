@@ -17,6 +17,7 @@ import {
   isSpecification,
 } from "./specification.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
+import { reportDocument } from "./report-json.js";
 import type {
   AdequacyReport,
   BorderCoverage,
@@ -58,7 +59,8 @@ const checkCommand = defineCommand({
       targets.map(target => evaluateSpecification(target.specification)),
     );
     if (args.json) {
-      console.log(JSON.stringify({ schemaVersion: 1, reports }, undefined, 2));
+      const document = reportDocument(reports, { id: resolve(args.file), name: args.file });
+      console.log(JSON.stringify(document, undefined, 2));
     } else {
       for (const report of reports) {
         console.log(formatReport(report));

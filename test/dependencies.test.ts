@@ -86,6 +86,32 @@ describe("a value dependency", () => {
       { name: "時刻を書き忘れた", message: "No stand-in for dependency 現在時刻" },
     ]);
   });
+
+  it("says the row was not observed, and why", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(受付する, [
+          example(受付する, "時刻を書き忘れた", {
+            given: { 状態: "申込済み", 申込ID: "a-1" },
+            expect: {
+              result: { 受付日時: Temporal.Instant.from("2026-10-01T09:00:00Z") },
+              effects: [],
+            },
+          }),
+        ]),
+        implementation: 今で受け付ける,
+      }),
+    );
+
+    expect(report.incompleteness).toStrictEqual([
+      {
+        kind: "row not run",
+        subject: "時刻を書き忘れた",
+        reason: "No stand-in for dependency 現在時刻",
+      },
+    ]);
+  });
 });
 
 describe("a value a row writes for a dependency", () => {

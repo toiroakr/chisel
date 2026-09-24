@@ -122,6 +122,7 @@ export type {
   ExampleFailure,
   ExampleSet,
   GeneratedExample,
+  Incompleteness,
   GenerationReport,
   InputCaseEvidence,
   Measure,
@@ -137,3 +138,5 @@ export type {
   Verdict,
 } from "./specification.js";
 export type { EnsuresClassification, EnsuresReading, EnsuresReport } from "./ensures.js";
+export { reportDocument, reportSchemaVersion } from "./report-json.js";
+export type { ReportSource, Weakening } from "./report-json.js";

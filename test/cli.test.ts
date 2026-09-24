@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -5,6 +6,7 @@ import { runCommand } from "@politty/valibot";
 import type { RunResult } from "@politty/valibot";
 import { describe, expect, it } from "vitest";
 import { cli } from "../src/cli.js";
+import { validate } from "./support/json-schema.js";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -345,5 +347,74 @@ describe("chisel check --json", () => {
     const result = await run(["check", fixture("test/fixtures/rules.ts"), "--json", "--strict"]);
 
     expect(result.exitCode).toBe(1);
+  });
+  async function documentFor(path: string) {
+    const result = await run(["check", fixture(path), "--json"]);
+    return JSON.parse(stdoutOf(result)) as {
+      readonly sources: readonly { readonly id: string; readonly name: string }[];
+      readonly reports: readonly Readonly<Record<string, unknown>>[];
+    };
+  }
+
+  it("keeps to the published schema", async () => {
+    const schema = JSON.parse(
+      readFileSync(resolve(repoRoot, "schema/report.schema.json"), "utf8"),
+    ) as Parameters<typeof validate>[0];
+    const documents = [];
+    for (const path of [
+      "test/fixtures/rules.ts",
+      "test/fixtures/classes.ts",
+      "test/fixtures/borders.ts",
+      "test/fixtures/gap-coverage.ts",
+      "test/fixtures/infeasible-way.ts",
+      "test/fixtures/ensures-readings.ts",
+      "examples/cart-checkout/注文確定.spec.ts",
+    ]) {
+      documents.push(await documentFor(path));
+    }
+
+    expect(documents.flatMap(document => validate(schema, document))).toStrictEqual([]);
+  });
+
+  it("names the source each report is about", async () => {
+    const document = await documentFor("test/fixtures/rules.ts");
+
+    expect({
+      sources: document.sources,
+      source: document.reports.map(report => report.source),
+    }).toStrictEqual({
+      sources: [{ id: fixture("test/fixtures/rules.ts"), name: fixture("test/fixtures/rules.ts") }],
+      source: [fixture("test/fixtures/rules.ts")],
+    });
+  });
+
+  it("says what weakened a measure it could not finish", async () => {
+    const document = await documentFor("test/fixtures/classes.ts");
+    const measures = document.reports[0]!.measures as Readonly<Record<string, unknown>>;
+
+    expect(measures.arms).toStrictEqual({
+      status: "unavailable",
+      reason: "not measured",
+      notRead: ["確定する"],
+      weakening: [{ kind: "decision not read", subject: "確定する" }],
+    });
+  });
+
+  it("gives every obligation an identity of its own", async () => {
+    const document = await documentFor("test/fixtures/rules.ts");
+    const report = document.reports[0]! as {
+      readonly borders: readonly { readonly points: readonly { readonly obligationId: string }[] }[];
+      readonly measures: {
+        readonly arms: { readonly arms: readonly { readonly obligationId: string }[] };
+        readonly rules: { readonly rules: readonly { readonly obligationId: string }[] };
+      };
+    };
+    const ids = [
+      ...report.borders.flatMap(border => border.points.map(point => point.obligationId)),
+      ...report.measures.arms.arms.map(arm => arm.obligationId),
+      ...report.measures.rules.rules.map(rule => rule.obligationId),
+    ];
+
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

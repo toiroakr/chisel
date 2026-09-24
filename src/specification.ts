@@ -140,6 +140,7 @@ export interface AdequacyReport {
   readonly controlGaps: readonly ControlGap[];
   readonly dependencyIssues: readonly DependencyIssue[];
   readonly modelIssues: readonly string[];
+  readonly incompleteness: readonly Incompleteness[];
   readonly ensures: EnsuresReport;
   readonly failures: readonly ExampleFailure[];
   readonly partitions: readonly PartitionCoverage[];
@@ -163,6 +164,12 @@ export interface AdequacyReport {
 export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 
 export type CoverageStatus = "met" | "gap" | "answer owed" | "no row owed" | "undecided";
+
+export interface Incompleteness {
+  readonly kind: "row not run" | "row did not come back";
+  readonly subject: string;
+  readonly reason: string;
+}
 
 export interface ArmCoverage {
   readonly decision: string;
@@ -361,6 +368,7 @@ export async function evaluateSpecification(
     ...Object.fromEntries(tables),
     ...(row.with ?? {}),
   });
+  const incompleteness: Incompleteness[] = [];
   const unstoodFor = (row: Example<AnyBehavior>): string | undefined => {
     const written = (row.with ?? {}) as Readonly<Record<string, unknown>>;
     for (const [name, value] of Object.entries(written)) {
@@ -423,6 +431,7 @@ export async function evaluateSpecification(
       const unstoodOwed = unstoodFor(row);
       if (implementation !== undefined && unstoodOwed !== undefined) {
         failures.push({ name: row.name, message: unstoodOwed });
+        incompleteness.push({ kind: "row not run", subject: row.name, reason: unstoodOwed });
       } else if (
         implementation !== undefined &&
         decision !== undefined &&
@@ -436,10 +445,9 @@ export async function evaluateSpecification(
             waysOwed.push(traced.way);
           }
         } catch (error) {
-          failures.push({
-            name: row.name,
-            message: error instanceof Error ? error.message : String(error),
-          });
+          const message = error instanceof Error ? error.message : String(error);
+          failures.push({ name: row.name, message });
+          incompleteness.push({ kind: "row did not come back", subject: row.name, reason: message });
         }
       }
       continue;
@@ -489,6 +497,7 @@ export async function evaluateSpecification(
     const unstood = unstoodFor(row);
     if (implementation !== undefined && unstood !== undefined) {
       failures.push({ name: row.name, message: unstood });
+      incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
     } else if (implementation !== undefined) {
       const { actual, failure } = await runAndCompare(
         row.name,
@@ -521,6 +530,13 @@ export async function evaluateSpecification(
       }
       if (failure !== undefined) {
         failures.push(failure);
+        if (actual === undefined) {
+          incompleteness.push({
+            kind: "row did not come back",
+            subject: row.name,
+            reason: failure.message,
+          });
+        }
       }
     }
   }
@@ -745,6 +761,7 @@ export async function evaluateSpecification(
     controlGaps,
     dependencyIssues,
     modelIssues,
+    incompleteness,
     ensures: readEnsures(definition),
     failures,
     partitions,

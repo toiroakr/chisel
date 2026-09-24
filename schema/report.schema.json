@@ -1,0 +1,925 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/toiroakr/chisel/schema/report.schema.json",
+  "title": "Chisel adequacy report",
+  "description": "The document `chisel check --json` writes. Every object is closed; schemaVersion is raised only when a field is removed or renamed.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "reports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/report"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sources",
+    "reports"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "covered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "total": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "covered",
+        "missing",
+        "excluded",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "weakening": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "decision not read",
+            "comparison not read"
+          ]
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "subject"
+      ],
+      "additionalProperties": false
+    },
+    "arm": {
+      "type": "object",
+      "properties": {
+        "obligationId": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "guard": {
+          "type": "string"
+        },
+        "arm": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "met",
+            "gap",
+            "answer owed",
+            "no row owed",
+            "undecided"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "obligationId",
+        "decision",
+        "guard",
+        "arm",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "rule": {
+      "type": "object",
+      "properties": {
+        "obligationId": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "way": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "met",
+            "gap",
+            "answer owed",
+            "no row owed",
+            "undecided"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "obligationId",
+        "decision",
+        "way",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object",
+      "properties": {
+        "obligationId": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "ON",
+            "OFF",
+            "IN",
+            "OUT"
+          ]
+        },
+        "relation": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "met",
+            "gap",
+            "excluded",
+            "not named",
+            "no point",
+            "no row owed",
+            "undecided"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "obligationId",
+        "role",
+        "relation",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "report": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "specification": {
+          "type": "string"
+        },
+        "behavior": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/coverage"
+        },
+        "result": {
+          "$ref": "#/$defs/coverage"
+        },
+        "effects": {
+          "$ref": "#/$defs/coverage"
+        },
+        "implementation": {
+          "enum": [
+            "present",
+            "missing"
+          ]
+        },
+        "unanswered": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "pendingDecisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "variant": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "variant",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "controlGaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "effect": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "effect",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "dependencyIssues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "variant": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "modelIssues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "incompleteness": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "row not run",
+                  "row did not come back"
+                ]
+              },
+              "subject": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "subject",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "ensures": {
+          "type": "object",
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "clause": {
+                    "type": "string"
+                  },
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "conjunct": {
+                    "type": "string"
+                  },
+                  "classification": {
+                    "enum": [
+                      "derivable",
+                      "exact match",
+                      "always holds",
+                      "never holds",
+                      "runtime only"
+                    ]
+                  }
+                },
+                "required": [
+                  "clause",
+                  "conjunct",
+                  "classification"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "unstated": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "rules",
+            "unstated"
+          ],
+          "additionalProperties": false
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "partitions": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "divided"
+                  },
+                  "covered": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "missing": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "excluded": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind",
+                  "covered",
+                  "missing",
+                  "excluded"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "not-derivable",
+                      "bounded"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "borders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "rule": {
+                "type": "string"
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/point"
+                }
+              }
+            },
+            "required": [
+              "path",
+              "rule",
+              "points"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "positions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "reached": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "positions",
+              "reached",
+              "total"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "fakeIssues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "case": {
+                    "type": "string"
+                  },
+                  "specified": {
+                    "type": "boolean"
+                  },
+                  "executed": {
+                    "type": "boolean"
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "case",
+                  "specified",
+                  "executed",
+                  "verified"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "result": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "case": {
+                    "type": "string"
+                  },
+                  "specified": {
+                    "type": "boolean"
+                  },
+                  "observed": {
+                    "type": "boolean"
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "case",
+                  "specified",
+                  "observed",
+                  "verified"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "effects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "case": {
+                    "type": "string"
+                  },
+                  "specified": {
+                    "type": "boolean"
+                  },
+                  "observed": {
+                    "type": "boolean"
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "case",
+                  "specified",
+                  "observed",
+                  "verified"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "input",
+            "result",
+            "effects"
+          ],
+          "additionalProperties": false
+        },
+        "measures": {
+          "type": "object",
+          "properties": {
+            "arms": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "complete"
+                    },
+                    "arms": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/arm"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "arms"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "partial"
+                    },
+                    "arms": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/arm"
+                      }
+                    },
+                    "notRead": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "weakening": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/weakening"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "arms",
+                    "notRead",
+                    "weakening"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "unavailable"
+                    },
+                    "reason": {
+                      "const": "not applicable"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "unavailable"
+                    },
+                    "reason": {
+                      "const": "not measured"
+                    },
+                    "notRead": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "weakening": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/weakening"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason",
+                    "notRead",
+                    "weakening"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "rules": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "complete"
+                    },
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/rule"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "rules"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "partial"
+                    },
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/rule"
+                      }
+                    },
+                    "notRead": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "weakening": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/weakening"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "rules",
+                    "notRead",
+                    "weakening"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "unavailable"
+                    },
+                    "reason": {
+                      "const": "not applicable"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "unavailable"
+                    },
+                    "reason": {
+                      "const": "not measured"
+                    },
+                    "notRead": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "weakening": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/weakening"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "reason",
+                    "notRead",
+                    "weakening"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "comparisons": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "complete"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "partial"
+                    },
+                    "notRead": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "weakening": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/weakening"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "notRead",
+                    "weakening"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "arms",
+            "rules",
+            "comparisons"
+          ],
+          "additionalProperties": false
+        },
+        "adequate": {
+          "type": "boolean"
+        },
+        "verdict": {
+          "enum": [
+            "satisfied",
+            "not_satisfied",
+            "undetermined"
+          ]
+        }
+      },
+      "required": [
+        "source",
+        "specification",
+        "behavior",
+        "input",
+        "result",
+        "effects",
+        "implementation",
+        "unanswered",
+        "pendingDecisions",
+        "controlGaps",
+        "dependencyIssues",
+        "modelIssues",
+        "incompleteness",
+        "ensures",
+        "failures",
+        "partitions",
+        "borders",
+        "pairs",
+        "fakeIssues",
+        "evidence",
+        "measures",
+        "adequate",
+        "verdict"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
