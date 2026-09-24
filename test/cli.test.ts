@@ -153,3 +153,29 @@ describe("cli run() check with classes", () => {
     expect(await report()).toMatch(/^充足度: 不完全 \(not_satisfied\)$/m);
   });
 });
+
+describe("cli run() check with borders", () => {
+  async function report(): Promise<string> {
+    const result = await run(["check", fixture("test/fixtures/borders.ts")]);
+    return result.stdout.join("\n");
+  }
+
+  it("prints a class the rules refuse as excluded", async () => {
+    expect(await report()).toMatch(/^    @入力済み\.同意 +1\/1; 除外 false \(excluded\)$/m);
+  });
+
+  it("prints each border with the rule that drew it", async () => {
+    expect(await report()).toMatch(/^    @入力済み\.数量 +invariant \$ >= 1$/m);
+  });
+
+  it("prints each point with its role, relation and what became of it", async () => {
+    const text = await report();
+
+    expect([
+      /^      ON  = 1 +met$/m.test(text),
+      /^      OFF = 0 +除外 \(excluded\)$/m.test(text),
+      /^      IN  > 1 +! 行がない \(gap\)$/m.test(text),
+      /^      OUT < 0 +除外 \(excluded\)$/m.test(text),
+    ]).toStrictEqual([true, true, true, true]);
+  });
+});

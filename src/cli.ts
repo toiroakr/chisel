@@ -16,6 +16,7 @@ import {
 } from "./specification.js";
 import type {
   AdequacyReport,
+  BorderCoverage,
   GeneratedExample,
   Measure,
   PartitionCoverage,
@@ -125,6 +126,7 @@ function formatReport(report: AdequacyReport): string {
     formatCoverage("結果variant", report.result),
     formatCoverage("作用variant", report.effects),
     ...formatPartitions(report.partitions),
+    ...formatBorders(report.borders),
     ...formatEvidence("証拠（入力）", report.evidence.input, ["specified", "executed", "verified"]),
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
     ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
@@ -168,9 +170,15 @@ function formatPartitions(partitions: readonly PartitionCoverage[]): string[] {
     lines.push("  クラス");
     for (const partition of divided) {
       const total = partition.covered.length + partition.missing.length;
-      const suffix =
+      const missing =
         partition.missing.length === 0 ? "" : `; 未網羅 ${partition.missing.join(", ")}`;
-      lines.push(`    ${padDisplay(partition.path, 19)} ${partition.covered.length}/${total}${suffix}`);
+      const excluded =
+        partition.excluded.length === 0
+          ? ""
+          : `; 除外 ${partition.excluded.join(", ")} (excluded)`;
+      lines.push(
+        `    ${padDisplay(partition.path, 19)} ${partition.covered.length}/${total}${missing}${excluded}`,
+      );
     }
   }
   const undivided = partitions.filter(partition => partition.kind === "not-derivable");
@@ -180,6 +188,29 @@ function formatPartitions(partitions: readonly PartitionCoverage[]): string[] {
     );
   }
   return lines;
+}
+
+const pointStatusLabels: Readonly<Record<BorderCoverage["points"][number]["status"], string>> = {
+  met: "met",
+  gap: "! 行がない (gap)",
+  excluded: "除外 (excluded)",
+  "not named": "隣の値なし (not named)",
+};
+
+function formatBorders(borders: readonly BorderCoverage[]): string[] {
+  if (borders.length === 0) {
+    return [];
+  }
+  return [
+    "  境界",
+    ...borders.flatMap(border => [
+      `    ${padDisplay(border.path, 19)} ${border.rule}`,
+      ...border.points.map(
+        point =>
+          `      ${point.role.padEnd(3)} ${padDisplay(point.relation, 20)} ${pointStatusLabels[point.status]}`,
+      ),
+    ]),
+  ];
 }
 
 function formatEvidence<Grade extends string>(
