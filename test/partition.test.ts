@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   array,
   boolean,
+  eq,
   ge,
   gt,
   integer,
@@ -9,6 +10,7 @@ import {
   length,
   lt,
   instant,
+  ne,
   number,
   object,
   optional,
@@ -277,5 +279,29 @@ describe("where an object invariant draws its border", () => {
     });
 
     expect(positionsOf(Cart).map(p => p.borders.length)).toStrictEqual([0, 0]);
+  });
+});
+
+describe("classes an invariant refuses", () => {
+  it("excludes the boolean class an equality rules out", () => {
+    const [position] = positionsOf(
+      sum("状態", { 商品あり: object({ 同意: boolean().invariant(v => eq(v, true)) }) }),
+    ) as [DividedPosition];
+
+    expect(position.excluded).toStrictEqual(["false"]);
+  });
+
+  it("excludes the case of a sum field its discriminant is ruled out of", () => {
+    const [position] = positionsOf(
+      sum("状態", {
+        確定済み: object({
+          配送: sum("方法", { 店頭受取: object({}), 宅配: object({}) }).invariant(v =>
+            ne(v.方法, "店頭受取"),
+          ),
+        }),
+      }),
+    ) as [DividedPosition];
+
+    expect(position.excluded).toStrictEqual(["店頭受取"]);
   });
 });

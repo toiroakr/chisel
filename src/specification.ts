@@ -157,6 +157,7 @@ export type PartitionCoverage =
       readonly kind: "divided";
       readonly covered: readonly string[];
       readonly missing: readonly string[];
+      readonly excluded: readonly string[];
     }
   | { readonly path: string; readonly kind: "not-derivable" | "bounded" };
 
@@ -419,8 +420,17 @@ export async function evaluateSpecification(
     if (position.kind !== "divided") {
       return { path: position.path, kind: position.kind };
     }
-    const { covered, missing } = coverage(position.classes, coveredClasses[index]!);
-    return { path: position.path, kind: "divided", covered, missing };
+    const { covered, missing } = coverage(
+      position.classes.filter(className => !position.excluded.includes(className)),
+      coveredClasses[index]!,
+    );
+    return {
+      path: position.path,
+      kind: "divided",
+      covered,
+      missing,
+      excluded: position.excluded,
+    };
   });
   const borders = positions.flatMap(position =>
     position.borders.map((border): BorderCoverage => {
@@ -541,6 +551,9 @@ export function generateExamples(
       continue;
     }
     for (const className of position.classes) {
+      if (position.excluded.includes(className)) {
+        continue;
+      }
       const standsIn = [...rows, ...generated].some(row =>
         position.classify(row.given).includes(className),
       );

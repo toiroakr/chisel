@@ -15,7 +15,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, resize, stepInto } from "./rule.js";
+import { boundTermPath, holds, resize, stepInto } from "./rule.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -24,6 +24,7 @@ export interface DividedPosition {
   readonly kind: "divided";
   readonly path: string;
   readonly classes: readonly string[];
+  readonly excluded: readonly string[];
   readonly borders: readonly Border[];
   valuesIn(given: unknown): readonly unknown[];
   write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
@@ -132,8 +133,14 @@ function positionAt(
       }),
     ];
   }
+  const rules = [...schema.invariants, ...inherited];
   if (schema.kind === "boolean") {
-    return [divided(path, ["true", "false"], focus, String, className => className === "true")];
+    return [
+      divided(path, ["true", "false"], focus, String, className => className === "true", {
+        rules: rules.filter(rule => boundTermPath(rule)?.length === 0),
+        sample: className => className === "true",
+      }),
+    ];
   }
   if (schema.kind === "array") {
     const element = (schema as ArraySchema<unknown>).element;
@@ -157,6 +164,13 @@ function positionAt(
         focus,
         value => tagOf(schema, value),
         className => schema.placeholderFor(className),
+        {
+          rules: rules.filter(rule => {
+            const termPath = boundTermPath(rule);
+            return termPath?.length === 1 && termPath[0] === schema.discriminant;
+          }),
+          sample: className => ({ [schema.discriminant]: className }),
+        },
       ),
       ...underCases(schema, path, focus),
     ];
@@ -203,11 +217,18 @@ function divided(
   focus: Focus,
   classOf: (value: unknown) => string | undefined,
   witness: (className: string) => unknown,
+  refusal: { readonly rules: readonly Rule[]; sample(className: string): unknown } = {
+    rules: [],
+    sample: () => undefined,
+  },
 ): DividedPosition {
   return {
     kind: "divided",
     path,
     classes: [...classes],
+    excluded: classes.filter(className =>
+      refusal.rules.some(rule => !holds(rule, refusal.sample(className))),
+    ),
     borders: [],
     valuesIn: focus.reach,
     write: writer(focus),

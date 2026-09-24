@@ -3,6 +3,7 @@ import {
   array,
   behavior,
   boolean,
+  eq,
   example,
   ge,
   le,
@@ -155,6 +156,23 @@ describe("generateExamples for border points", () => {
       { 状態: "入力済み", 割合: 0 },
       { 状態: "入力済み", 割合: 0.25 },
       { 状態: "入力済み", 割合: 0.5 },
+    ]);
+  });
+});
+
+describe("generateExamples and excluded classes", () => {
+  it("offers no row for a class the rules refuse", () => {
+    const 同意する = behavior({
+      name: "同意する",
+      input: sum("状態", {
+        入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+
+    expect(generateExamples(同意する).map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 同意: true },
     ]);
   });
 });

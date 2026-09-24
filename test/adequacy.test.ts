@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   behavior,
+  boolean,
   defineSpecification,
   evaluateSpecification,
   example,
+  eq,
   examples,
   ge,
   implement,
@@ -62,6 +64,7 @@ describe("equivalence partitions in the adequacy report", () => {
         kind: "divided",
         covered: ["なし"],
         missing: ["あり"],
+        excluded: [],
       },
       { path: "@商品あり.クーポン?", kind: "not-derivable" },
     ]);
@@ -85,6 +88,7 @@ describe("equivalence partitions in the adequacy report", () => {
       kind: "divided",
       covered: [],
       missing: ["なし", "あり"],
+      excluded: [],
     });
   });
 
@@ -427,6 +431,40 @@ describe("border points in the adequacy report", () => {
       "excluded",
       "gap",
       "excluded",
+    ]);
+  });
+});
+
+describe("excluded classes in the adequacy report", () => {
+  it("neither covers nor misses a class the rules refuse", async () => {
+    const 同意する = behavior({
+      name: "同意する",
+      input: sum("状態", {
+        入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "同意",
+        examples: examples(同意する, [
+          example(同意する, "同意した", {
+            given: { 状態: "入力済み", 同意: true },
+            expect: { result: {}, effects: [] },
+          }),
+        ]),
+      }),
+    );
+
+    expect(report.partitions).toStrictEqual([
+      {
+        path: "@入力済み.同意",
+        kind: "divided",
+        covered: ["true"],
+        missing: [],
+        excluded: ["false"],
+      },
     ]);
   });
 });
