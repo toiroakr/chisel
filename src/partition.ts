@@ -25,6 +25,7 @@ export interface DividedPosition {
   readonly path: string;
   readonly classes: readonly string[];
   readonly borders: readonly Border[];
+  valuesIn(given: unknown): readonly unknown[];
   classify(given: unknown): readonly string[];
   place(given: unknown, className: string): unknown;
 }
@@ -33,6 +34,7 @@ export interface UndividedPosition {
   readonly kind: "not-derivable" | "bounded";
   readonly path: string;
   readonly borders: readonly Border[];
+  valuesIn(given: unknown): readonly unknown[];
 }
 
 interface Focus {
@@ -144,7 +146,14 @@ function positionAt(
       ...underCases(schema, path, focus),
     ];
   }
-  return [{ kind: borders.length === 0 ? "not-derivable" : "bounded", path, borders }];
+  return [
+    {
+      kind: borders.length === 0 ? "not-derivable" : "bounded",
+      path,
+      borders,
+      valuesIn: focus.reach,
+    },
+  ];
 }
 
 function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
@@ -177,6 +186,7 @@ function divided(
     path,
     classes: [...classes],
     borders: [],
+    valuesIn: focus.reach,
     classify: given =>
       focus
         .reach(given)

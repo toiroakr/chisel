@@ -8,6 +8,7 @@ import type {
   Implementation,
 } from "./behavior.js";
 import { runImplementation } from "./behavior.js";
+import type { PointRole } from "./border.js";
 import { positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
@@ -105,6 +106,7 @@ export interface AdequacyReport {
   readonly dependencyIssues: readonly DependencyIssue[];
   readonly failures: readonly ExampleFailure[];
   readonly partitions: readonly PartitionCoverage[];
+  readonly borders: readonly BorderCoverage[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -137,6 +139,16 @@ export interface ResultCaseEvidence {
   readonly specified: boolean;
   readonly observed: boolean;
   readonly verified: boolean;
+}
+
+export interface BorderCoverage {
+  readonly path: string;
+  readonly rule: string;
+  readonly points: readonly {
+    readonly role: PointRole;
+    readonly relation: string;
+    readonly status: "met" | "gap" | "excluded" | "not named";
+  }[];
 }
 
 export type PartitionCoverage =
@@ -236,6 +248,7 @@ export async function evaluateSpecification(
   const verifiedEffects = new Set<string>();
   const positions = positionsOf(definition.input);
   const coveredClasses = positions.map(() => new Set<string>());
+  const answeredGivens: unknown[] = [];
   const observe = (
     inputTag: string,
     actual: unknown,
@@ -294,6 +307,7 @@ export async function evaluateSpecification(
     if (inputTag !== undefined) {
       coveredInputs.add(inputTag);
     }
+    answeredGivens.push(row.given);
     positions.forEach((position, index) => {
       if (position.kind === "divided") {
         for (const found of position.classify(row.given)) {
@@ -408,6 +422,30 @@ export async function evaluateSpecification(
     const { covered, missing } = coverage(position.classes, coveredClasses[index]!);
     return { path: position.path, kind: "divided", covered, missing };
   });
+  const borders = positions.flatMap(position =>
+    position.borders.map((border): BorderCoverage => {
+      const coordinates = answeredGivens
+        .flatMap(given => position.valuesIn(given))
+        .filter(value => value !== undefined)
+        .map(value =>
+          border.measure === "length" ? (value as string | readonly unknown[]).length : value,
+        );
+      return {
+        path: position.path,
+        rule: border.rule,
+        points: border.points.map(point => ({
+          role: point.role,
+          relation: point.relation,
+          status:
+            point.status !== "owed"
+              ? point.status
+              : coordinates.some(value => point.contains(value))
+                ? "met"
+                : "gap",
+        })),
+      };
+    }),
+  );
   const adequate =
     specification.implementation !== undefined &&
     failures.length === 0 &&
@@ -420,7 +458,8 @@ export async function evaluateSpecification(
     effects.missing.length === 0 &&
     partitions.every(
       partition => partition.kind !== "divided" || partition.missing.length === 0,
-    );
+    ) &&
+    borders.every(border => border.points.every(point => point.status !== "gap"));
 
   const arms: Measure =
     specification.implementation === undefined
@@ -452,6 +491,7 @@ export async function evaluateSpecification(
     dependencyIssues,
     failures,
     partitions,
+    borders,
     evidence: {
       input: definition.input.variantTags.map(tag => ({
         case: tag,

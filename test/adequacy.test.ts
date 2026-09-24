@@ -5,7 +5,10 @@ import {
   evaluateSpecification,
   example,
   examples,
+  ge,
   implement,
+  integer,
+  length,
   object,
   optional,
   string,
@@ -340,5 +343,90 @@ describe("measures and verdict", () => {
     );
 
     expect(report.verdict).toBe("undetermined");
+  });
+});
+
+describe("border points in the adequacy report", () => {
+  const 数量を確定する = behavior({
+    name: "数量を確定する",
+    input: sum("状態", {
+      入力済み: object({ 数量: integer().invariant(v => ge(v, 1)) }),
+    }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+  const 数量で = (数量: number) =>
+    example(数量を確定する, `数量${数量}`, {
+      given: { 状態: "入力済み", 数量 },
+      expect: { result: {}, effects: [] },
+    });
+
+  it("marks a point met when an answered row's value stands at it", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "数量", examples: examples(数量を確定する, [数量で(1)]) }),
+    );
+
+    expect(report.borders).toStrictEqual([
+      {
+        path: "@入力済み.数量",
+        rule: "invariant $ >= 1",
+        points: [
+          { role: "ON", relation: "= 1", status: "met" },
+          { role: "OFF", relation: "= 0", status: "excluded" },
+          { role: "IN", relation: "> 1", status: "gap" },
+          { role: "OUT", relation: "< 0", status: "excluded" },
+        ],
+      },
+    ]);
+  });
+
+  it("is not adequate while a point is owed a row", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "数量", examples: examples(数量を確定する, [数量で(1)]) }),
+    );
+
+    expect(report.adequate).toBe(false);
+  });
+
+  it("does not let a row whose answer is owed meet a point", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "数量",
+        examples: examples(数量を確定する, [
+          example(数量を確定する, "まだ", { given: { 状態: "入力済み", 数量: 1 }, expect: unanswered() }),
+        ]),
+      }),
+    );
+
+    expect(report.borders[0]!.points[0]!.status).toBe("gap");
+  });
+
+  it("reads the length of a value where the border is drawn on its length", async () => {
+    const 登録する = behavior({
+      name: "登録する",
+      input: sum("状態", {
+        入力済み: object({ 商品ID: string("商品ID").invariant(v => ge(length(v), 3)) }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "登録",
+        examples: examples(登録する, [
+          example(登録する, "3文字", {
+            given: { 状態: "入力済み", 商品ID: "A-1" },
+            expect: { result: {}, effects: [] },
+          }),
+        ]),
+      }),
+    );
+
+    expect(report.borders[0]!.points.map(point => point.status)).toStrictEqual([
+      "met",
+      "excluded",
+      "gap",
+      "excluded",
+    ]);
   });
 });

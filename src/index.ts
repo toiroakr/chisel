@@ -40,6 +40,8 @@ export type { Comparable, InvariantRule, Operand, Operator, Rule, Term, TermOf }
 
 export { formatTypeScriptValue } from "./codegen.js";
 
+export type { Border, BorderPoint, PointRole, PointStatus } from "./border.js";
+
 export { positionsOf } from "./partition.js";
 export type {
   DividedPosition,
@@ -84,6 +86,7 @@ export {
 } from "./specification.js";
 export type {
   AdequacyReport,
+  BorderCoverage,
   ConformanceSubject,
   ControlGap,
   Coverage,
