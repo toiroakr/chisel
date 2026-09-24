@@ -237,7 +237,7 @@ const findMember = behavior({
 });
 ```
 
-Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`.
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. A rules decision reads a value dependency in a guard condition through the second argument of its builder, `rules("future only", (request, deps) => [guard(lt(deps.now, request.at), ...)], ...)`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions.
 
 `check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document.
 

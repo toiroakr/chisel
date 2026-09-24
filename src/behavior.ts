@@ -20,6 +20,8 @@ import {
   readOperand,
   rootTerm,
   selfTerm,
+  depsTerm,
+  withDeps,
   termData,
   termPaths,
 } from "./rule.js";
@@ -174,14 +176,24 @@ export function match<Input, Result, Effect, Deps = unknown, Tag extends string 
   return { kind: "match", on: select(selfTerm<Input>()), cases };
 }
 
+export type ValueDepsOf<Deps> = {
+  readonly [K in keyof Deps as Deps[K] extends (...args: never[]) => unknown ? never : K]: Deps[K];
+};
+
 export function rules<Input, Result, Effect, Deps = unknown>(
   id: string,
   build: (
     input: TermOf<NoInfer<Input>>,
+    deps: TermOf<ValueDepsOf<NoInfer<Deps>>>,
   ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>[],
   otherwise: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>,
 ): RulesDecision<Input, Result, Effect, Deps> {
-  return { kind: "rules", id, guards: build(selfTerm<NoInfer<Input>>()), otherwise };
+  return {
+    kind: "rules",
+    id,
+    guards: build(selfTerm<NoInfer<Input>>(), depsTerm<ValueDepsOf<NoInfer<Deps>>>()),
+    otherwise,
+  };
 }
 
 export function pending(reason: string): Pending {
@@ -452,8 +464,9 @@ export function traceSync(
 export function comparisonsReached(
   implementation: AnyImplementation,
   input: unknown,
+  deps?: unknown,
 ): readonly ComparisonReached[] {
-  return traceSync(implementation, input).comparisons;
+  return traceSync(implementation, input, deps).comparisons;
 }
 
 function decide<Result, Effect>(
@@ -464,8 +477,9 @@ function decide<Result, Effect>(
   observe: ComparisonObserver,
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
 ): Execution<Result, Effect> {
+  const scope = withDeps(input, deps);
   for (const [index, candidate] of decision.guards.entries()) {
-    if (!holds(candidate.condition, input, observe, distinguish)) {
+    if (!holds(candidate.condition, scope, observe, distinguish)) {
       arms.push({ decision: decision.id, guard: index, arm: "else" });
       return candidate.orElse(input, deps);
     }

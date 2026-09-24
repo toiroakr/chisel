@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  all,
+  array,
   behavior,
   boolean,
   defineSpecification,
@@ -10,9 +12,13 @@ import {
   fake,
   generateExamples,
   generationReport,
+  guard,
   implement,
+  le,
+  lt,
   match,
   rules,
+  runImplementation,
   integer,
   instant,
   object,
@@ -270,5 +276,184 @@ describe("generated rows and dependencies", () => {
     );
 
     expect(report.notComposed).toStrictEqual([]);
+  });
+});
+
+describe("a value dependency read in a guard condition", () => {
+  const 予約する = behavior({
+    name: "予約する",
+    input: sum("状態", { 申込済み: object({ 希望日時: instant() }) }),
+    result: sum("結果", { 受付: object({}), 過去: object({}) }),
+    effects: sum("種類", {}),
+    requires: {
+      現在時刻: dependency(instant()),
+      採番: dependency(string("入力"), string("番号")),
+    },
+  });
+  const 過去を断る = implement(予約する, {
+    cases: {
+      申込済み: rules(
+        "過去を断る",
+        (申込, 依存) => [
+          guard(lt(依存.現在時刻, 申込.希望日時), () => ({
+            result: { 結果: "過去" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "受付" }, effects: [] }),
+      ),
+    },
+  });
+  const 今 = Temporal.Instant.from("2026-10-01T09:00:00Z");
+  const 採番 = () => "n-1";
+  const 行 = (
+    名前: string,
+    希望日時: Temporal.Instant,
+    結果: "受付" | "過去",
+  ) =>
+    example(予約する, 名前, {
+      given: { 状態: "申込済み", 希望日時 },
+      with: { 現在時刻: 今 },
+      expect: { result: { 結果 }, effects: [] },
+    });
+
+  it("is evaluated against the dependency the run is given", async () => {
+    expect(
+      await runImplementation(
+        過去を断る,
+        {
+          状態: "申込済み",
+          希望日時: Temporal.Instant.from("2026-09-30T09:00:00Z"),
+        },
+        { 現在時刻: 今, 採番 },
+      ),
+    ).toStrictEqual({ result: { 結果: "過去" }, effects: [] });
+  });
+
+  it("is evaluated against the value a row writes with with", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "予約",
+        examples: examples(予約する, [
+          行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
+          行("昨日", Temporal.Instant.from("2026-09-30T09:00:00Z"), "過去"),
+        ]),
+        implementation: 過去を断る,
+        fakes: [fake(予約する, "採番", [["x", "n-1"]])],
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+
+  it("draws its border on the difference between the position and the dependency", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "予約",
+        examples: examples(予約する, [
+          行("ちょうど1ns後", 今.add({ nanoseconds: 1 }), "受付"),
+        ]),
+        implementation: 過去を断る,
+        fakes: [fake(予約する, "採番", [["x", "n-1"]])],
+      }),
+    );
+
+    expect(
+      report.borders
+        .filter((border) => border.rule.startsWith("guard"))
+        .map((border) => ({
+          path: border.path,
+          rule: border.rule,
+          met: border.points
+            .filter((point) => point.status === "met")
+            .map((point) => point.role),
+        })),
+    ).toStrictEqual([
+      {
+        path: "deps.現在時刻 − @申込済み.希望日時",
+        rule: "guard deps.現在時刻 < $.希望日時",
+        met: ["ON"],
+      },
+    ]);
+  });
+
+  it("is a comparison Chisel reads", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "予約",
+        examples: examples(予約する, []),
+        implementation: 過去を断る,
+      }),
+    );
+
+    expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
+  });
+
+  it("generates a row at a point by moving the position against the value the row stands in with", () => {
+    const generated = generateExamples(
+      examples(予約する, [
+        行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
+      ]),
+      過去を断る,
+    ).find((row) => row.name.endsWith("OFF (= 0)"));
+
+    expect(generated).toStrictEqual({
+      name: "予約する: deps.現在時刻 − @申込済み.希望日時 OFF (= 0)",
+      given: { 状態: "申込済み", 希望日時: 今 },
+      with: { 現在時刻: 今 },
+      reason:
+        "deps.現在時刻 − @申込済み.希望日時のOFF点（= 0）の期待結果を人間が決める必要があります",
+    });
+  });
+});
+
+describe("a value dependency read inside all", () => {
+  const 注文する = behavior({
+    name: "注文する",
+    input: sum("状態", {
+      入力済み: object({ 明細: array(object({ 数量: integer() })) }),
+    }),
+    result: sum("結果", { 受付: object({}), 上限超過: object({}) }),
+    effects: sum("種類", {}),
+    requires: { 上限: dependency(integer()) },
+  });
+  const 上限で断る = implement(注文する, {
+    cases: {
+      入力済み: rules(
+        "上限で断る",
+        (注文, 依存) => [
+          guard(
+            all(注文.明細, (行) => le(行.数量, 依存.上限)),
+            () => ({
+              result: { 結果: "上限超過" },
+              effects: [],
+            }),
+          ),
+        ],
+        () => ({ result: { 結果: "受付" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("is evaluated against the dependency for every element", async () => {
+    expect(
+      await runImplementation(
+        上限で断る,
+        { 状態: "入力済み", 明細: [{ 数量: 3 }] },
+        { 上限: 2 },
+      ),
+    ).toStrictEqual({ result: { 結果: "上限超過" }, effects: [] });
+  });
+
+  it("is a comparison Chisel reads inside all", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "注文",
+        examples: examples(注文する, []),
+        implementation: 上限で断る,
+      }),
+    );
+
+    expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
   });
 });

@@ -12,6 +12,7 @@ import type { Position } from "./partition.js";
 import { carrierOf, positionsOf } from "./partition.js";
 import type { CompareRule, Rule, Term } from "./rule.js";
 import {
+  DEPS,
   boundTermPath,
   conjuncts,
   describeRule,
@@ -23,8 +24,9 @@ import {
   sizeOf,
   stepInto,
   termData,
+  withDeps,
 } from "./rule.js";
-import { schemaAtPath } from "./schema.js";
+import { object, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -42,7 +44,30 @@ export interface GuardBorder {
     readonly scope: AnySchema;
   };
   coordinateOf(reached: ComparisonReached): unknown;
-  compose(given: unknown, coordinate: unknown): unknown;
+  compose(given: unknown, coordinate: unknown, deps?: unknown): unknown;
+}
+
+export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
+  const variant = definition.input.variants[tag] as ObjectSchema<ObjectShape>;
+  const values = Object.entries(definition.requires).flatMap(([name, declared]) =>
+    declared.takes === "nothing" ? [[name, declared.output as AnySchema] as const] : [],
+  );
+  if (values.length === 0) {
+    return variant;
+  }
+  const deps = { ...object(Object.fromEntries(values)) } as AnySchema;
+  return { ...variant, shape: { ...variant.shape, [DEPS]: deps } } as AnySchema;
+}
+
+function elementScope(scope: AnySchema, element: AnySchema): AnySchema {
+  const deps =
+    scope.kind === "object" ? (scope as ObjectSchema<ObjectShape>).shape[DEPS] : undefined;
+  return deps === undefined || element.kind !== "object"
+    ? element
+    : ({
+        ...element,
+        shape: { ...(element as ObjectSchema<ObjectShape>).shape, [DEPS]: deps },
+      } as AnySchema);
 }
 
 export function guardBordersOf(implementation: AnyImplementation): readonly GuardBorder[] {
@@ -54,10 +79,10 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$", at, asGuard).map(
+          walk(candidate.condition, guardScope(implementation.behavior, tag), `@${tag}`, "$", at, asGuard).map(
             drawn => ({
               ...drawn,
-              origin: { decision, scope: input.variants[tag] as AnySchema },
+              origin: { decision, scope: guardScope(implementation.behavior, tag) },
             }),
           ),
         ),
@@ -123,7 +148,7 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          thresholdsIn(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`),
+          thresholdsIn(candidate.condition, guardScope(implementation.behavior, tag), `@${tag}`),
         ),
   );
   const paths = [...new Set(thresholds.map(threshold => threshold.path))];
@@ -152,7 +177,7 @@ function thresholdsIn(rule: Rule, scope: AnySchema, path: string): Threshold[] {
     return collection?.kind === "array"
       ? thresholdsIn(
           rule.each,
-          (collection as ArraySchema<unknown>).element,
+          elementScope(scope, (collection as ArraySchema<unknown>).element),
           `${path}${of.map(key => `.${key}`).join("")}[]`,
         )
       : [];
@@ -337,7 +362,9 @@ function walk(
     const of = termData(rule.of).path;
     const collection = schemaAt(scope, of);
     const element =
-      collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
+      collection?.kind === "array"
+        ? elementScope(scope, (collection as ArraySchema<unknown>).element)
+        : undefined;
     const suffix = of.map(key => `.${key}`).join("");
     return element === undefined
       ? []
@@ -386,10 +413,14 @@ function between(
   const sides = [left, right].map(term => {
     const { path: keys, measure } = termData(term);
     const schema = schemaAt(scope, keys);
+    const standsIn = keys[0] === DEPS;
     return {
       term,
       measure,
-      path: `${path}${keys.map(key => `.${key}`).join("")}`,
+      standsIn,
+      path: standsIn
+        ? ["deps", ...keys.slice(1)].join(".")
+        : `${path}${keys.map(key => `.${key}`).join("")}`,
       kind: measure === "length" ? "integer" : schema?.kind,
     };
   });
@@ -429,20 +460,24 @@ function between(
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
     },
-    compose: (given, coordinate) => {
-      const moved = at(first.path);
-      const other = at(second.path)?.valuesIn(given)[0];
+    compose: (given, coordinate, deps) => {
+      const [moving, fixed, sign] = first.standsIn ? [second, first, -1] : [first, second, 1];
+      const moved = moving.standsIn ? undefined : at(moving.path);
+      const other = fixed.standsIn
+        ? readOperand(fixed.term, withDeps({}, deps))
+        : at(fixed.path)?.valuesIn(given)[0];
       if (moved === undefined || other === undefined) {
         return undefined;
       }
       if (instants) {
         const shifted = (other as { add(duration: object): unknown }).add({
-          nanoseconds: Number(coordinate as bigint),
+          nanoseconds: sign * Number(coordinate as bigint),
         });
-        return moved.write(given, first.measure, shifted);
+        return moved.write(given, moving.measure, shifted);
       }
-      const base = second.measure === "length" ? sizeOf(other) : (other as number);
-      return moved.write(given, first.measure, base + (coordinate as number));
+      const base =
+        fixed.measure === "length" && !fixed.standsIn ? sizeOf(other) : (other as number);
+      return moved.write(given, moving.measure, base + sign * (coordinate as number));
     },
   }));
 }
@@ -467,7 +502,7 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          unreadIn(candidate.condition, input.variants[tag] as AnySchema, "$").map(
+          unreadIn(candidate.condition, guardScope(implementation.behavior, tag), "$").map(
             text => `${decision.id}: ${text}`,
           ),
         ),
@@ -488,7 +523,7 @@ function unreadIn(rule: Rule, scope: AnySchema, label: string): string[] {
       return collection?.kind === "array"
         ? unreadIn(
             rule.each,
-            (collection as ArraySchema<unknown>).element,
+            elementScope(scope, (collection as ArraySchema<unknown>).element),
             `${label}${of.map(key => `.${key}`).join("")}[]`,
           )
         : [describeRule(rule, label)];

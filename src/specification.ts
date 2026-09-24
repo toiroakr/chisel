@@ -18,6 +18,7 @@ import {
   ensuresBordersOf,
   guardBordersOf,
   guardPartitionsOf,
+  guardScope,
 } from "./guard-borders.js";
 import {
   brokenEnsures,
@@ -899,21 +900,24 @@ export function generationReport(
   }
 
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
-    const reachedBy = (given: unknown) =>
-      comparisonsReached(implementation!, given).filter(item => item.rule === drawn.comparison);
+    const reachedBy = (given: unknown, deps: unknown) =>
+      comparisonsReached(implementation!, given, deps).filter(
+        item => item.rule === drawn.comparison,
+      );
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
         continue;
       }
       const standsAt = [...rows, ...generated].some(row =>
-        reachedBy(row.given).some(item => point.contains(drawn.coordinateOf(item))),
+        reachedBy(row.given, row.with).some(item => point.contains(drawn.coordinateOf(item))),
       );
       if (standsAt || unmetStatus(reachOf(drawn, point)).status === "no row owed") {
         continue;
       }
       const origin =
-        origins.find(given => reachedBy(given).length > 0) ?? definition.input.placeholder();
-      const given = drawn.compose(origin, point.witness);
+        origins.find(given => reachedBy(given, withFrom(given).with).length > 0) ??
+        definition.input.placeholder();
+      const given = drawn.compose(origin, point.witness, withFrom(origin).with);
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
       } else {
@@ -931,20 +935,23 @@ export function generationReport(
     if (decision.kind !== "rules") {
       continue;
     }
-    const wayOf = (given: unknown) => traceSync(implementation!, given).way;
-    const takes = (given: unknown, way: Way) => {
-      const taken = wayOf(given);
+    const wayOf = (given: unknown, deps: unknown) => traceSync(implementation!, given, deps).way;
+    const takes = (given: unknown, deps: unknown, way: Way) => {
+      const taken = wayOf(given, deps);
       return taken !== undefined && sameSteps(taken.steps, way.steps);
     };
     for (const way of waysOf(decision)) {
-      if ([...rows, ...generated].some(row => takes(row.given, way))) {
+      if ([...rows, ...generated].some(row => takes(row.given, row.with, way))) {
         continue;
       }
       if (feasibilityOf(way, scopeOf(implementation!, tag)).kind === "infeasible") {
         continue;
       }
       const composed = composeForWay(way, tag);
-      if (composed !== undefined && takes(composed.given, way)) {
+      if (
+        composed !== undefined &&
+        takes(composed.given, withFrom(composed.origin).with, way)
+      ) {
         offer({
           name: `${definition.name}: ${decision.id} ${describeWay(way)}`,
           given: composed.given,
@@ -970,7 +977,7 @@ export function generationReport(
         `@${caseTag}${keys.slice(0, -1).map(key => `.${key}`).join("")}`,
       );
       const origin = origins.find(given =>
-        wayOf(given)?.steps.some(step => step.distinction === matched),
+        wayOf(given, withFrom(given).with)?.steps.some(step => step.distinction === matched),
       );
       return position?.kind === "divided" && origin !== undefined
         ? { given: position.place(origin, String(last.outcome)), origin }
@@ -1236,7 +1243,7 @@ function reachOf(drawn: GuardBorder, point: BorderPoint): readonly Feasibility[]
 }
 
 function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnySchema {
-  return implementation.behavior.input.variants[tag] as AnySchema;
+  return guardScope(implementation.behavior, tag);
 }
 
 function coverage(

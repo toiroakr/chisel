@@ -135,6 +135,21 @@ export function length(
   return termAt(of[TERM].path, "length");
 }
 
+// A key no object schema field is expected to take: deps terms live beside the
+// input fields in the scope a guard is evaluated against, not in a separate one,
+// so a comparison reached records the dependency values with the input.
+export const DEPS = "#deps";
+
+export function depsTerm<T>(): TermOf<T> {
+  return termAt([DEPS], "value") as TermOf<T>;
+}
+
+export function withDeps(input: unknown, deps: unknown): unknown {
+  return deps === undefined || typeof input !== "object" || input === null
+    ? input
+    : { ...input, [DEPS]: deps };
+}
+
 export function rootTerm<T>(key: string): TermOf<T> {
   return termAt([key], "value") as TermOf<T>;
 }
@@ -226,7 +241,11 @@ export function holds(
     case "all":
     case "any": {
       const elements = read(rule.of, value);
-      const each = (element: unknown) => holds(rule.each, element, observe);
+      const deps =
+        typeof value === "object" && value !== null
+          ? (value as Readonly<Record<string, unknown>>)[DEPS]
+          : undefined;
+      const each = (element: unknown) => holds(rule.each, withDeps(element, deps), observe);
       const outcome = !Array.isArray(elements)
         ? rule.kind === "all"
         : rule.kind === "all"
@@ -456,6 +475,10 @@ function describeOperand(operand: unknown, path: string): string {
     return typeof operand === "string" ? JSON.stringify(operand) : String(operand);
   }
   const { path: keys, measure } = termData(operand);
-  const location = [path, ...keys].filter(part => part !== "").join(".");
+  const location = (
+    keys[0] === DEPS ? ["deps", ...keys.slice(1)] : [path, ...keys]
+  )
+    .filter(part => part !== "")
+    .join(".");
   return measure === "length" ? `length(${location})` : location;
 }
