@@ -13,8 +13,8 @@ import type {
   Term,
   TermOf,
 } from "./rule.js";
-import { holds, readOperand, selfTerm } from "./rule.js";
-import { tagOf } from "./schema.js";
+import { describeRule, holds, readOperand, rootTerm, selfTerm, termPaths } from "./rule.js";
+import { isSumSchema, tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
   readonly result: Result;
@@ -74,6 +74,24 @@ export type ControlTable<Effects extends AnySumSchema> = Readonly<
   Partial<Record<Tags<Effects>, ControlPolicy | Pending>>
 >;
 
+export interface EnsuresClause {
+  readonly name: string;
+  readonly cases: readonly string[] | undefined;
+  readonly rule: Rule;
+}
+
+export interface EnsuresBuilder<Input, ResultSchema extends Schema<unknown>> {
+  when<Tag extends Tags<ResultSchema>>(
+    name: string,
+    cases: readonly Tag[],
+    rule: (input: TermOf<Input>, value: TermOf<VariantOf<ResultSchema, Tag>>) => Rule,
+  ): EnsuresClause;
+  always(
+    name: string,
+    rule: (input: TermOf<Input>, value: TermOf<Infer<ResultSchema>>) => Rule,
+  ): EnsuresClause;
+}
+
 export interface Behavior<
   InputSchema extends AnySumSchema,
   ResultSchema extends Schema<unknown>,
@@ -85,6 +103,7 @@ export interface Behavior<
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
   readonly dependsOn: readonly string[];
+  readonly ensures: readonly EnsuresClause[];
 }
 
 export type AnyBehavior = Behavior<
@@ -172,7 +191,19 @@ export function behavior<
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
   readonly dependsOn?: readonly string[];
+  readonly ensures?: (
+    clause: EnsuresBuilder<Infer<InputSchema>, ResultSchema>,
+  ) => readonly EnsuresClause[];
 }): Behavior<InputSchema, ResultSchema, EffectSchema> {
+  const clauses = options.ensures?.(ensuresBuilder()) ?? [];
+  for (const clause of clauses) {
+    const roots = new Set(termPaths(clause.rule).map(path => path[0]));
+    if (!roots.has("input") || !roots.has("value")) {
+      throw new SpecificationError(
+        `Ensures ${clause.name} must relate the input to the answer`,
+      );
+    }
+  }
   return {
     kind: "behavior",
     name: options.name,
@@ -180,7 +211,40 @@ export function behavior<
     result: options.result,
     effects: options.effects,
     dependsOn: options.dependsOn ?? [],
+    ensures: clauses,
   };
+}
+
+function ensuresBuilder<Input, ResultSchema extends Schema<unknown>>(): EnsuresBuilder<
+  Input,
+  ResultSchema
+> {
+  const build = (
+    name: string,
+    cases: readonly string[] | undefined,
+    rule: (input: never, value: never) => Rule,
+  ): EnsuresClause => ({
+    name,
+    cases,
+    rule: rule(rootTerm("input") as never, rootTerm("value") as never),
+  });
+  return {
+    when: (name, cases, rule) => build(name, cases, rule as never),
+    always: (name, rule) => build(name, undefined, rule as never),
+  };
+}
+
+export function brokenEnsures(
+  definition: AnyBehavior,
+  input: unknown,
+  result: unknown,
+): EnsuresClause | undefined {
+  const tag = isSumSchema(definition.result) ? tagOf(definition.result, result) : undefined;
+  return definition.ensures.find(
+    clause =>
+      (clause.cases === undefined || (tag !== undefined && clause.cases.includes(tag))) &&
+      !holds(clause.rule, { input, value: result }),
+  );
 }
 
 export function implement<B extends AnyBehavior>(
@@ -275,6 +339,13 @@ export async function runTraced<B extends AnyBehavior>(
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
     throw new SpecificationError(formatIssues("Invalid result", parsedResult.issues));
+  }
+
+  const broken = brokenEnsures(definition, parsedInput.value, parsedResult.value);
+  if (broken !== undefined) {
+    throw new SpecificationError(
+      `Ensures ${broken.name} does not hold: ${describeRule(broken.rule, "")}`,
+    );
   }
 
   const parsedEffects: unknown[] = [];

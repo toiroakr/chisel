@@ -135,6 +135,25 @@ export function length(
   return termAt(of[TERM].path, "length");
 }
 
+export function rootTerm<T>(key: string): TermOf<T> {
+  return termAt([key], "value") as TermOf<T>;
+}
+
+export function termPaths(rule: Rule): readonly (readonly string[])[] {
+  switch (rule.kind) {
+    case "compare":
+      return [rule.left, rule.right].filter(isTerm).map(term => termData(term).path);
+    case "all":
+    case "any":
+      return [termData(rule.of).path];
+    case "and":
+    case "or":
+      return rule.rules.flatMap(termPaths);
+    case "not":
+      return termPaths(rule.rule);
+  }
+}
+
 export function selfTerm<T>(): TermOf<T> {
   return termAt([], "value") as TermOf<T>;
 }
@@ -402,6 +421,6 @@ function describeOperand(operand: unknown, path: string): string {
     return typeof operand === "string" ? JSON.stringify(operand) : String(operand);
   }
   const { path: keys, measure } = termData(operand);
-  const location = [path, ...keys].join(".");
+  const location = [path, ...keys].filter(part => part !== "").join(".");
   return measure === "length" ? `length(${location})` : location;
 }

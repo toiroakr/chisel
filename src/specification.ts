@@ -12,7 +12,13 @@ import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
 import { comparisonsNotReadOf, guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
-import { comparisonsReached, runImplementation, runTraced, traceSync } from "./behavior.js";
+import {
+  brokenEnsures,
+  comparisonsReached,
+  runImplementation,
+  runTraced,
+  traceSync,
+} from "./behavior.js";
 import { describeRule, describeTerm, termData } from "./rule.js";
 import type { PointRole } from "./border.js";
 import type { Position } from "./partition.js";
@@ -379,6 +385,14 @@ export async function evaluateSpecification(
     if (!resultValidation.success) {
       failures.push({ name: row.name, message: "Expected result is invalid" });
       continue;
+    }
+
+    const broken = brokenEnsures(definition, row.given, row.expect.result);
+    if (broken !== undefined) {
+      failures.push({
+        name: row.name,
+        message: `Example breaks ensures ${broken.name}: ${describeRule(broken.rule, "")}`,
+      });
     }
 
     const resultTag = isSumSchema(definition.result)
@@ -815,14 +829,29 @@ export function generationReport(
 
 export async function verifyConformance<B extends AnyBehavior>(
   exampleSet: ExampleSet<B>,
-  subject: ConformanceSubject<B>,
+  subject: NoInfer<ConformanceSubject<B>>,
 ): Promise<readonly ExampleFailure[]> {
   const failures: ExampleFailure[] = [];
   for (const row of exampleSet.rows) {
     if (isUnanswered(row.expect)) {
       continue;
     }
-    const { failure } = await runAndCompare(row.name, row.given, row.expect, subject);
+    const { actual, failure } = await runAndCompare(row.name, row.given, row.expect, subject);
+    const broken =
+      actual === undefined
+        ? undefined
+        : brokenEnsures(
+            exampleSet.behavior,
+            row.given,
+            (actual as Execution<unknown, unknown>).result,
+          );
+    if (broken !== undefined) {
+      failures.push({
+        name: row.name,
+        message: `Answer breaks ensures ${broken.name}: ${describeRule(broken.rule, "")}`,
+      });
+      continue;
+    }
     if (failure !== undefined) {
       failures.push(failure);
     }

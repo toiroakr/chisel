@@ -70,6 +70,8 @@ export type {
   ControlPolicy,
   ControlTable,
   Decision,
+  EnsuresBuilder,
+  EnsuresClause,
   Execution,
   Guard,
   Implementation,
