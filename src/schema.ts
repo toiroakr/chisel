@@ -1,4 +1,6 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
+import type { InvariantRule, Rule, TermOf } from "./rule.js";
+import { conjuncts, describeRule, holds, satisfy, selfTerm } from "./rule.js";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -11,8 +13,10 @@ export type ValidationResult<T> =
 
 export interface Schema<T> {
   readonly kind: string;
+  readonly invariants: readonly Rule[];
   parse(value: unknown, path?: string): ValidationResult<T>;
   placeholder(): unknown;
+  invariant(rule: InvariantRule<T>): this;
 }
 
 export type AnySchema = Schema<unknown>;
@@ -25,6 +29,10 @@ export interface StringSchema extends Schema<string> {
 
 export interface NumberSchema extends Schema<number> {
   readonly kind: "number";
+}
+
+export interface IntegerSchema extends Schema<number> {
+  readonly kind: "integer";
 }
 
 export interface BooleanSchema extends Schema<boolean> {
@@ -59,7 +67,7 @@ export interface RecordSchema<T> extends Schema<Readonly<Record<string, T>>> {
 export type ObjectShape = Readonly<Record<string, AnySchema>>;
 
 type OptionalShapeKeys<Shape extends ObjectShape> = {
-  readonly [K in keyof Shape]: Shape[K] extends OptionalSchema<unknown>
+  readonly [K in keyof Shape]: Shape[K] extends { readonly kind: "optional" }
     ? K
     : never;
 }[keyof Shape];
@@ -111,7 +119,7 @@ export interface SumSchema<
 }
 
 export type AnySumSchema = SumSchema<any, any>;
-export type Tags<S> = S extends SumSchema<string, infer Variants>
+export type Tags<S> = S extends SumSchema<any, infer Variants>
   ? keyof Variants & string
   : never;
 export type VariantOf<S, Tag extends Tags<S>> = S extends SumSchema<
@@ -131,13 +139,40 @@ function invalid(path: string, message: string): ValidationResult<never> {
   return { success: false, issues: [{ path, message }] };
 }
 
-export function string(name = "string"): StringSchema {
+type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "invariant">;
+
+function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
   return {
+    ...core,
+    invariants,
+    parse(value: unknown, path = "$") {
+      const result = core.parse(value, path);
+      if (!result.success) {
+        return result;
+      }
+      const broken = invariants.find(rule => !holds(rule, result.value));
+      return broken === undefined
+        ? result
+        : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
+    },
+    placeholder() {
+      return invariants
+        .flatMap(conjuncts)
+        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder());
+    },
+    invariant(rule: (self: TermOf<unknown>) => Rule) {
+      return refinable<S>(core, [...invariants, rule(selfTerm())]);
+    },
+  } as unknown as S;
+}
+
+export function string(name = "string"): StringSchema {
+  return refinable<StringSchema>({
     kind: "string",
     name,
     parse,
     placeholder: () => `<${name}>`,
-  };
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<string> {
     return typeof value === "string"
@@ -147,11 +182,11 @@ export function string(name = "string"): StringSchema {
 }
 
 export function number(): NumberSchema {
-  return {
+  return refinable<NumberSchema>({
     kind: "number",
     parse,
     placeholder: () => 0,
-  };
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<number> {
     return typeof value === "number" && Number.isFinite(value)
@@ -160,12 +195,26 @@ export function number(): NumberSchema {
   }
 }
 
+export function integer(): IntegerSchema {
+  return refinable<IntegerSchema>({
+    kind: "integer",
+    parse,
+    placeholder: () => 0,
+  });
+
+  function parse(value: unknown, path = "$"): ValidationResult<number> {
+    return Number.isSafeInteger(value)
+      ? valid(value as number)
+      : invalid(path, "Expected an integer");
+  }
+}
+
 export function boolean(): BooleanSchema {
-  return {
+  return refinable<BooleanSchema>({
     kind: "boolean",
     parse,
     placeholder: () => false,
-  };
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<boolean> {
     return typeof value === "boolean"
@@ -175,12 +224,12 @@ export function boolean(): BooleanSchema {
 }
 
 export function instant(): InstantSchema {
-  return {
+  return refinable<InstantSchema>({
     kind: "instant",
     parse,
     placeholder: () =>
       temporalInstant().from("2000-01-01T00:00:00Z"),
-  };
+  });
 
   function parse(
     value: unknown,
@@ -195,12 +244,12 @@ export function instant(): InstantSchema {
 export function literal<const T extends string | number | boolean | null>(
   expected: T,
 ): LiteralSchema<T> {
-  return {
+  return refinable<LiteralSchema<T>>({
     kind: "literal",
     value: expected,
     parse,
     placeholder: () => expected,
-  };
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<T> {
     return value === expected
@@ -212,12 +261,12 @@ export function literal<const T extends string | number | boolean | null>(
 export function object<const Shape extends ObjectShape>(
   shape: Shape,
 ): ObjectSchema<Shape> {
-  return {
+  return refinable<ObjectSchema<Shape>>({
     kind: "object",
     shape,
     parse,
     placeholder,
-  };
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<InferShape<Shape>> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -257,12 +306,12 @@ export function object<const Shape extends ObjectShape>(
 }
 
 export function array<T>(element: Schema<T>): ArraySchema<T> {
-  return {
+  return refinable<ArraySchema<T>>({
     kind: "array",
     element,
     parse,
-    placeholder: () => [],
-  };
+    placeholder: () => [element.placeholder()],
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<readonly T[]> {
     if (!Array.isArray(value)) {
@@ -286,12 +335,12 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
 }
 
 export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
-  return {
+  return refinable<OptionalSchema<T>>({
     kind: "optional",
     schema,
     parse,
     placeholder: () => undefined,
-  };
+  });
 
   function parse(value: unknown, path = "$"): ValidationResult<T | undefined> {
     return value === undefined ? valid(undefined) : schema.parse(value, path);
@@ -299,12 +348,12 @@ export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
 }
 
 export function record<T>(value: Schema<T>): RecordSchema<T> {
-  return {
+  return refinable<RecordSchema<T>>({
     kind: "record",
     value,
     parse,
     placeholder: () => ({}),
-  };
+  });
 
   function parse(
     raw: unknown,
@@ -341,7 +390,7 @@ export function sum<
 ): SumSchema<Discriminant, Variants> {
   const variantTags = Object.keys(variants) as (keyof Variants & string)[];
 
-  return {
+  return refinable<SumSchema<Discriminant, Variants>>({
     kind: "sum",
     discriminant,
     variants,
@@ -349,7 +398,7 @@ export function sum<
     parse,
     placeholder: () => placeholderFor(variantTags[0]!),
     placeholderFor,
-  };
+  });
 
   function parse(
     value: unknown,
@@ -420,4 +469,18 @@ function temporalInstant(): TemporalTypes.InstantConstructor {
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
   return temporal.Instant;
+}
+
+export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  const unwrapped =
+    schema.kind === "optional" ? (schema as OptionalSchema<unknown>).schema : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) {
+    return unwrapped;
+  }
+  if (unwrapped.kind !== "object") {
+    return undefined;
+  }
+  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
+  return field === undefined ? undefined : schemaAtPath(field, rest);
 }

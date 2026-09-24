@@ -3,6 +3,7 @@ import {
   array,
   boolean,
   instant,
+  integer,
   isSumSchema,
   literal,
   number,
@@ -13,7 +14,7 @@ import {
   sum,
   tagOf,
 } from "../src/index.js";
-import type { Infer } from "../src/index.js";
+import type { Infer, Tags, VariantOf } from "../src/index.js";
 
 describe("array", () => {
   it("accepts a list whose every item matches the element schema", () => {
@@ -41,10 +42,10 @@ describe("array", () => {
     expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$[1]"]);
   });
 
-  it("uses an empty array as its placeholder", () => {
+  it("shows the shape of its element by holding one placeholder element", () => {
     const Tags = array(string("Tag"));
 
-    expect(Tags.placeholder()).toStrictEqual([]);
+    expect(Tags.placeholder()).toStrictEqual(["<Tag>"]);
   });
 });
 
@@ -169,6 +170,24 @@ describe("number", () => {
 
   it("uses 0 as its placeholder", () => {
     expect(number().placeholder()).toBe(0);
+  });
+});
+
+describe("integer", () => {
+  it("accepts a whole number", () => {
+    expect(integer().parse(3)).toStrictEqual({ success: true, value: 3 });
+  });
+
+  it("rejects a number with a fractional part", () => {
+    expect(integer().parse(1.5).success).toBe(false);
+  });
+
+  it("rejects a value that is not a number", () => {
+    expect(integer().parse("3").success).toBe(false);
+  });
+
+  it("uses 0 as its placeholder", () => {
+    expect(integer().placeholder()).toBe(0);
   });
 });
 
@@ -326,5 +345,30 @@ describe("tagOf", () => {
     expect(tagOf(Shape, "not-an-object")).toBe(undefined);
     expect(tagOf(Shape, null)).toBe(undefined);
     expect(tagOf(Shape, ["not", "an", "object"])).toBe(undefined);
+  });
+});
+
+describe("Tags and VariantOf", () => {
+  const Shape = sum("state", {
+    draft: object({ id: string("Id") }),
+    published: object({ id: string("Id"), url: string("Url") }),
+  });
+
+  it("names the tags of a sum", () => {
+    const tag: Tags<typeof Shape> = "draft";
+    // @ts-expect-error "archived" is not a tag of Shape
+    const unknown: Tags<typeof Shape> = "archived";
+
+    expect([tag, unknown]).toStrictEqual(["draft", "archived"]);
+  });
+
+  it("types a variant with its own fields", () => {
+    const variant: VariantOf<typeof Shape, "published"> = {
+      state: "published",
+      id: "p-1",
+      url: "https://example.com",
+    };
+
+    expect(variant.url).toBe("https://example.com");
   });
 });
