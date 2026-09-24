@@ -21,9 +21,9 @@ function format(value: unknown, level: number): string {
       return "[]";
     }
     const items = value
-      .map(item => `${indent(level + 1)}${format(item, level + 1)}`)
-      .join(",\n");
-    return `[\n${items}\n${indent(level)}]`;
+      .map(item => `${indent(level + 1)}${format(item, level + 1)},\n`)
+      .join("");
+    return `[\n${items}${indent(level)}]`;
   }
   if (typeof value === "object") {
     const entries = Object.entries(value);
@@ -32,13 +32,16 @@ function format(value: unknown, level: number): string {
     }
     const fields = entries
       .map(
-        ([key, field]) =>
-          `${indent(level + 1)}${JSON.stringify(key)}: ${format(field, level + 1)}`,
+        ([key, field]) => `${indent(level + 1)}${formatKey(key)}: ${format(field, level + 1)},\n`,
       )
-      .join(",\n");
-    return `{\n${fields}\n${indent(level)}}`;
+      .join("");
+    return `{\n${fields}${indent(level)}}`;
   }
   throw new TypeError(`Cannot format ${typeof value} as TypeScript`);
+}
+
+function formatKey(key: string): string {
+  return /^[\p{ID_Start}$_][\p{ID_Continue}$\u200C\u200D]*$/u.test(key) ? key : JSON.stringify(key);
 }
 
 function indent(level: number): string {

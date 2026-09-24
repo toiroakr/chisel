@@ -120,6 +120,41 @@ describe("chisel generate", () => {
     expect(stdout).toMatch(/expect: unanswered\(/);
   });
 
+  it("wraps rows for a behavior with no specification in imports and defineSpecification", async () => {
+    const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts")]);
+
+    expect(stdoutOf(result).match(/^import .* from "chisel";$/gm)).toStrictEqual([
+      'import { defineSpecification, example, examples, unanswered } from "chisel";',
+    ]);
+    expect(stdoutOf(result)).toContain(
+      [
+        "export const unreferencedBehaviorExamples = examples(unreferencedBehavior, [",
+        '  example(unreferencedBehavior, "unreferenced: ready", {',
+        "    given: {",
+        '      state: "ready",',
+        '      id: "<Id>",',
+        "    },",
+        '    expect: unanswered("readyの期待結果を人間が決める必要があります"),',
+        "  }),",
+      ].join("\n"),
+    );
+    expect(stdoutOf(result)).toContain(
+      [
+        "export const unreferencedBehaviorSpecification = defineSpecification({",
+        '  name: "unreferenced",',
+        "  examples: unreferencedBehaviorExamples,",
+        "});",
+      ].join("\n"),
+    );
+  });
+
+  it("prints only rows, each with a trailing comma, for a specification that has examples", async () => {
+    const result = await run(["generate", fixture("examples/order-cancellation.spec.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/^  \}\),$/m);
+    expect(stdoutOf(result)).not.toMatch(/^import /m);
+  });
+
   it("derives a binding name from the behavior when it has no exported name of its own", async () => {
     const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts")]);
 

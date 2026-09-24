@@ -31,7 +31,7 @@ import type {
 interface LoadedTarget {
   readonly behaviorBinding: string;
   readonly specification: Specification;
-  readonly existingRows: number;
+  readonly synthesized: boolean;
 }
 
 const fileArg = arg(v.string(), {
@@ -74,13 +74,17 @@ const generateCommand = defineCommand({
   description: "未網羅の入力variantに対するexampleの雛形を出力する",
   args: v.object({ file: fileArg }),
   run: async args => {
-    for (const target of await loadTargets(args.file)) {
+    const targets = await loadTargets(args.file);
+    if (targets.some(target => target.synthesized)) {
+      console.log('import { defineSpecification, example, examples, unanswered } from "chisel";\n');
+    }
+    for (const target of targets) {
       const { rows: generated, notComposed } = generationReport(
         target.specification.examples,
         target.specification.implementation,
       );
       console.log(
-        formatGeneratedExamples(target.behaviorBinding, generated, target.existingRows),
+        formatGeneratedExamples(target, generated),
       );
       for (const way of notComposed) {
         console.log(`// 組み立てられなかった道筋: ${way}`);
@@ -122,7 +126,7 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
       behaviorBinding:
         exportedBehaviors.get(definition) ?? toIdentifier(definition.name),
       specification: value,
-      existingRows: value.examples.rows.length,
+      synthesized: false,
     });
   }
 
@@ -136,7 +140,7 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
         name: definition.name,
         examples: examples(definition, []),
       }),
-      existingRows: 0,
+      synthesized: true,
     });
   }
 
@@ -362,22 +366,27 @@ function formatCoverage(
 }
 
 function formatGeneratedExamples(
-  binding: string,
+  target: LoadedTarget,
   generated: readonly GeneratedExample[],
-  existingRows: number,
 ): string {
+  const binding = target.behaviorBinding;
   if (generated.length === 0) {
     return `${binding}: 未網羅の入力variantはありません`;
   }
 
-  const rows = generated
-    .map(row => formatGeneratedExample(binding, row))
-    .join(",\n");
-  if (existingRows > 0) {
-    return rows;
+  const rows = generated.map(row => `${formatGeneratedExample(binding, row)},\n`).join("");
+  if (!target.synthesized) {
+    return rows.trimEnd();
   }
 
-  return `export const ${binding}Examples = examples(${binding}, [\n${rows}\n]);`;
+  return [
+    `export const ${binding}Examples = examples(${binding}, [\n${rows}]);`,
+    "",
+    `export const ${binding}Specification = defineSpecification({`,
+    `  name: ${JSON.stringify(target.specification.name)},`,
+    `  examples: ${binding}Examples,`,
+    "});",
+  ].join("\n");
 }
 
 function formatGeneratedExample(

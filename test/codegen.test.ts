@@ -23,10 +23,22 @@ describe("formatTypeScriptValue", () => {
     expect(formatTypeScriptValue({})).toBe("{}");
   });
 
-  it("formats nested arrays and objects with two-space indentation per level", () => {
+  it("formats nested arrays and objects with two-space indentation and trailing commas", () => {
     const value = { a: [1, "x"], b: {} };
 
-    expect(formatTypeScriptValue(value)).toBe('{\n  "a": [\n    1,\n    "x"\n  ],\n  "b": {}\n}');
+    expect(formatTypeScriptValue(value)).toBe("{\n  a: [\n    1,\n    \"x\",\n  ],\n  b: {},\n}");
+  });
+
+  it("writes a key bare where it is an identifier, including one in Japanese", () => {
+    expect(formatTypeScriptValue({ 状態: "入力済み", $id: 1, _x: 2 })).toBe(
+      '{\n  状態: "入力済み",\n  $id: 1,\n  _x: 2,\n}',
+    );
+  });
+
+  it("quotes a key that is not an identifier", () => {
+    expect(formatTypeScriptValue({ "order-id": 1, "1st": 2, "": 3 })).toBe(
+      '{\n  "order-id": 1,\n  "1st": 2,\n  "": 3,\n}',
+    );
   });
 
   it("throws a TypeError for a value with no TypeScript literal form", () => {

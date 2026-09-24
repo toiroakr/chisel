@@ -53,7 +53,7 @@ export const cancelOrder = behavior({
 chisel generate ./cancel-order.spec.ts
 ```
 
-Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)).
+Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `defineSpecification` wraps yet, the output also carries the `import` line and a `defineSpecification` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` array.
 
 ```ts
 export const cancelOrderExamples = examples(cancelOrder, [
