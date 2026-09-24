@@ -362,4 +362,14 @@ describe("Position.write", () => {
       Object.keys(単価!.write({ 状態: "商品あり", 数量: 1, 単価: 2, 在庫数: 3 }, "value", 0) as object),
     ).toStrictEqual(["状態", "数量", "単価", "在庫数"]);
   });
+
+  it("moves only the first element of an array", () => {
+    const [単価] = positionsOf(
+      sum("状態", { 商品あり: object({ 明細: array(object({ 単価: integer() })) }) }),
+    );
+
+    expect(
+      単価!.write({ 状態: "商品あり", 明細: [{ 単価: 500 }, { 単価: 1500 }] }, "value", 0),
+    ).toStrictEqual({ 状態: "商品あり", 明細: [{ 単価: 0 }, { 単価: 1500 }] });
+  });
 });

@@ -152,7 +152,7 @@ function positionAt(
       update: (given, change) =>
         focus.update(given, value => {
           const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder()];
-          return items.map(change);
+          return items.map((item, index) => (index === 0 ? change(item) : item));
         }),
     });
     return withOwnBorders(path, borders, focus, elements);
