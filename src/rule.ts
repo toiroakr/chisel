@@ -130,11 +130,16 @@ export function stepInto(rule: Rule, key: string): Rule | undefined {
   return { ...rule, left: shift(rule.left), right: shift(rule.right) };
 }
 
-export function holds(rule: Rule, value: unknown): boolean {
+export type ComparisonObserver = (rule: CompareRule, scope: unknown) => void;
+
+export function holds(rule: Rule, value: unknown, observe?: ComparisonObserver): boolean {
   if (rule.kind === "all") {
     const elements = read(rule.of, value);
-    return !Array.isArray(elements) || elements.every(element => holds(rule.each, element));
+    return (
+      !Array.isArray(elements) || elements.every(element => holds(rule.each, element, observe))
+    );
   }
+  observe?.(rule, value);
   const left = read(rule.left, value);
   const right = read(rule.right, value);
   if (left === undefined || right === undefined) {
@@ -261,6 +266,10 @@ function termAt(path: readonly string[], measure: TermData["measure"]): Term<unk
     },
     has: (_target, key) => key === TERM,
   });
+}
+
+export function readOperand(operand: unknown, value: unknown): unknown {
+  return read(operand, value);
 }
 
 function read(operand: unknown, value: unknown): unknown {

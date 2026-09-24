@@ -7,7 +7,8 @@ import type {
   Execution,
   Implementation,
 } from "./behavior.js";
-import type { ArmTaken } from "./behavior.js";
+import type { ArmTaken, ComparisonReached } from "./behavior.js";
+import { guardBordersOf } from "./guard-borders.js";
 import { runImplementation, runTraced } from "./behavior.js";
 import { describeRule } from "./rule.js";
 import type { PointRole } from "./border.js";
@@ -268,6 +269,7 @@ export async function evaluateSpecification(
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
   const armsOwed: ArmTaken[] = [];
+  const reached: ComparisonReached[] = [];
   const observe = (
     inputTag: string,
     actual: unknown,
@@ -366,6 +368,7 @@ export async function evaluateSpecification(
         async input => {
           const traced = await runTraced(implementation, input);
           armsMet.push(...traced.arms);
+          reached.push(...traced.comparisons);
           return traced.execution;
         },
       );
@@ -456,7 +459,7 @@ export async function evaluateSpecification(
       excluded: position.excluded,
     };
   });
-  const borders = positions.flatMap(position =>
+  const borders: BorderCoverage[] = positions.flatMap(position =>
     position.borders.map((border): BorderCoverage => {
       const coordinates = answeredGivens.flatMap(given =>
         coordinatesIn(position, border.measure, given),
@@ -477,6 +480,28 @@ export async function evaluateSpecification(
       };
     }),
   );
+  const guardBorders = (
+    specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
+  ).map((drawn): BorderCoverage => {
+    const coordinates = reached
+      .filter(item => item.rule === drawn.comparison)
+      .map(item => drawn.coordinateOf(item));
+    return {
+      path: drawn.path,
+      rule: drawn.border.rule,
+      points: drawn.border.points.map(point => ({
+        role: point.role,
+        relation: point.relation,
+        status:
+          point.status !== "owed"
+            ? point.status
+            : coordinates.some(value => point.contains(value))
+              ? "met"
+              : "gap",
+      })),
+    };
+  });
+  borders.push(...guardBorders);
   const adequate =
     specification.implementation !== undefined &&
     failures.length === 0 &&

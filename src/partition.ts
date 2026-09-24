@@ -228,7 +228,7 @@ function writer(focus: Focus): Position["write"] {
     );
 }
 
-function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
+export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
   if (measure === "length") {
     return integerCarrier;
   }

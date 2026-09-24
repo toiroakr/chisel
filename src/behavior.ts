@@ -5,7 +5,7 @@ import type {
   Tags,
   VariantOf,
 } from "./schema.js";
-import type { Rule, TermOf } from "./rule.js";
+import type { CompareRule, ComparisonObserver, Rule, TermOf } from "./rule.js";
 import { holds, selfTerm } from "./rule.js";
 import { tagOf } from "./schema.js";
 
@@ -176,6 +176,11 @@ export function isBehavior(value: unknown): value is AnyBehavior {
   );
 }
 
+export interface ComparisonReached {
+  readonly rule: CompareRule;
+  readonly scope: unknown;
+}
+
 export interface ArmTaken {
   readonly decision: string;
   readonly guard: number;
@@ -195,6 +200,7 @@ export async function runTraced<B extends AnyBehavior>(
 ): Promise<{
   readonly execution: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
   readonly arms: readonly ArmTaken[];
+  readonly comparisons: readonly ComparisonReached[];
 }> {
   const definition = implementation.behavior;
   const parsedInput = definition.input.parse(input);
@@ -218,9 +224,10 @@ export async function runTraced<B extends AnyBehavior>(
   }
 
   const arms: ArmTaken[] = [];
+  const comparisons: ComparisonReached[] = [];
   const execution =
     selected.kind === "rules"
-      ? decide(selected, parsedInput.value, arms)
+      ? decide(selected, parsedInput.value, arms, (rule, scope) => comparisons.push({ rule, scope }))
       : await selected.run(parsedInput.value as never);
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
@@ -244,6 +251,7 @@ export async function runTraced<B extends AnyBehavior>(
       effects: parsedEffects as BehaviorEffect<B>[],
     },
     arms,
+    comparisons,
   };
 }
 
@@ -251,9 +259,10 @@ function decide<Result, Effect>(
   decision: RulesDecision<unknown, Result, Effect>,
   input: unknown,
   arms: ArmTaken[],
+  observe: ComparisonObserver,
 ): Execution<Result, Effect> {
   for (const [index, candidate] of decision.guards.entries()) {
-    if (!holds(candidate.condition, input)) {
+    if (!holds(candidate.condition, input, observe)) {
       arms.push({ decision: decision.id, guard: index, arm: "else" });
       return candidate.orElse(input);
     }

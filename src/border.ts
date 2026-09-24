@@ -13,7 +13,7 @@ export interface BorderPoint {
 }
 
 export interface Border {
-  readonly source: "invariant";
+  readonly source: "invariant" | "guard";
   readonly measure: "value" | "length";
   readonly rule: string;
   readonly closed: boolean;
@@ -68,9 +68,10 @@ export const stringCarrier: Carrier = {
 export function bordersOf(
   rules: readonly Rule[],
   carrierFor: (measure: Border["measure"]) => Carrier | undefined,
+  drawing: Drawing = invariantDrawing,
 ): Border[] {
   const drawn = rules.flatMap(rule => {
-    const border = borderOf(rule, carrierFor);
+    const border = borderOf(rule, carrierFor, drawing);
     return border === undefined ? [] : [border];
   });
   return drawn.map(current => {
@@ -131,9 +132,22 @@ interface Drawn {
   admits(value: unknown): boolean;
 }
 
+export interface Drawing {
+  readonly source: Border["source"];
+  readonly describe: (rule: Rule) => string;
+  readonly admits: (coordinate: unknown) => boolean;
+}
+
+const invariantDrawing: Drawing = {
+  source: "invariant",
+  describe: rule => describeRule(rule),
+  admits: () => true,
+};
+
 function borderOf(
   rule: Rule,
   carrierFor: (measure: Border["measure"]) => Carrier | undefined,
+  drawing: Drawing,
 ): Drawn | undefined {
   const normalized = normalize(rule);
   if (normalized === undefined) {
@@ -147,12 +161,16 @@ function borderOf(
   const lower = operator === ">" || operator === ">=";
   const closed = operator === ">=" || operator === "<=";
   const inward: 1 | -1 = lower ? 1 : -1;
+  const outward: 1 | -1 = lower ? -1 : 1;
   const { step } = carrier;
-  if (!closed && step === undefined) {
+  const on = closed ? bound : step?.(bound, inward);
+  const off = closed ? step?.(bound, outward) : bound;
+  const guarded = drawing.source === "guard";
+  if (on === undefined && !guarded) {
     return undefined;
   }
-  const on = closed ? bound : step!(bound, inward);
-  const off = closed ? (step === undefined ? undefined : step(bound, -inward as 1 | -1)) : bound;
+  const inner = on ?? bound;
+  const outer = off ?? bound;
   const beyond = (value: unknown) => (lower ? ">" : "<") + " " + carrier.format(value);
   const before = (value: unknown) => (lower ? "<" : ">") + " " + carrier.format(value);
   const inside = (edge: unknown) => (value: unknown) =>
@@ -160,38 +178,54 @@ function borderOf(
   const outside = (edge: unknown) => (value: unknown) =>
     lower ? carrier.compare(value, edge) < 0 : carrier.compare(value, edge) > 0;
   const at = (edge: unknown) => (value: unknown) => carrier.compare(value, edge) === 0;
+  const past = (value: unknown, direction: 1 | -1) =>
+    step?.(value, direction) ?? carrier.past?.(value, direction);
+  const owedUnlessRefused = (witness: unknown): PointStatus =>
+    witness === undefined || !drawing.admits(witness) ? "excluded" : "owed";
+  const outsideStatus = (witness: unknown): PointStatus =>
+    guarded ? owedUnlessRefused(witness) : "excluded";
 
+  const outWitness = past(outer, outward);
   const points: BorderPoint[] = [
-    {
-      role: "ON",
-      relation: `= ${carrier.format(on)}`,
-      status: "owed",
-      witness: on,
-      contains: at(on),
-    },
+    on === undefined
+      ? { role: "ON", relation: "neighbour not named", status: "not named", contains: () => false }
+      : {
+          role: "ON",
+          relation: `= ${carrier.format(on)}`,
+          status: owedUnlessRefused(on),
+          witness: on,
+          contains: at(on),
+        },
     off === undefined
       ? { role: "OFF", relation: "neighbour not named", status: "not named", contains: () => false }
-      : { role: "OFF", relation: `= ${carrier.format(off)}`, status: "excluded", contains: at(off) },
-    inPoint(beyond(on), step?.(on, inward) ?? carrier.past?.(on, inward), inside(on)),
+      : {
+          role: "OFF",
+          relation: `= ${carrier.format(off)}`,
+          status: outsideStatus(off),
+          witness: off,
+          contains: at(off),
+        },
+    inPoint(beyond(inner), past(inner, inward), inside(inner)),
     {
       role: "OUT",
-      relation: before(off ?? bound),
-      status: "excluded",
-      contains: outside(off ?? bound),
+      relation: before(outer),
+      status: outsideStatus(outWitness),
+      witness: outWitness,
+      contains: outside(outer),
     },
   ];
   return {
     border: {
-      source: "invariant",
+      source: drawing.source,
       measure,
-      rule: `invariant ${describeRule(rule)}`,
+      rule: `${drawing.source} ${drawing.describe(rule)}`,
       closed,
       points,
     },
     carrier,
-    on,
+    on: inner,
     lower,
-    admits: value => at(on)(value) || inside(on)(value),
+    admits: value => at(inner)(value) || inside(inner)(value),
   };
 }
 
