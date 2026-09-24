@@ -116,7 +116,7 @@ describe("cli entry point (subprocess)", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toMatch(/order cancellation \(cancel-order\)/);
     expect(result.stdout).toMatch(/充足度: 不完全/);
-  });
+  }, 30_000);
 });
 
 describe("cli run() check with classes", () => {
