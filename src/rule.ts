@@ -108,8 +108,74 @@ export function holds(rule: Rule, value: unknown): boolean {
   }
 }
 
+export function satisfy(rule: Rule, value: unknown): unknown {
+  if (holds(rule, value)) {
+    return value;
+  }
+  const [term, bound, operator] = isTerm(rule.left)
+    ? [rule.left, rule.right, rule.operator]
+    : [rule.right, rule.left, mirrored[rule.operator]];
+  if (!isTerm(term) || isTerm(bound)) {
+    return value;
+  }
+  const target =
+    operator === ">" || operator === "!="
+      ? step(bound, 1)
+      : operator === "<"
+        ? step(bound, -1)
+        : bound;
+  const { path, measure } = termData(term);
+  return writeAt(value, path, current =>
+    measure === "length" ? resize(current, target as number) : target,
+  );
+}
+
 export function describeRule(rule: Rule, path = "$"): string {
   return `${describeOperand(rule.left, path)} ${rule.operator} ${describeOperand(rule.right, path)}`;
+}
+
+const mirrored: Readonly<Record<Operator, Operator>> = {
+  "<": ">",
+  "<=": ">=",
+  ">": "<",
+  ">=": "<=",
+  "==": "==",
+  "!=": "!=",
+};
+
+function step(bound: unknown, direction: 1 | -1): unknown {
+  if (typeof bound === "number") {
+    return bound + direction;
+  }
+  const add = (bound as { readonly add?: (duration: object) => unknown } | null)?.add;
+  if (typeof add === "function") {
+    return add.call(bound, { nanoseconds: direction });
+  }
+  return bound;
+}
+
+function writeAt(
+  value: unknown,
+  path: readonly string[],
+  change: (current: unknown) => unknown,
+): unknown {
+  const [key, ...rest] = path;
+  if (key === undefined) {
+    return change(value);
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  return { ...record, [key]: writeAt(record[key], rest, change) };
+}
+
+function resize(current: unknown, size: number): unknown {
+  if (typeof current === "string") {
+    return current.length >= size ? current.slice(0, size) : current.padEnd(size, "_");
+  }
+  if (Array.isArray(current)) {
+    const filler = current[current.length - 1];
+    return Array.from({ length: Math.max(size, 0) }, (_, index) => current[index] ?? filler);
+  }
+  return current;
 }
 
 function compare(operator: Operator, left: unknown, right: unknown): Rule {

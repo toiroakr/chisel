@@ -1,6 +1,6 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { InvariantRule, Rule, TermOf } from "./rule.js";
-import { describeRule, holds, selfTerm } from "./rule.js";
+import { describeRule, holds, satisfy, selfTerm } from "./rule.js";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -154,6 +154,9 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       return broken === undefined
         ? result
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
+    },
+    placeholder() {
+      return invariants.reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder());
     },
     invariant(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
