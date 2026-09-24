@@ -241,6 +241,23 @@ Every answer an example writes, the model produces or a conformance subject retu
 
 `check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). Every measure carries `status`, `reason` exactly where it is `unavailable`, and `weakening` exactly where something weakened it; every border point, arm and way carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
+## Composition
+
+`compose(first, second)` connects two behaviors the way Souther's `>->` does: of the cases `first` answers, those `second` takes as input flow on to it, and the rest depart the main line and are answered as they are. The result is an ordinary behavior, so it is given examples and a specification like any other, and a row may expect a case that departed at the first stage, which no stage's own examples can state.
+
+```ts
+const quote = compose(validate, price); // validate: order -> valid | invalid, price: valid -> quoted
+// quote: order -> invalid | quoted
+
+export const quoteSpec = defineSpecification({
+  name: "quote",
+  examples: examples(quote, [/* rows expecting quoted, and invalid */]),
+  implementation: implementComposition(quote, validateImpl, priceImpl),
+});
+```
+
+The stages must name their cases by one discriminant; a case that would both depart the first stage and be answered by the second is refused, since a value cannot say which rail it is on. A case that departed stays departed through later compositions (`compose(compose(f, g), h)` never hands `h` what departed `f`). Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
+
 ## Conformance
 
 `verifyConformance` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model.

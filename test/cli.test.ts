@@ -130,6 +130,19 @@ describe("chisel check with ensures clauses", () => {
   });
 });
 
+describe("chisel check with a composition", () => {
+  it("measures the composition over its own cases and has no arms to measure", async () => {
+    const result = await run(["check", fixture("test/fixtures/composition.ts")]);
+    const stdout = stdoutOf(result);
+
+    expect([
+      /^見積 \(検証する >-> 価格を付ける\)$/m.test(stdout),
+      /^  結果variant +1\/2; 未網羅 無効$/m.test(stdout),
+      /^  分岐 +対象なし \(not applicable\)$/m.test(stdout),
+    ]).toStrictEqual([true, true, true]);
+  });
+});
+
 describe("chisel generate", () => {
   it("prints ready-to-paste example rows for uncovered input variants", async () => {
     const result = await run([
@@ -368,6 +381,7 @@ describe("chisel check --json", () => {
       "test/fixtures/gap-coverage.ts",
       "test/fixtures/infeasible-way.ts",
       "test/fixtures/ensures-readings.ts",
+      "test/fixtures/composition.ts",
       "examples/cart-checkout/注文確定.spec.ts",
     ]) {
       documents.push(await documentFor(path));

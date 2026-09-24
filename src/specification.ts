@@ -435,8 +435,8 @@ export async function evaluateSpecification(
         incompleteness.push({ kind: "row not run", subject: row.name, reason: unstoodOwed });
       } else if (
         implementation !== undefined &&
-        decision !== undefined &&
-        decision.kind !== "pending"
+        (implementation.stages !== undefined ||
+          (decision !== undefined && decision.kind !== "pending"))
       ) {
         try {
           const traced = await runTraced(implementation, row.given, standIns(row) as never);
@@ -1130,7 +1130,7 @@ function measureRules(
   met: readonly WayTaken[],
   owed: readonly WayTaken[],
 ): RulesMeasure {
-  if (implementation === undefined) {
+  if (implementation === undefined || implementation.stages !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
   }
   const decisions = Object.values(implementation.cases);
@@ -1166,7 +1166,7 @@ function measureArms(
   met: readonly ArmTaken[],
   owed: readonly ArmTaken[],
 ): Measure {
-  if (implementation === undefined) {
+  if (implementation === undefined || implementation.stages !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
   }
   const decisions = Object.values(implementation.cases);

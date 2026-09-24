@@ -149,6 +149,7 @@ export interface Implementation<B extends AnyBehavior> {
   readonly behavior: B;
   readonly cases: ImplementationCases<B>;
   readonly controls: ControlTable<B["effects"]>;
+  readonly stages?: readonly [Implementation<AnyBehavior>, Implementation<AnyBehavior>];
 }
 
 export type AnyImplementation = Implementation<AnyBehavior>;
@@ -374,6 +375,15 @@ export async function runTraced<B extends AnyBehavior>(
     throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
   }
 
+  if (implementation.stages !== undefined) {
+    const execution = await runStages(implementation.stages, parsedInput.value, deps);
+    return {
+      execution: validated(definition, parsedInput.value, execution),
+      arms: [],
+      comparisons: [],
+      way: undefined,
+    };
+  }
   const tag = tagOf(definition.input, parsedInput.value);
   if (tag === undefined) {
     throw new SpecificationError("Input has no recognized variant");
@@ -403,38 +413,61 @@ export async function runTraced<B extends AnyBehavior>(
           (distinction, outcome) => steps.push({ distinction, outcome }),
         )
       : await selected.run(parsedInput.value as never, deps as never);
+  return {
+    execution: validated(definition, parsedInput.value, execution),
+    arms,
+    comparisons,
+    way: selected.kind === "rules" ? { decision: selected.id, steps } : undefined,
+  };
+}
+
+function validated<B extends AnyBehavior>(
+  definition: B,
+  input: unknown,
+  execution: Execution<unknown, unknown>,
+): Execution<BehaviorResult<B>, BehaviorEffect<B>> {
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
     throw new SpecificationError(formatIssues("Invalid result", parsedResult.issues));
   }
-
-  const broken = brokenEnsures(definition, parsedInput.value, parsedResult.value);
+  const broken = brokenEnsures(definition, input, parsedResult.value);
   if (broken !== undefined) {
     throw new SpecificationError(
       `Ensures ${broken.name} does not hold: ${describeRule(broken.rule, "")}`,
     );
   }
-
   const parsedEffects: unknown[] = [];
   for (const [index, effect] of execution.effects.entries()) {
     const parsedEffect = definition.effects.parse(effect, `$.effects[${index}]`);
     if (!parsedEffect.success) {
-      throw new SpecificationError(
-        formatIssues("Invalid effect", parsedEffect.issues),
-      );
+      throw new SpecificationError(formatIssues("Invalid effect", parsedEffect.issues));
     }
     parsedEffects.push(parsedEffect.value);
   }
-
   return {
-    execution: {
-      result: parsedResult.value as BehaviorResult<B>,
-      effects: parsedEffects as BehaviorEffect<B>[],
-    },
-    arms,
-    comparisons,
-    way: selected.kind === "rules" ? { decision: selected.id, steps } : undefined,
+    result: parsedResult.value as BehaviorResult<B>,
+    effects: parsedEffects as BehaviorEffect<B>[],
   };
+}
+
+async function runStages(
+  [first, second]: readonly [AnyImplementation, AnyImplementation],
+  input: unknown,
+  deps: unknown,
+): Promise<Execution<unknown, unknown>> {
+  const answered = (await runTraced(first, input as never, deps as never)).execution;
+  const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
+  const firstResult = first.behavior.result;
+  const tag = isSumSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
+  if (
+    tag === undefined ||
+    departed.includes(tag) ||
+    !second.behavior.input.variantTags.includes(tag)
+  ) {
+    return answered;
+  }
+  const continued = (await runTraced(second, answered.result as never, deps as never)).execution;
+  return { result: continued.result, effects: [...answered.effects, ...continued.effects] };
 }
 
 export function traceSync(

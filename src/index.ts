@@ -140,3 +140,5 @@ export type {
 export type { EnsuresClassification, EnsuresReading, EnsuresReport } from "./ensures.js";
 export { reportDocument, reportSchemaVersion } from "./report-json.js";
 export type { ReportSource, Weakening } from "./report-json.js";
+export { compose, implementComposition, isComposition } from "./composition.js";
+export type { Composition } from "./composition.js";
