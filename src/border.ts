@@ -37,18 +37,18 @@ export const numberCarrier: Carrier = {
 };
 
 export const instantCarrier: Carrier = {
-  compare: (left, right) =>
-    (left as { readonly epochNanoseconds: bigint }).epochNanoseconds <
-    (right as { readonly epochNanoseconds: bigint }).epochNanoseconds
-      ? -1
-      : (left as { readonly epochNanoseconds: bigint }).epochNanoseconds >
-          (right as { readonly epochNanoseconds: bigint }).epochNanoseconds
-        ? 1
-        : 0,
+  compare: (left, right) => {
+    const difference = epochNanoseconds(left) - epochNanoseconds(right);
+    return difference < 0n ? -1 : difference > 0n ? 1 : 0;
+  },
   step: (value, direction) =>
     (value as { add(duration: object): unknown }).add({ nanoseconds: direction }),
-  format: value => String(value),
+  format: String,
 };
+
+function epochNanoseconds(value: unknown): bigint {
+  return (value as { readonly epochNanoseconds: bigint }).epochNanoseconds;
+}
 
 export const stringCarrier: Carrier = {
   compare: (left, right) =>
@@ -64,22 +64,33 @@ export function bordersOf(
     const border = borderOf(rule, carrierFor);
     return border === undefined ? [] : [border];
   });
-  return drawn.map(({ border, carrier, on, lower }) => {
-    const others = drawn.filter(other => other.border.measure === border.measure && other !== drawn.find(d => d.border === border));
-    const candidate = carrier.step?.(on, lower ? 1 : -1);
-    const wide =
-      candidate === undefined
-        ? !others.some(other => other.lower !== lower && other.border.closed && carrier.compare(other.on, on) === 0)
-        : others.every(other => other.admits(candidate));
-    return wide
-      ? border
-      : {
-          ...border,
-          points: border.points.map(point =>
-            point.role === "IN" ? { ...point, status: "excluded" as const } : point,
-          ),
-        };
+  return drawn.map(current => {
+    const others = drawn.filter(
+      other => other !== current && other.border.measure === current.border.measure,
+    );
+    return oneValueWide(current, others) ? withoutInPoint(current.border) : current.border;
   });
+}
+
+function oneValueWide(current: Drawn, others: readonly Drawn[]): boolean {
+  const { carrier, on, lower } = current;
+  const next = carrier.step?.(on, lower ? 1 : -1);
+  if (next === undefined) {
+    return others.some(
+      other =>
+        other.lower !== lower && other.border.closed && carrier.compare(other.on, on) === 0,
+    );
+  }
+  return !others.every(other => other.admits(next));
+}
+
+function withoutInPoint(border: Border): Border {
+  return {
+    ...border,
+    points: border.points.map(point =>
+      point.role === "IN" ? { ...point, status: "excluded" as const } : point,
+    ),
+  };
 }
 
 interface Drawn {
