@@ -197,7 +197,28 @@ const Line = object({
 const Lines = array(Line).invariant(v => ge(length(v), 1));
 ```
 
-Free-form TypeScript inside a decision may contain branches Chisel cannot read, so the arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. A declarative rule API for decisions is planned to make those branches readable.
+- **Arms and rules** of a decision written with `rules`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
+
+```ts
+const implementation = implement(checkout, {
+  cases: {
+    withItems: rules(
+      "check stock, then confirm",
+      cart => [
+        guard(all(cart.lines, line => le(line.quantity, line.stock)), () => ({
+          result: { type: "rejected", reason: "out of stock" },
+          effects: [],
+        })),
+      ],
+      cart => confirm(cart),
+    ),
+  },
+});
+```
+
+  Every guard has a `holds` and an `else` arm, and every case of a `match` is an arm; each way through the guards is a rule. A guard comparing a position with a constant divides it into classes and owes all four border points; one comparing two positions draws its border on their difference. A guard point is met only by a row that reached the comparison.
+
+A free-form `run` closure may contain branches Chisel cannot read, so its arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. The same holds for a comparison inside `rules` that Chisel cannot draw a line from.
 
 ## Conformance
 
