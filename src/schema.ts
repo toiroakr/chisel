@@ -470,3 +470,17 @@ function temporalInstant(): TemporalTypes.InstantConstructor {
   }
   return temporal.Instant;
 }
+
+export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  const unwrapped =
+    schema.kind === "optional" ? (schema as OptionalSchema<unknown>).schema : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) {
+    return unwrapped;
+  }
+  if (unwrapped.kind !== "object") {
+    return undefined;
+  }
+  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
+  return field === undefined ? undefined : schemaAtPath(field, rest);
+}

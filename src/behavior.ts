@@ -14,8 +14,16 @@ import type {
   Term,
   TermOf,
 } from "./rule.js";
-import { describeRule, holds, readOperand, rootTerm, selfTerm, termPaths } from "./rule.js";
-import { isSumSchema, tagOf } from "./schema.js";
+import {
+  describeRule,
+  holds,
+  readOperand,
+  rootTerm,
+  selfTerm,
+  termData,
+  termPaths,
+} from "./rule.js";
+import { isSumSchema, schemaAtPath, tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
   readonly result: Result;
@@ -254,12 +262,48 @@ export function implement<B extends AnyBehavior>(
     readonly controls?: ControlTable<B["effects"]>;
   }>,
 ): Implementation<B> {
+  for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
+    checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
+  }
   return {
     kind: "implementation",
     behavior: definition,
     cases: options.cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+function checkMatch(
+  definition: AnyBehavior,
+  tag: string,
+  decision: ImplementationCases<AnyBehavior>[string],
+): void {
+  if (decision?.kind !== "rules" || typeof decision.otherwise === "function") {
+    return;
+  }
+  const keys = termData(decision.otherwise.on).path;
+  const selected = schemaAtPath(
+    definition.input.variants[tag] as Schema<unknown>,
+    keys.slice(0, -1),
+  );
+  if (
+    selected === undefined ||
+    !isSumSchema(selected) ||
+    selected.discriminant !== keys[keys.length - 1]
+  ) {
+    throw new SpecificationError(
+      `match in ${decision.id} does not select the discriminant of a sum field`,
+    );
+  }
+  const written = Object.keys(decision.otherwise.cases);
+  const missing = selected.variantTags.find(caseTag => !written.includes(caseTag));
+  if (missing !== undefined) {
+    throw new SpecificationError(`match in ${decision.id} has no case for ${missing}`);
+  }
+  const unknown = written.find(caseTag => !selected.variantTags.includes(caseTag));
+  if (unknown !== undefined) {
+    throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the sum does not`);
+  }
 }
 
 export function isBehavior(value: unknown): value is AnyBehavior {

@@ -21,6 +21,7 @@ import {
   or,
   rules,
   runImplementation,
+  SpecificationError,
   string,
   sum,
   unanswered,
@@ -405,5 +406,46 @@ describe("ways generate could not compose", () => {
     expect(generationReport(並べる, 並び).notComposed).toStrictEqual([
       "並び: $.姓 < $.名 holds → otherwise",
     ]);
+  });
+});
+
+describe("what match can branch on", () => {
+  const 送る = behavior({
+    name: "送る",
+    input: sum("状態", {
+      確定済み: object({
+        メモ: string("メモ"),
+        配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
+      }),
+    }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+  const 何もしない = () => ({ result: {}, effects: [] });
+
+  it("refuses a match on a field that is not the discriminant of a sum", () => {
+    expect(() =>
+      implement(送る, {
+        cases: {
+          確定済み: rules("メモで分ける", () => [], match(注文 => 注文.メモ, { 至急: 何もしない })),
+        },
+      }),
+    ).toThrow(
+      new SpecificationError("match in メモで分ける does not select the discriminant of a sum field"),
+    );
+  });
+
+  it("refuses a match that leaves out a case of the sum", () => {
+    expect(() =>
+      implement(送る, {
+        cases: {
+          確定済み: rules(
+            "宅配だけ",
+            () => [],
+            match(注文 => 注文.配送.方法, { 宅配: 何もしない }),
+          ),
+        },
+      }),
+    ).toThrow(new SpecificationError("match in 宅配だけ has no case for 店頭受取"));
   });
 });

@@ -24,6 +24,7 @@ import {
   stepInto,
   termData,
 } from "./rule.js";
+import { schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -505,15 +506,5 @@ function unreadIn(rule: Rule, scope: AnySchema, label: string): string[] {
 }
 
 function schemaAt(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
-  const unwrapped =
-    schema.kind === "optional" ? (schema as OptionalSchema<unknown>).schema : schema;
-  const [key, ...rest] = keys;
-  if (key === undefined) {
-    return unwrapped;
-  }
-  if (unwrapped.kind !== "object") {
-    return undefined;
-  }
-  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
-  return field === undefined ? undefined : schemaAt(field, rest);
+  return schemaAtPath(schema, keys);
 }
