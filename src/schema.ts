@@ -261,7 +261,7 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
     kind: "array",
     element,
     parse,
-    placeholder: () => [],
+    placeholder: () => [element.placeholder()],
   };
 
   function parse(value: unknown, path = "$"): ValidationResult<readonly T[]> {

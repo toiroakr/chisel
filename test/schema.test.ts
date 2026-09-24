@@ -41,10 +41,10 @@ describe("array", () => {
     expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$[1]"]);
   });
 
-  it("uses an empty array as its placeholder", () => {
+  it("shows the shape of its element by holding one placeholder element", () => {
     const Tags = array(string("Tag"));
 
-    expect(Tags.placeholder()).toStrictEqual([]);
+    expect(Tags.placeholder()).toStrictEqual(["<Tag>"]);
   });
 });
 

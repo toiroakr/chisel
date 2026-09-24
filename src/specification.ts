@@ -466,13 +466,33 @@ export function generateExamples(
       .filter((tag): tag is string => tag !== undefined),
   );
 
-  return definition.input.variantTags
+  const generated: GeneratedExample[] = definition.input.variantTags
     .filter(tag => !existing.has(tag))
     .map(tag => ({
       name: `${definition.name}: ${tag}`,
       given: definition.input.placeholderFor(tag),
       reason: `${tag}の期待結果を人間が決める必要があります`,
     }));
+
+  for (const position of positionsOf(definition.input)) {
+    if (position.kind !== "divided") {
+      continue;
+    }
+    for (const className of position.classes) {
+      const standsIn = [...rows, ...generated].some(row =>
+        position.classify(row.given).includes(className),
+      );
+      if (!standsIn) {
+        generated.push({
+          name: `${definition.name}: ${position.path} = ${className}`,
+          given: position.place(definition.input.placeholder(), className),
+          reason: `${position.path}が${className}の期待結果を人間が決める必要があります`,
+        });
+      }
+    }
+  }
+
+  return generated;
 }
 
 export async function verifyConformance<B extends AnyBehavior>(
