@@ -176,10 +176,26 @@ export function isBehavior(value: unknown): value is AnyBehavior {
   );
 }
 
+export interface ArmTaken {
+  readonly decision: string;
+  readonly guard: number;
+  readonly arm: "holds" | "else";
+}
+
 export async function runImplementation<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
 ): Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>> {
+  return (await runTraced(implementation, input)).execution;
+}
+
+export async function runTraced<B extends AnyBehavior>(
+  implementation: Implementation<B>,
+  input: BehaviorInput<B>,
+): Promise<{
+  readonly execution: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
+  readonly arms: readonly ArmTaken[];
+}> {
   const definition = implementation.behavior;
   const parsedInput = definition.input.parse(input);
   if (!parsedInput.success) {
@@ -201,9 +217,10 @@ export async function runImplementation<B extends AnyBehavior>(
     throw new SpecificationError(`Pending decision for ${tag}: ${selected.reason}`);
   }
 
+  const arms: ArmTaken[] = [];
   const execution =
     selected.kind === "rules"
-      ? decide(selected, parsedInput.value)
+      ? decide(selected, parsedInput.value, arms)
       : await selected.run(parsedInput.value as never);
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
@@ -222,17 +239,27 @@ export async function runImplementation<B extends AnyBehavior>(
   }
 
   return {
-    result: parsedResult.value as BehaviorResult<B>,
-    effects: parsedEffects as BehaviorEffect<B>[],
+    execution: {
+      result: parsedResult.value as BehaviorResult<B>,
+      effects: parsedEffects as BehaviorEffect<B>[],
+    },
+    arms,
   };
 }
 
 function decide<Result, Effect>(
   decision: RulesDecision<unknown, Result, Effect>,
   input: unknown,
+  arms: ArmTaken[],
 ): Execution<Result, Effect> {
-  const failed = decision.guards.find(candidate => !holds(candidate.condition, input));
-  return failed === undefined ? decision.otherwise(input) : failed.orElse(input);
+  for (const [index, candidate] of decision.guards.entries()) {
+    if (!holds(candidate.condition, input)) {
+      arms.push({ decision: decision.id, guard: index, arm: "else" });
+      return candidate.orElse(input);
+    }
+    arms.push({ decision: decision.id, guard: index, arm: "holds" });
+  }
+  return decision.otherwise(input);
 }
 
 function formatIssues(

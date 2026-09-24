@@ -7,7 +7,9 @@ import type {
   Execution,
   Implementation,
 } from "./behavior.js";
-import { runImplementation } from "./behavior.js";
+import type { ArmTaken } from "./behavior.js";
+import { runImplementation, runTraced } from "./behavior.js";
+import { describeRule } from "./rule.js";
 import type { PointRole } from "./border.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
@@ -120,7 +122,20 @@ export interface AdequacyReport {
 
 export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 
+export interface ArmCoverage {
+  readonly decision: string;
+  readonly guard: string;
+  readonly arm: "holds" | "else";
+  readonly status: "met" | "gap" | "answer owed";
+}
+
 export type Measure =
+  | { readonly status: "complete"; readonly arms: readonly ArmCoverage[] }
+  | {
+      readonly status: "partial";
+      readonly arms: readonly ArmCoverage[];
+      readonly notRead: readonly string[];
+    }
   | { readonly status: "unavailable"; readonly reason: "not applicable" }
   | {
       readonly status: "unavailable";
@@ -251,6 +266,8 @@ export async function evaluateSpecification(
   const positions = positionsOf(definition.input);
   const coveredClasses = positions.map(() => new Set<string>());
   const answeredGivens: unknown[] = [];
+  const armsMet: ArmTaken[] = [];
+  const armsOwed: ArmTaken[] = [];
   const observe = (
     inputTag: string,
     actual: unknown,
@@ -293,9 +310,11 @@ export async function evaluateSpecification(
         implementation === undefined || inputTag === undefined
           ? undefined
           : implementation.cases[inputTag];
-      if (implementation !== undefined && decision?.kind === "decision") {
+      if (implementation !== undefined && decision !== undefined && decision.kind !== "pending") {
         try {
-          observe(inputTag!, await runImplementation(implementation, row.given));
+          const traced = await runTraced(implementation, row.given);
+          observe(inputTag!, traced.execution);
+          armsOwed.push(...traced.arms);
         } catch (error) {
           failures.push({
             name: row.name,
@@ -344,7 +363,11 @@ export async function evaluateSpecification(
         row.name,
         row.given,
         row.expect,
-        input => runImplementation(implementation, input),
+        async input => {
+          const traced = await runTraced(implementation, input);
+          armsMet.push(...traced.arms);
+          return traced.execution;
+        },
       );
       if (actual !== undefined && inputTag !== undefined) {
         const observed = observe(inputTag, actual);
@@ -469,21 +492,15 @@ export async function evaluateSpecification(
     ) &&
     borders.every(border => border.points.every(point => point.status !== "gap"));
 
-  const arms: Measure =
-    specification.implementation === undefined
-      ? { status: "unavailable", reason: "not applicable" }
-      : {
-          status: "unavailable",
-          reason: "not measured",
-          notRead: Object.values(specification.implementation.cases).flatMap(decision =>
-            decision.kind === "decision" ? [decision.id] : [],
-          ),
-        };
-  const verdict: Verdict = !adequate
-    ? "not_satisfied"
-    : arms.reason === "not measured"
-      ? "undetermined"
-      : "satisfied";
+  const arms = measureArms(specification.implementation, armsMet, armsOwed);
+  const armGap = arms.status !== "unavailable" && arms.arms.some(arm => arm.status !== "met");
+  const verdict: Verdict =
+    !adequate || armGap
+      ? "not_satisfied"
+      : arms.status === "complete" ||
+          (arms.status === "unavailable" && arms.reason === "not applicable")
+        ? "satisfied"
+        : "undetermined";
 
   return {
     specification: specification.name,
@@ -523,7 +540,7 @@ export async function evaluateSpecification(
       })),
     },
     measures: { arms },
-    adequate,
+    adequate: adequate && !armGap,
     verdict,
   };
 }
@@ -611,6 +628,46 @@ export async function verifyConformance<B extends AnyBehavior>(
     }
   }
   return failures;
+}
+
+function measureArms(
+  implementation: Implementation<AnyBehavior> | undefined,
+  met: readonly ArmTaken[],
+  owed: readonly ArmTaken[],
+): Measure {
+  if (implementation === undefined) {
+    return { status: "unavailable", reason: "not applicable" };
+  }
+  const decisions = Object.values(implementation.cases);
+  const notRead = decisions.flatMap(decision =>
+    decision.kind === "decision" ? [decision.id] : [],
+  );
+  const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
+    taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
+  const arms = decisions.flatMap(decision =>
+    decision.kind !== "rules"
+      ? []
+      : decision.guards.flatMap((candidate, index) =>
+          (["holds", "else"] as const).map(
+            (arm): ArmCoverage => ({
+              decision: decision.id,
+              guard: describeRule(candidate.condition),
+              arm,
+              status: took(met, decision.id, index, arm)
+                ? "met"
+                : took(owed, decision.id, index, arm)
+                  ? "answer owed"
+                  : "gap",
+            }),
+          ),
+        ),
+  );
+  if (notRead.length === 0) {
+    return { status: "complete", arms };
+  }
+  return arms.length === 0
+    ? { status: "unavailable", reason: "not measured", notRead }
+    : { status: "partial", arms, notRead };
 }
 
 function coverage(all: readonly string[], covered: ReadonlySet<string>): Coverage {

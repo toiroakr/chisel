@@ -237,9 +237,16 @@ function padDisplay(value: string, width: number): string {
 }
 
 function formatMeasure(measure: Measure): string {
-  return measure.reason === "not applicable"
-    ? "対象なし (not applicable)"
-    : `計測不能 (not measured); 読めないdecision: ${measure.notRead.join(", ")}`;
+  switch (measure.status) {
+    case "complete":
+      return "計測済み (complete)";
+    case "partial":
+      return `一部のみ (partial); 読めないdecision: ${measure.notRead.join(", ")}`;
+    case "unavailable":
+      return measure.reason === "not applicable"
+        ? "対象なし (not applicable)"
+        : `計測不能 (not measured); 読めないdecision: ${measure.notRead.join(", ")}`;
+  }
 }
 
 function formatCoverage(
