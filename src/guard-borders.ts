@@ -1,7 +1,8 @@
 import type { AnyImplementation, ComparisonReached } from "./behavior.js";
 import type { Border } from "./border.js";
 import { bordersOf, integerCarrier, numberCarrier } from "./border.js";
-import { carrierOf } from "./partition.js";
+import type { Position } from "./partition.js";
+import { carrierOf, positionsOf } from "./partition.js";
 import type { CompareRule, Rule, Term } from "./rule.js";
 import { describeRule, isTerm, readOperand, selfTerm, sizeOf, termData } from "./rule.js";
 import type {
@@ -17,20 +18,32 @@ export interface GuardBorder {
   readonly comparison: CompareRule;
   readonly border: Border;
   coordinateOf(reached: ComparisonReached): unknown;
+  compose(given: unknown, coordinate: unknown): unknown;
 }
 
 export function guardBordersOf(implementation: AnyImplementation): readonly GuardBorder[] {
   const input = implementation.behavior.input;
+  const positions = positionsOf(input);
+  const at = (path: string): Position | undefined =>
+    positions.find(position => position.path === path);
   return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$"),
+          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$", at),
         ),
   );
 }
 
-function walk(rule: Rule, scope: AnySchema, path: string, label: string): GuardBorder[] {
+type PositionAt = (path: string) => Position | undefined;
+
+function walk(
+  rule: Rule,
+  scope: AnySchema,
+  path: string,
+  label: string,
+  at: PositionAt,
+): GuardBorder[] {
   if (rule.kind === "all") {
     const of = termData(rule.of).path;
     const collection = schemaAt(scope, of);
@@ -39,10 +52,10 @@ function walk(rule: Rule, scope: AnySchema, path: string, label: string): GuardB
     const suffix = of.map(key => `.${key}`).join("");
     return element === undefined
       ? []
-      : walk(rule.each, element, `${path}${suffix}[]`, `${label}${suffix}[]`);
+      : walk(rule.each, element, `${path}${suffix}[]`, `${label}${suffix}[]`, at);
   }
   if (isTerm(rule.left) && isTerm(rule.right)) {
-    return between(rule, rule.left, rule.right, scope, path, label);
+    return between(rule, rule.left, rule.right, scope, path, label, at);
   }
   const term = isTerm(rule.left) ? rule.left : isTerm(rule.right) ? rule.right : undefined;
   if (term === undefined) {
@@ -58,14 +71,16 @@ function walk(rule: Rule, scope: AnySchema, path: string, label: string): GuardB
     describe: compared => describeRule(compared, label),
     admits: coordinate => measure !== "value" || schema.parse(coordinate).success,
   });
+  const positionPath = `${path}${keys.map(key => `.${key}`).join("")}`;
   return borders.map(border => ({
-    path: `${path}${keys.map(key => `.${key}`).join("")}`,
+    path: positionPath,
     comparison: rule,
     border,
     coordinateOf: reached => {
       const value = readOperand(term, reached.scope);
       return measure === "length" && value !== undefined ? sizeOf(value) : value;
     },
+    compose: (given, coordinate) => at(positionPath)?.write(given, measure, coordinate),
   }));
 }
 
@@ -76,6 +91,7 @@ function between(
   scope: AnySchema,
   path: string,
   label: string,
+  at: PositionAt,
 ): GuardBorder[] {
   const sides = [left, right].map(term => {
     const { path: keys, measure } = termData(term);
@@ -124,6 +140,15 @@ function between(
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : a - b;
+    },
+    compose: (given, coordinate) => {
+      const moved = at(first.path);
+      const other = at(second.path)?.valuesIn(given)[0];
+      if (moved === undefined || other === undefined) {
+        return undefined;
+      }
+      const base = second.measure === "length" ? sizeOf(other) : (other as number);
+      return moved.write(given, first.measure, base + (coordinate as number));
     },
   }));
 }

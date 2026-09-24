@@ -255,6 +255,25 @@ export async function runTraced<B extends AnyBehavior>(
   };
 }
 
+export function comparisonsReached(
+  implementation: AnyImplementation,
+  input: unknown,
+): readonly ComparisonReached[] {
+  const parsed = implementation.behavior.input.parse(input);
+  const tag = parsed.success ? tagOf(implementation.behavior.input, parsed.value) : undefined;
+  const decision = tag === undefined ? undefined : implementation.cases[tag];
+  if (!parsed.success || decision?.kind !== "rules") {
+    return [];
+  }
+  const reached: ComparisonReached[] = [];
+  for (const candidate of decision.guards) {
+    if (!holds(candidate.condition, parsed.value, (rule, scope) => reached.push({ rule, scope }))) {
+      break;
+    }
+  }
+  return reached;
+}
+
 function decide<Result, Effect>(
   decision: RulesDecision<unknown, Result, Effect>,
   input: unknown,

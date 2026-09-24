@@ -8,6 +8,7 @@ import {
   example,
   examples,
   ge,
+  generateExamples,
   guard,
   implement,
   integer,
@@ -229,5 +230,56 @@ describe("a border between two positions", () => {
       relation: "neighbour not named",
       status: "not named",
     });
+  });
+});
+
+describe("generateExamples for guard borders", () => {
+  const 注文を確定する = behavior({
+    name: "注文を確定する",
+    input: sum("状態", {
+      商品あり: object({ 明細: array(object({ 数量: integer(), 在庫数: integer() })) }),
+    }),
+    result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    effects: sum("種類", {}),
+  });
+  const 在庫を確かめる = implement(注文を確定する, {
+    cases: {
+      商品あり: rules(
+        "在庫を確かめる",
+        カート => [
+          guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+            result: { 結果: "不可", 理由: "在庫不足" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "確定" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("moves one side of a compared pair so the difference stands at each point no row reached", () => {
+    const existing = examples(注文を確定する, [
+      example(注文を確定する, "ちょうど在庫分", {
+        given: { 状態: "商品あり", 明細: [{ 数量: 3, 在庫数: 3 }] },
+        expect: { result: { 結果: "確定" }, effects: [] },
+      }),
+    ]);
+
+    expect(
+      generateExamples(existing, 在庫を確かめる).map(row => ({ name: row.name, given: row.given })),
+    ).toStrictEqual([
+      {
+        name: "注文を確定する: @商品あり.明細[].数量 − @商品あり.明細[].在庫数 OFF (= 1)",
+        given: { 状態: "商品あり", 明細: [{ 数量: 4, 在庫数: 3 }] },
+      },
+      {
+        name: "注文を確定する: @商品あり.明細[].数量 − @商品あり.明細[].在庫数 IN (< 0)",
+        given: { 状態: "商品あり", 明細: [{ 数量: 2, 在庫数: 3 }] },
+      },
+      {
+        name: "注文を確定する: @商品あり.明細[].数量 − @商品あり.明細[].在庫数 OUT (> 1)",
+        given: { 状態: "商品あり", 明細: [{ 数量: 5, 在庫数: 3 }] },
+      },
+    ]);
   });
 });

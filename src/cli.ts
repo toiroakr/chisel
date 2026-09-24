@@ -65,7 +65,10 @@ export async function run(argv: readonly string[]): Promise<CliResult> {
   }
 
   for (const target of targets) {
-    const generated = generateExamples(target.specification.examples);
+    const generated = generateExamples(
+      target.specification.examples,
+      target.specification.implementation,
+    );
     stdout.push(
       formatGeneratedExamples(target.behaviorBinding, generated, target.existingRows),
     );

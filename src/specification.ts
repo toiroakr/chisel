@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type {
   AnyBehavior,
+  AnyImplementation,
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
@@ -9,7 +10,7 @@ import type {
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached } from "./behavior.js";
 import { guardBordersOf } from "./guard-borders.js";
-import { runImplementation, runTraced } from "./behavior.js";
+import { comparisonsReached, runImplementation, runTraced } from "./behavior.js";
 import { describeRule } from "./rule.js";
 import type { PointRole } from "./border.js";
 import type { Position } from "./partition.js";
@@ -572,6 +573,7 @@ export async function evaluateSpecification(
 
 export function generateExamples(
   target: AnyBehavior | ExampleSet<AnyBehavior>,
+  implementation?: AnyImplementation,
 ): readonly GeneratedExample[] {
   const definition = target.kind === "behavior" ? target : target.behavior;
   const rows = target.kind === "behavior" ? [] : target.rows;
@@ -631,6 +633,32 @@ export function generateExamples(
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
           });
         }
+      }
+    }
+  }
+
+  for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
+    const reachedBy = (given: unknown) =>
+      comparisonsReached(implementation!, given).filter(item => item.rule === drawn.comparison);
+    for (const point of drawn.border.points) {
+      if (point.status !== "owed" || point.witness === undefined) {
+        continue;
+      }
+      const standsAt = [...rows, ...generated].some(row =>
+        reachedBy(row.given).some(item => point.contains(drawn.coordinateOf(item))),
+      );
+      if (standsAt) {
+        continue;
+      }
+      const origin =
+        origins.find(given => reachedBy(given).length > 0) ?? definition.input.placeholder();
+      const given = drawn.compose(origin, point.witness);
+      if (given !== undefined) {
+        generated.push({
+          name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
+          given,
+          reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
+        });
       }
     }
   }
