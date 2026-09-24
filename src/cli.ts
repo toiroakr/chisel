@@ -58,8 +58,12 @@ export async function run(argv: readonly string[]): Promise<CliResult> {
     const reports = await Promise.all(
       targets.map(target => evaluateSpecification(target.specification)),
     );
-    for (const report of reports) {
-      stdout.push(formatReport(report));
+    if (flags.includes("--json")) {
+      stdout.push(JSON.stringify({ schemaVersion: 1, reports }, undefined, 2));
+    } else {
+      for (const report of reports) {
+        stdout.push(formatReport(report));
+      }
     }
     const exitCode =
       flags.includes("--strict") && reports.some(report => !report.adequate) ? 1 : 0;
@@ -354,7 +358,7 @@ function toIdentifier(value: string): string {
 }
 
 function usage(): string {
-  return "Usage: chisel <check|generate> <spec.ts> [--strict]";
+  return "Usage: chisel <check|generate> <spec.ts> [--strict] [--json]";
 }
 
 function isRunAsScript(): boolean {

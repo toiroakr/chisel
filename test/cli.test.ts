@@ -231,3 +231,27 @@ describe("cli run() generate with a way it could not compose", () => {
     );
   });
 });
+
+describe("cli run() check --json", () => {
+  it("writes the reports as one JSON document with a schema version", async () => {
+    const result = await run(["check", fixture("test/fixtures/rules.ts"), "--json"]);
+    const document = JSON.parse(result.stdout.join("\n")) as {
+      readonly schemaVersion: number;
+      readonly reports: readonly { readonly specification: string; readonly verdict: string }[];
+    };
+
+    expect({
+      schemaVersion: document.schemaVersion,
+      reports: document.reports.map(({ specification, verdict }) => ({ specification, verdict })),
+    }).toStrictEqual({
+      schemaVersion: 1,
+      reports: [{ specification: "注文確定", verdict: "not_satisfied" }],
+    });
+  });
+
+  it("keeps the exit status --strict decides", async () => {
+    const result = await run(["check", fixture("test/fixtures/rules.ts"), "--json", "--strict"]);
+
+    expect(result.exitCode).toBe(1);
+  });
+});
