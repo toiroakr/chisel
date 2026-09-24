@@ -261,7 +261,7 @@ export function implement<B extends AnyBehavior>(
     readonly cases: ImplementationCases<B>;
     readonly controls?: ControlTable<B["effects"]>;
   }>,
-): Implementation<B> {
+): Implementation<NoInfer<B>> {
   for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
     checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
   }

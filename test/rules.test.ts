@@ -449,3 +449,50 @@ describe("what match can branch on", () => {
     ).toThrow(new SpecificationError("match in 宅配だけ has no case for 店頭受取"));
   });
 });
+
+describe("rules written inline in defineSpecification", () => {
+  const 受け付ける = behavior({
+    name: "受け付ける",
+    input: sum("状態", { 入力済み: object({ 合計: integer() }) }),
+    result: sum("結果", { 受付: object({}), 審査: object({}) }),
+    effects: sum("種類", {}),
+  });
+
+  it("keeps the result literals of an implementation written inside the specification", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(受け付ける, [
+          example(受け付ける, "少額", {
+            given: { 状態: "入力済み", 合計: 100 },
+            expect: { result: { 結果: "受付" }, effects: [] },
+          }),
+        ]),
+        implementation: implement(受け付ける, {
+          cases: {
+            入力済み: rules(
+              "上限",
+              入力 => [guard(le(入力.合計, 100), () => ({ result: { 結果: "審査" }, effects: [] }))],
+              () => ({ result: { 結果: "受付" }, effects: [] }),
+            ),
+          },
+        }),
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+
+  it("refuses a result case the behavior does not answer, inline as well", () => {
+    defineSpecification({
+      name: "受付",
+      examples: examples(受け付ける, []),
+      implementation: implement(受け付ける, {
+        cases: {
+          // @ts-expect-error 却下 is not a result case of 受け付ける
+          入力済み: rules("上限", () => [], () => ({ result: { 結果: "却下" }, effects: [] })),
+        },
+      }),
+    });
+  });
+});
