@@ -155,7 +155,18 @@ describe("verdict over a rules decision", () => {
     const report = await evaluateSpecification(
       defineSpecification({
         name: "注文確定",
-        examples: examples(注文を確定する, [在庫あり, 在庫不足]),
+        examples: examples(注文を確定する, [
+          在庫あり,
+          在庫不足,
+          example(注文を確定する, "在庫に余裕がある", {
+            given: { 状態: "商品あり", カートID: "c-3", 明細: [{ 数量: 2, 在庫数: 3 }] },
+            expect: { result: { 結果: "確定", カートID: "c-3" }, effects: [] },
+          }),
+          example(注文を確定する, "在庫が大きく足りない", {
+            given: { 状態: "商品あり", カートID: "c-4", 明細: [{ 数量: 5, 在庫数: 3 }] },
+            expect: { result: { 結果: "不可", 理由: "在庫不足" }, effects: [] },
+          }),
+        ]),
         implementation: 在庫を確かめて確定する,
       }),
     );

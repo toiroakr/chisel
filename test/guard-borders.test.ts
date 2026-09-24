@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  all,
+  array,
   behavior,
   defineSpecification,
   evaluateSpecification,
@@ -10,6 +12,7 @@ import {
   implement,
   integer,
   le,
+  number,
   object,
   rules,
   string,
@@ -146,5 +149,85 @@ describe("a guard's border is met by reaching the comparison", () => {
       { role: "IN", relation: "> 1", status: "gap" },
       { role: "OUT", relation: "< 0", status: "excluded" },
     ]);
+  });
+});
+
+describe("a border between two positions", () => {
+  const 注文を確定する = behavior({
+    name: "注文を確定する",
+    input: sum("状態", {
+      商品あり: object({ 明細: array(object({ 数量: integer(), 在庫数: integer() })) }),
+    }),
+    result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    effects: sum("種類", {}),
+  });
+  const 在庫を確かめる = implement(注文を確定する, {
+    cases: {
+      商品あり: rules(
+        "在庫を確かめる",
+        カート => [
+          guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+            result: { 結果: "不可", 理由: "在庫不足" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "確定" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("draws the line on the difference of the two and reads it for every element the rule reached", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "確定",
+        examples: examples(注文を確定する, [
+          example(注文を確定する, "ちょうど在庫分", {
+            given: { 状態: "商品あり", 明細: [{ 数量: 5, 在庫数: 9 }, { 数量: 3, 在庫数: 3 }] },
+            expect: { result: { 結果: "確定" }, effects: [] },
+          }),
+        ]),
+        implementation: 在庫を確かめる,
+      }),
+    );
+
+    expect(report.borders).toStrictEqual([
+      {
+        path: "@商品あり.明細[].数量 − @商品あり.明細[].在庫数",
+        rule: "guard $.明細[].数量 <= $.明細[].在庫数",
+        points: [
+          { role: "ON", relation: "= 0", status: "met" },
+          { role: "OFF", relation: "= 1", status: "gap" },
+          { role: "IN", relation: "< 0", status: "met" },
+          { role: "OUT", relation: "> 1", status: "gap" },
+        ],
+      },
+    ]);
+  });
+
+  it("names no OFF point on the difference of two numbers, which has no step", async () => {
+    const 比べる = behavior({
+      name: "比べる",
+      input: sum("状態", { 入力済み: object({ 予算: number(), 見積: number() }) }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+    const 予算内か = implement(比べる, {
+      cases: {
+        入力済み: rules(
+          "予算内か",
+          入力 => [guard(le(入力.見積, 入力.予算), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "比較", examples: examples(比べる, []), implementation: 予算内か }),
+    );
+
+    expect(report.borders[0]!.points[1]).toStrictEqual({
+      role: "OFF",
+      relation: "neighbour not named",
+      status: "not named",
+    });
   });
 });
