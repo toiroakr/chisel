@@ -26,12 +26,13 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { describeRule, describeTerm, termData } from "./rule.js";
-import type { PointRole } from "./border.js";
-import { emptiedBy } from "./border.js";
+import { describeRule, describeTerm, isTerm, termData } from "./rule.js";
+import type { Term } from "./rule.js";
+import type { BorderPoint, PointRole } from "./border.js";
+import { emptiedBy, normalize } from "./border.js";
 import { feasibilityOf } from "./feasibility.js";
 import type { Feasibility } from "./feasibility.js";
-import type { GuardPartition } from "./guard-borders.js";
+import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
@@ -232,7 +233,8 @@ export interface BorderCoverage {
   readonly points: readonly {
     readonly role: PointRole;
     readonly relation: string;
-    readonly status: "met" | "gap" | "excluded" | "not named" | "no point";
+    readonly status: "met" | "gap" | "excluded" | "not named" | "no point" | "no row owed" | "undecided";
+    readonly reason?: string;
   }[];
 }
 
@@ -646,16 +648,16 @@ export async function evaluateSpecification(
     return {
       path: drawn.path,
       rule: drawn.border.rule,
-      points: drawn.border.points.map(point => ({
-        role: point.role,
-        relation: point.relation,
-        status:
-          point.status !== "owed"
-            ? point.status
-            : coordinates.some(value => point.contains(value))
-              ? "met"
-              : "gap",
-      })),
+      points: drawn.border.points.map(point => {
+        const base = { role: point.role, relation: point.relation };
+        if (point.status !== "owed") {
+          return { ...base, status: point.status };
+        }
+        if (coordinates.some(value => point.contains(value))) {
+          return { ...base, status: "met" as const };
+        }
+        return { ...base, ...unmetStatus(reachOf(drawn, point)) };
+      }),
     };
   });
   borders.push(...guardBorders);
@@ -703,7 +705,9 @@ export async function evaluateSpecification(
     ...(rulesMeasure.status === "unavailable" ? [] : rulesMeasure.rules),
   ];
   const armGap = lines.some(line => line.status === "gap" || line.status === "answer owed");
-  const armUndecided = lines.some(line => line.status === "undecided");
+  const armUndecided =
+    lines.some(line => line.status === "undecided") ||
+    borders.some(border => border.points.some(point => point.status === "undecided"));
   const unreadComparisons =
     specification.implementation === undefined
       ? []
@@ -899,7 +903,7 @@ export function generationReport(
       const standsAt = [...rows, ...generated].some(row =>
         reachedBy(row.given).some(item => point.contains(drawn.coordinateOf(item))),
       );
-      if (standsAt) {
+      if (standsAt || unmetStatus(reachOf(drawn, point)).status === "no row owed") {
         continue;
       }
       const origin =
@@ -1199,6 +1203,29 @@ function unmetStatus(
     return { status: "undecided", reason: undecided.reason };
   }
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
+}
+
+function reachOf(drawn: GuardBorder, point: BorderPoint): readonly Feasibility[] {
+  const normalized = normalize(drawn.comparison);
+  if (drawn.origin === undefined || point.region === undefined || normalized === undefined) {
+    return [{ kind: "feasible" }];
+  }
+  const { decision, scope } = drawn.origin;
+  const term = (
+    isTerm(drawn.comparison.left) ? drawn.comparison.left : drawn.comparison.right
+  ) as Term<unknown>;
+  const placement = {
+    path: termData(term).path,
+    measure: normalized.measure,
+    ...point.region,
+  };
+  const prefixes = waysOf(decision).flatMap(way => {
+    const index = way.steps.findIndex(step => step.distinction === drawn.comparison);
+    return index === -1 ? [] : [way.steps.slice(0, index)];
+  });
+  return prefixes.length === 0
+    ? [{ kind: "feasible" }]
+    : prefixes.map(steps => feasibilityOf({ steps }, scope, placement));
 }
 
 function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnySchema {

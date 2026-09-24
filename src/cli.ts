@@ -239,6 +239,8 @@ const pointStatusLabels: Readonly<Record<BorderCoverage["points"][number]["statu
   excluded: "除外 (excluded)",
   "not named": "隣の値なし (not named)",
   "no point": "点なし (no point)",
+  "no row owed": "行は不要 (no row owed)",
+  undecided: "未決 (undecided)",
 };
 
 function formatBorders(borders: readonly BorderCoverage[]): string[] {

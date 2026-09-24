@@ -1,4 +1,4 @@
-import type { AnyBehavior, AnyImplementation, ComparisonReached } from "./behavior.js";
+import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
 import {
@@ -37,6 +37,10 @@ export interface GuardBorder {
   readonly path: string;
   readonly comparison: CompareRule;
   readonly border: Border;
+  readonly origin?: {
+    readonly decision: RulesDecision<unknown, unknown, unknown>;
+    readonly scope: AnySchema;
+  };
   coordinateOf(reached: ComparisonReached): unknown;
   compose(given: unknown, coordinate: unknown): unknown;
 }
@@ -50,7 +54,12 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$", at, asGuard),
+          walk(candidate.condition, input.variants[tag] as AnySchema, `@${tag}`, "$", at, asGuard).map(
+            drawn => ({
+              ...drawn,
+              origin: { decision, scope: input.variants[tag] as AnySchema },
+            }),
+          ),
         ),
   );
 }

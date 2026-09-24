@@ -9,6 +9,7 @@ export interface BorderPoint {
   readonly relation: string;
   readonly status: PointStatus;
   readonly witness?: unknown;
+  readonly region?: { readonly operator: Operator; readonly bound: unknown };
   contains(coordinate: unknown): boolean;
 }
 
@@ -246,6 +247,7 @@ function borderOf(
           relation: `= ${carrier.format(on)}`,
           status: owedUnlessRefused(on),
           witness: on,
+          region: { operator: "==", bound: on },
           contains: at(on),
         },
     off === undefined
@@ -255,14 +257,19 @@ function borderOf(
           relation: `= ${carrier.format(off)}`,
           status: outsideStatus(off),
           witness: off,
+          region: { operator: "==", bound: off },
           contains: at(off),
         },
-    inPoint(beyond(inner), past(inner, inward), inside(inner)),
+    {
+      ...inPoint(beyond(inner), past(inner, inward), inside(inner)),
+      region: { operator: lower ? ">" : "<", bound: inner },
+    },
     {
       role: "OUT",
       relation: before(outer),
       status: outsideStatus(outWitness),
       witness: outWitness,
+      region: { operator: lower ? "<" : ">", bound: outer },
       contains: outside(outer),
     },
   ];
@@ -319,6 +326,7 @@ function namedValueBorder(
           relation: `= ${carrier.format(edge)}`,
           status: statusFor(edge, inside),
           witness: edge,
+          region: { operator: "==", bound: edge },
           contains: at(edge),
         };
   const run = (role: PointRole, direction: 1 | -1, inside: boolean): BorderPoint => {
@@ -329,6 +337,7 @@ function namedValueBorder(
       relation: `${direction === 1 ? ">" : "<"} ${carrier.format(edge)}`,
       status: statusFor(witness, inside),
       witness,
+      region: { operator: direction === 1 ? ">" : "<", bound: edge },
       contains: value => carrier.compare(value, edge) * direction > 0,
     };
   };

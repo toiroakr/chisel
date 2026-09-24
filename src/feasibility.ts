@@ -64,7 +64,18 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
 export const contradicts = "ガードの条件がこの値について両立しない";
 export const unreadable = "読めない条件が同じ値を読む別の条件と重なる";
 
-export function feasibilityOf(way: Way, scope: AnySchema): Feasibility {
+export interface Placement {
+  readonly path: readonly string[];
+  readonly measure: Measure;
+  readonly operator: Operator;
+  readonly bound: unknown;
+}
+
+export function feasibilityOf(
+  way: Pick<Way, "steps">,
+  scope: AnySchema,
+  placement?: Placement,
+): Feasibility {
   const groups = new Map<string, Group>();
   const relations: Relation[] = [];
   const opaque: (readonly (readonly string[])[])[] = [];
@@ -77,6 +88,11 @@ export function feasibilityOf(way: Way, scope: AnySchema): Feasibility {
     return key;
   };
 
+  if (placement !== undefined) {
+    groups
+      .get(groupFor(placement.path, placement.measure))!
+      .constraints.push({ operator: placement.operator, bound: placement.bound });
+  }
   for (const step of way.steps) {
     const key = stepKey(step);
     const seen = outcomes.get(key);

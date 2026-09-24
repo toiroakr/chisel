@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   all,
+  and,
   array,
   behavior,
   defineSpecification,
@@ -654,5 +655,48 @@ describe("a guard on a length", () => {
     expect(
       await pointsReached(注文 => le(length(注文.明細), 注文.上限), { 明細: [1, 2, 3], 上限: 3 }),
     ).toStrictEqual(["ON"]);
+  });
+});
+
+describe("a guard point no row can reach", () => {
+  const 数量を見る = behavior({
+    name: "数量を見る",
+    input: sum("状態", { 入力済み: object({ 数量: integer() }) }),
+    result: sum("結果", { 受付: object({}), 却下: object({}) }),
+    effects: sum("種類", {}),
+  });
+  const 二段 = implement(数量を見る, {
+    cases: {
+      入力済み: rules(
+        "二段",
+        入力 => [
+          guard(and(ge(入力.数量, 10), ge(入力.数量, 5)), () => ({
+            result: { 結果: "却下" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "受付" }, effects: [] }),
+      ),
+    },
+  });
+
+  it("owes no row at a point of a comparison only reached with values outside it", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "二段", examples: examples(数量を見る, []), implementation: 二段 }),
+    );
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.数量 >= 5")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON no row owed", "OFF no row owed", "IN gap", "OUT no row owed"]);
+  });
+
+  it("offers no row at such a point", () => {
+    expect(
+      generateExamples(examples(数量を見る, []), 二段)
+        .map(row => row.name)
+        .filter(name => /@入力済み\.数量 (ON \(= 5\)|OFF \(= 4\)|OUT \(< 4\))/.test(name)),
+    ).toStrictEqual([]);
   });
 });
