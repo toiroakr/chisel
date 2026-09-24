@@ -3,7 +3,9 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { arg, defineCommand, runMain } from "@politty/valibot";
 import { tsImport } from "tsx/esm/api";
+import * as v from "valibot";
 import { isBehavior } from "./behavior.js";
 import type { AnyBehavior } from "./behavior.js";
 import { formatTypeScriptValue } from "./codegen.js";
@@ -26,48 +28,56 @@ interface LoadedTarget {
   readonly existingRows: number;
 }
 
-export interface CliResult {
-  readonly exitCode: number;
-  readonly stdout: readonly string[];
-  readonly stderr: readonly string[];
-}
+const fileArg = arg(v.string(), {
+  positional: true,
+  description: "behaviorまたはspecificationをexportしたspecファイル",
+});
 
-export async function run(argv: readonly string[]): Promise<CliResult> {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const [command, file, ...flags] = argv;
-
-  if ((command !== "check" && command !== "generate") || file === undefined) {
-    stderr.push(usage());
-    return { exitCode: 2, stdout, stderr };
-  }
-
-  const targets = await loadTargets(file);
-  if (targets.length === 0) {
-    stderr.push(`${file}にexportされたbehaviorまたはspecificationがありません`);
-    return { exitCode: 2, stdout, stderr };
-  }
-
-  if (command === "check") {
+const checkCommand = defineCommand({
+  name: "check",
+  description: "specificationの充足度を報告する",
+  args: v.object({
+    file: fileArg,
+    strict: arg(v.optional(v.boolean(), false), {
+      description: "充足度が不完全なら終了コード1で失敗する",
+    }),
+  }),
+  run: async args => {
+    const targets = await loadTargets(args.file);
     const reports = await Promise.all(
       targets.map(target => evaluateSpecification(target.specification)),
     );
     for (const report of reports) {
-      stdout.push(formatReport(report));
+      console.log(formatReport(report));
     }
-    const exitCode =
-      flags.includes("--strict") && reports.some(report => !report.adequate) ? 1 : 0;
-    return { exitCode, stdout, stderr };
-  }
+    if (args.strict && reports.some(report => !report.adequate)) {
+      throw new Error("充足度が不完全なspecificationがあります");
+    }
+  },
+});
 
-  for (const target of targets) {
-    const generated = generateExamples(target.specification.examples);
-    stdout.push(
-      formatGeneratedExamples(target.behaviorBinding, generated, target.existingRows),
-    );
-  }
-  return { exitCode: 0, stdout, stderr };
-}
+const generateCommand = defineCommand({
+  name: "generate",
+  description: "未網羅の入力variantに対するexampleの雛形を出力する",
+  args: v.object({ file: fileArg }),
+  run: async args => {
+    for (const target of await loadTargets(args.file)) {
+      const generated = generateExamples(target.specification.examples);
+      console.log(
+        formatGeneratedExamples(target.behaviorBinding, generated, target.existingRows),
+      );
+    }
+  },
+});
+
+export const cli = defineCommand({
+  name: "chisel",
+  description: "実行可能な業務仕様を段階的に育てるツールキット",
+  subCommands: {
+    check: checkCommand,
+    generate: generateCommand,
+  },
+});
 
 async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
   const url = pathToFileURL(resolve(file)).href;
@@ -111,6 +121,9 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
     });
   }
 
+  if (targets.length === 0) {
+    throw new Error(`${file}にexportされたbehaviorまたはspecificationがありません`);
+  }
   return targets;
 }
 
@@ -198,10 +211,6 @@ function toIdentifier(value: string): string {
   return [first, ...rest.map(word => word[0]?.toUpperCase() + word.slice(1))].join("");
 }
 
-function usage(): string {
-  return "Usage: chisel <check|generate> <spec.ts> [--strict]";
-}
-
 function isRunAsScript(): boolean {
   if (process.argv[1] === undefined) {
     return false;
@@ -214,12 +223,5 @@ function isRunAsScript(): boolean {
 }
 
 if (isRunAsScript()) {
-  const result = await run(process.argv.slice(2));
-  for (const line of result.stdout) {
-    console.log(line);
-  }
-  for (const line of result.stderr) {
-    console.error(line);
-  }
-  process.exitCode = result.exitCode;
+  await runMain(cli);
 }
