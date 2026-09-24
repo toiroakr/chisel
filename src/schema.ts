@@ -119,7 +119,7 @@ export interface SumSchema<
 }
 
 export type AnySumSchema = SumSchema<any, any>;
-export type Tags<S> = S extends SumSchema<string, infer Variants>
+export type Tags<S> = S extends SumSchema<any, infer Variants>
   ? keyof Variants & string
   : never;
 export type VariantOf<S, Tag extends Tags<S>> = S extends SumSchema<

@@ -191,17 +191,18 @@ describe("verdict over a rules decision", () => {
       result: object({}),
       effects: sum("種類", {}),
     });
+    const 混在 = implement(二つの状態, {
+      cases: {
+        商品あり: rules(
+          "数量を確かめる",
+          入力 => [guard(le(入力.数量, 10), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+        確定済み: { kind: "decision", id: "何もしない", run: () => ({ result: {}, effects: [] }) },
+      },
+    });
     const report = await evaluateSpecification(
-      defineSpecification({
-        name: "混在",
-        examples: examples(二つの状態, []),
-        implementation: implement(二つの状態, {
-          cases: {
-            商品あり: rules("数量を確かめる", 入力 => [guard(le(入力.数量, 10), () => ({ result: {}, effects: [] }))], () => ({ result: {}, effects: [] })),
-            確定済み: { kind: "decision", id: "何もしない", run: () => ({ result: {}, effects: [] }) },
-          },
-        }),
-      }),
+      defineSpecification({ name: "混在", examples: examples(二つの状態, []), implementation: 混在 }),
     );
 
     expect(report.measures.arms).toMatchObject({ status: "partial", notRead: ["何もしない"] });

@@ -14,7 +14,7 @@ import {
   sum,
   tagOf,
 } from "../src/index.js";
-import type { Infer } from "../src/index.js";
+import type { Infer, Tags, VariantOf } from "../src/index.js";
 
 describe("array", () => {
   it("accepts a list whose every item matches the element schema", () => {
@@ -345,5 +345,30 @@ describe("tagOf", () => {
     expect(tagOf(Shape, "not-an-object")).toBe(undefined);
     expect(tagOf(Shape, null)).toBe(undefined);
     expect(tagOf(Shape, ["not", "an", "object"])).toBe(undefined);
+  });
+});
+
+describe("Tags and VariantOf", () => {
+  const Shape = sum("state", {
+    draft: object({ id: string("Id") }),
+    published: object({ id: string("Id"), url: string("Url") }),
+  });
+
+  it("names the tags of a sum", () => {
+    const tag: Tags<typeof Shape> = "draft";
+    // @ts-expect-error "archived" is not a tag of Shape
+    const unknown: Tags<typeof Shape> = "archived";
+
+    expect([tag, unknown]).toStrictEqual(["draft", "archived"]);
+  });
+
+  it("types a variant with its own fields", () => {
+    const variant: VariantOf<typeof Shape, "published"> = {
+      state: "published",
+      id: "p-1",
+      url: "https://example.com",
+    };
+
+    expect(variant.url).toBe("https://example.com");
   });
 });

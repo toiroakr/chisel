@@ -185,10 +185,10 @@ export function behavior<
 
 export function implement<B extends AnyBehavior>(
   definition: B,
-  options: {
+  options: NoInfer<{
     readonly cases: ImplementationCases<B>;
     readonly controls?: ControlTable<B["effects"]>;
-  },
+  }>,
 ): Implementation<B> {
   return {
     kind: "implementation",

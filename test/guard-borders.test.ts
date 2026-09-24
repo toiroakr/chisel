@@ -455,20 +455,17 @@ describe("classes a guard's threshold divides a position into", () => {
       result: object({}),
       effects: sum("種類", {}),
     });
+    const 在庫内か = implement(比べる, {
+      cases: {
+        入力済み: rules(
+          "在庫内か",
+          入力 => [guard(le(入力.数量, 入力.在庫数), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
     const report = await evaluateSpecification(
-      defineSpecification({
-        name: "比較",
-        examples: examples(比べる, []),
-        implementation: implement(比べる, {
-          cases: {
-            入力済み: rules(
-              "在庫内か",
-              入力 => [guard(le(入力.数量, 入力.在庫数), () => ({ result: {}, effects: [] }))],
-              () => ({ result: {}, effects: [] }),
-            ),
-          },
-        }),
-      }),
+      defineSpecification({ name: "比較", examples: examples(比べる, []), implementation: 在庫内か }),
     );
 
     expect(report.partitions.map(partition => partition.kind)).toStrictEqual([
