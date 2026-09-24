@@ -189,7 +189,7 @@ function writeAt(
   return { ...record, [key]: writeAt(record[key], rest, change) };
 }
 
-function resize(current: unknown, size: number): unknown {
+export function resize(current: unknown, size: number): unknown {
   if (typeof current === "string") {
     return current.length >= size ? current.slice(0, size) : current.padEnd(size, "_");
   }

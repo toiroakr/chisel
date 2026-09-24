@@ -9,7 +9,7 @@ import type {
 } from "./behavior.js";
 import { runImplementation } from "./behavior.js";
 import type { PointRole } from "./border.js";
-import { positionsOf } from "./partition.js";
+import { coordinatesIn, positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
 interface RunOutcome {
@@ -424,12 +424,9 @@ export async function evaluateSpecification(
   });
   const borders = positions.flatMap(position =>
     position.borders.map((border): BorderCoverage => {
-      const coordinates = answeredGivens
-        .flatMap(given => position.valuesIn(given))
-        .filter(value => value !== undefined)
-        .map(value =>
-          border.measure === "length" ? (value as string | readonly unknown[]).length : value,
-        );
+      const coordinates = answeredGivens.flatMap(given =>
+        coordinatesIn(position, border.measure, given),
+      );
       return {
         path: position.path,
         rule: border.rule,
@@ -553,6 +550,26 @@ export function generateExamples(
           given: position.place(definition.input.placeholder(), className),
           reason: `${position.path}が${className}の期待結果を人間が決める必要があります`,
         });
+      }
+    }
+  }
+
+  for (const position of positionsOf(definition.input)) {
+    for (const border of position.borders) {
+      for (const point of border.points) {
+        if (point.status !== "owed" || point.witness === undefined) {
+          continue;
+        }
+        const standsAt = [...rows, ...generated].some(row =>
+          coordinatesIn(position, border.measure, row.given).some(value => point.contains(value)),
+        );
+        if (!standsAt) {
+          generated.push({
+            name: `${definition.name}: ${position.path} ${point.role} (${point.relation})`,
+            given: position.write(definition.input.placeholder(), border.measure, point.witness),
+            reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
+          });
+        }
       }
     }
   }

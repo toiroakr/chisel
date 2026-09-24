@@ -4,8 +4,13 @@ import {
   behavior,
   boolean,
   example,
+  ge,
+  le,
   examples,
   generateExamples,
+  integer,
+  length,
+  number,
   object,
   optional,
   string,
@@ -87,6 +92,69 @@ describe("generateExamples for classes", () => {
     expect(generateExamples(計算する).map(row => row.given)).toStrictEqual([
       { 状態: "商品あり", 明細: [{ 軽減税率: false }] },
       { 状態: "商品あり", 明細: [{ 軽減税率: true }] },
+    ]);
+  });
+});
+
+describe("generateExamples for border points", () => {
+  const 数量を確定する = behavior({
+    name: "数量を確定する",
+    input: sum("状態", {
+      入力済み: object({ 数量: integer().invariant(v => ge(v, 1)) }),
+    }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+
+  it("offers a row at each owed point no row stands at", () => {
+    expect(generateExamples(数量を確定する)).toStrictEqual([
+      {
+        name: "数量を確定する: 入力済み",
+        given: { 状態: "入力済み", 数量: 1 },
+        reason: "入力済みの期待結果を人間が決める必要があります",
+      },
+      {
+        name: "数量を確定する: @入力済み.数量 IN (> 1)",
+        given: { 状態: "入力済み", 数量: 2 },
+        reason: "@入力済み.数量のIN点（> 1）の期待結果を人間が決める必要があります",
+      },
+    ]);
+  });
+
+  it("writes a value of the length a point on a length border asks for", () => {
+    const 登録する = behavior({
+      name: "登録する",
+      input: sum("状態", {
+        入力済み: object({ 商品ID: string("ID").invariant(v => ge(length(v), 4)) }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+
+    expect(generateExamples(登録する).map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 商品ID: "<ID>" },
+      { 状態: "入力済み", 商品ID: "<ID>_" },
+    ]);
+  });
+
+  it("finds a value inside both bounds of a number", () => {
+    const 割合を決める = behavior({
+      name: "割合を決める",
+      input: sum("状態", {
+        入力済み: object({
+          割合: number()
+            .invariant(v => ge(v, 0))
+            .invariant(v => le(v, 0.5)),
+        }),
+      }),
+      result: object({}),
+      effects: sum("種類", {}),
+    });
+
+    expect(generateExamples(割合を決める).map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 割合: 0 },
+      { 状態: "入力済み", 割合: 0.25 },
+      { 状態: "入力済み", 割合: 0.5 },
     ]);
   });
 });

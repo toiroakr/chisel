@@ -15,7 +15,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, stepInto } from "./rule.js";
+import { boundTermPath, resize, stepInto } from "./rule.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -26,8 +26,22 @@ export interface DividedPosition {
   readonly classes: readonly string[];
   readonly borders: readonly Border[];
   valuesIn(given: unknown): readonly unknown[];
+  write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
   classify(given: unknown): readonly string[];
   place(given: unknown, className: string): unknown;
+}
+
+export function coordinatesIn(
+  position: Position,
+  measure: Border["measure"],
+  given: unknown,
+): readonly unknown[] {
+  return position
+    .valuesIn(given)
+    .filter(value => value !== undefined)
+    .map(value =>
+      measure === "length" ? (value as string | readonly unknown[]).length : value,
+    );
 }
 
 export interface UndividedPosition {
@@ -35,6 +49,7 @@ export interface UndividedPosition {
   readonly path: string;
   readonly borders: readonly Border[];
   valuesIn(given: unknown): readonly unknown[];
+  write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
 }
 
 interface Focus {
@@ -152,8 +167,16 @@ function positionAt(
       path,
       borders,
       valuesIn: focus.reach,
+      write: writer(focus),
     },
   ];
+}
+
+function writer(focus: Focus): Position["write"] {
+  return (given, measure, coordinate) =>
+    focus.update(given, current =>
+      measure === "length" ? resize(current, coordinate as number) : coordinate,
+    );
 }
 
 function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
@@ -187,6 +210,7 @@ function divided(
     classes: [...classes],
     borders: [],
     valuesIn: focus.reach,
+    write: writer(focus),
     classify: given =>
       focus
         .reach(given)

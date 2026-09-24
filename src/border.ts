@@ -8,6 +8,7 @@ export interface BorderPoint {
   readonly role: PointRole;
   readonly relation: string;
   readonly status: PointStatus;
+  readonly witness?: unknown;
   contains(coordinate: unknown): boolean;
 }
 
@@ -68,8 +69,29 @@ export function bordersOf(
     const others = drawn.filter(
       other => other !== current && other.border.measure === current.border.measure,
     );
-    return oneValueWide(current, others) ? withoutInPoint(current.border) : current.border;
+    return oneValueWide(current, others)
+      ? withoutInPoint(current.border)
+      : withAdmittedInWitness(current, others);
   });
+}
+
+function withAdmittedInWitness(current: Drawn, others: readonly Drawn[]): Border {
+  const inPoint = current.border.points.find(point => point.role === "IN");
+  const witness = inPoint?.witness;
+  if (witness === undefined || others.every(other => other.admits(witness))) {
+    return current.border;
+  }
+  const facing = others.find(other => other.lower !== current.lower);
+  const between =
+    typeof current.on === "number" && typeof facing?.on === "number"
+      ? (current.on + facing.on) / 2
+      : undefined;
+  return {
+    ...current.border,
+    points: current.border.points.map(point =>
+      point.role === "IN" ? { ...point, witness: between } : point,
+    ),
+  };
 }
 
 function oneValueWide(current: Drawn, others: readonly Drawn[]): boolean {
@@ -132,11 +154,23 @@ function borderOf(
   const at = (edge: unknown) => (value: unknown) => carrier.compare(value, edge) === 0;
 
   const points: BorderPoint[] = [
-    { role: "ON", relation: `= ${carrier.format(on)}`, status: "owed", contains: at(on) },
+    {
+      role: "ON",
+      relation: `= ${carrier.format(on)}`,
+      status: "owed",
+      witness: on,
+      contains: at(on),
+    },
     off === undefined
       ? { role: "OFF", relation: "neighbour not named", status: "not named", contains: () => false }
       : { role: "OFF", relation: `= ${carrier.format(off)}`, status: "excluded", contains: at(off) },
-    { role: "IN", relation: beyond(on), status: "owed", contains: inside(on) },
+    {
+      role: "IN",
+      relation: beyond(on),
+      status: "owed",
+      witness: step?.(on, inward) ?? (typeof on === "number" ? on + inward : undefined),
+      contains: inside(on),
+    },
     {
       role: "OUT",
       relation: before(off ?? bound),
