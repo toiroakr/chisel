@@ -18,8 +18,8 @@ import {
 } from "./specification.js";
 import type {
   AdequacyReport,
-  ArmCoverage,
   BorderCoverage,
+  CoverageStatus,
   GeneratedExample,
   Measure,
   PartitionCoverage,
@@ -290,28 +290,49 @@ function padDisplay(value: string, width: number): string {
   return value + " ".repeat(Math.max(width - displayWidth, 0));
 }
 
-const armStatusLabels: Readonly<Record<ArmCoverage["status"], string>> = {
+const armStatusLabels: Readonly<Record<"met" | "gap" | "answer owed", string>> = {
   met: "met",
   gap: "! 行がない (gap)",
   "answer owed": "! 期待結果が未回答 (answer owed)",
 };
 
+const countedLabels: Readonly<Record<"no row owed" | "undecided", string>> = {
+  "no row owed": "行は不要 (no row owed)",
+  undecided: "未決 (undecided)",
+};
+
+function formatLines<T extends { readonly status: CoverageStatus; readonly reason?: string }>(
+  items: readonly T[],
+  describe: (item: T) => string,
+): string[] {
+  const lines: string[] = [];
+  const counted = new Map<string, number>();
+  for (const item of items) {
+    if (item.status === "no row owed" || item.status === "undecided") {
+      const key = `${countedLabels[item.status]}: ${item.reason ?? ""}`;
+      counted.set(key, (counted.get(key) ?? 0) + 1);
+    } else {
+      lines.push(`    ${describe(item)} ${armStatusLabels[item.status]}`);
+    }
+  }
+  for (const [key, count] of counted) {
+    lines.push(`    ${key} — ${count}件`);
+  }
+  return lines;
+}
+
 function formatArms(measure: Measure): string[] {
   if (measure.status === "unavailable") {
     return [];
   }
-  return measure.arms.map(
-    arm => `    ${arm.decision}: guard ${arm.guard} ${arm.arm.padEnd(5)} ${armStatusLabels[arm.status]}`,
-  );
+  return formatLines(measure.arms, arm => `${arm.decision}: guard ${arm.guard} ${arm.arm.padEnd(5)}`);
 }
 
 function formatRules(measure: RulesMeasure): string[] {
   if (measure.status === "unavailable") {
     return [];
   }
-  return measure.rules.map(
-    rule => `    ${rule.decision}: ${rule.way} ${armStatusLabels[rule.status]}`,
-  );
+  return formatLines(measure.rules, rule => `${rule.decision}: ${rule.way}`);
 }
 
 function formatMeasure(measure: Measure | RulesMeasure): string {

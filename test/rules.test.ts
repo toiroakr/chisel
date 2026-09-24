@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   all,
+  and,
   array,
   behavior,
   defineSpecification,
+  eq,
   evaluateSpecification,
   example,
   examples,
@@ -26,6 +28,7 @@ import {
   sum,
   unanswered,
 } from "../src/index.js";
+import type { Implementation } from "../src/index.js";
 
 const 注文を確定する = behavior({
   name: "注文を確定する",
@@ -494,5 +497,104 @@ describe("rules written inline in defineSpecification", () => {
         },
       }),
     });
+  });
+});
+
+describe("ways no row can take", () => {
+  const 受け付ける = behavior({
+    name: "受け付ける",
+    input: sum("状態", {
+      入力済み: object({
+        数量: integer().invariant(v => ge(v, 0)),
+        上限: integer(),
+        最低: integer().invariant(v => ge(v, 10)),
+        明細: array(integer()),
+      }),
+    }),
+    result: sum("結果", { 受付: object({}), 却下: object({}) }),
+    effects: sum("種類", {}),
+  });
+  const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
+  const 受付 = () => ({ result: { 結果: "受付" as const }, effects: [] });
+
+  async function statuses(implementation: Implementation<typeof 受け付ける>) {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "受付",
+        examples: examples(受け付ける, []),
+        implementation,
+      }),
+    );
+    return {
+      rules:
+        report.measures.rules.status === "unavailable"
+          ? []
+          : report.measures.rules.rules.map(rule => `${rule.way}: ${rule.status}`),
+      arms:
+        report.measures.arms.status === "unavailable"
+          ? []
+          : report.measures.arms.arms.map(arm => `${arm.guard} ${arm.arm}: ${arm.status}`),
+    };
+  }
+
+  it("owes no row at a way whose conditions leave nothing on one value", async () => {
+    const 二段 = implement(受け付ける, {
+      cases: {
+        入力済み: rules("二段", 入力 => [guard(and(ge(入力.数量, 10), ge(入力.数量, 5)), 却下)], 受付),
+      },
+    });
+
+    expect((await statuses(二段)).rules).toStrictEqual([
+      "$.数量 >= 10 holds, $.数量 >= 5 holds → otherwise: gap",
+      "$.数量 >= 10 holds, $.数量 >= 5 fails → else of guard 1: no row owed",
+      "$.数量 >= 10 fails → else of guard 1: gap",
+    ]);
+  });
+
+  it("owes no row at a way or an arm the invariants of the position leave nothing at", async () => {
+    const 非負 = implement(受け付ける, {
+      cases: { 入力済み: rules("非負", 入力 => [guard(ge(入力.数量, 0), 却下)], 受付) },
+    });
+
+    expect(await statuses(非負)).toStrictEqual({
+      rules: ["$.数量 >= 0 holds → otherwise: gap", "$.数量 >= 0 fails → else of guard 1: no row owed"],
+      arms: ["$.数量 >= 0 holds: gap", "$.数量 >= 0 else: no row owed"],
+    });
+  });
+
+  it("owes no row at a way whose comparison between two positions their bounds refuse", async () => {
+    const 最低と比べる = implement(受け付ける, {
+      cases: {
+        入力済み: rules(
+          "最低と比べる",
+          入力 => [guard(and(le(入力.数量, 5), ge(入力.数量, 入力.最低)), 却下)],
+          受付,
+        ),
+      },
+    });
+
+    expect((await statuses(最低と比べる)).rules).toStrictEqual([
+      "$.数量 <= 5 holds, $.数量 >= $.最低 holds → otherwise: no row owed",
+      "$.数量 <= 5 holds, $.数量 >= $.最低 fails → else of guard 1: gap",
+      "$.数量 <= 5 fails → else of guard 1: gap",
+    ]);
+  });
+
+  it("leaves a way undecided where a condition it cannot read shares a value with another", async () => {
+    const 明細を見る = implement(受け付ける, {
+      cases: {
+        入力済み: rules(
+          "明細を見る",
+          入力 => [guard(and(all(入力.明細, 行 => ge(行, 1)), ge(length(入力.明細), 1)), 却下)],
+          受付,
+        ),
+      },
+    });
+
+    expect((await statuses(明細を見る)).rules).toStrictEqual([
+      "all($.明細, $.明細[] >= 1) holds, length($.明細) >= 1 holds → otherwise: undecided",
+      "all($.明細, $.明細[] >= 1) holds, length($.明細) >= 1 fails → else of guard 1: undecided",
+      "all($.明細, $.明細[] >= 1) fails → else of guard 1: gap",
+    ]);
   });
 });

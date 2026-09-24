@@ -29,10 +29,13 @@ import {
 import { describeRule, describeTerm, termData } from "./rule.js";
 import type { PointRole } from "./border.js";
 import { emptiedBy } from "./border.js";
+import { feasibilityOf } from "./feasibility.js";
+import type { Feasibility } from "./feasibility.js";
 import type { GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, positionsOf } from "./partition.js";
 import { isSumSchema, tagOf } from "./schema.js";
+import type { AnySchema } from "./schema.js";
 
 interface RunOutcome {
   readonly actual: unknown;
@@ -154,11 +157,14 @@ export interface AdequacyReport {
 
 export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 
+export type CoverageStatus = "met" | "gap" | "answer owed" | "no row owed" | "undecided";
+
 export interface ArmCoverage {
   readonly decision: string;
   readonly guard: string;
   readonly arm: string;
-  readonly status: "met" | "gap" | "answer owed";
+  readonly status: CoverageStatus;
+  readonly reason?: string;
 }
 
 export type ComparisonsMeasure =
@@ -168,7 +174,8 @@ export type ComparisonsMeasure =
 export interface RuleCoverage {
   readonly decision: string;
   readonly way: string;
-  readonly status: "met" | "gap" | "answer owed";
+  readonly status: CoverageStatus;
+  readonly reason?: string;
 }
 
 export type RulesMeasure =
@@ -691,10 +698,12 @@ export async function evaluateSpecification(
 
   const arms = measureArms(specification.implementation, armsMet, armsOwed);
   const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed);
-  const armGap =
-    (arms.status !== "unavailable" && arms.arms.some(arm => arm.status !== "met")) ||
-    (rulesMeasure.status !== "unavailable" &&
-      rulesMeasure.rules.some(rule => rule.status !== "met"));
+  const lines = [
+    ...(arms.status === "unavailable" ? [] : arms.arms),
+    ...(rulesMeasure.status === "unavailable" ? [] : rulesMeasure.rules),
+  ];
+  const armGap = lines.some(line => line.status === "gap" || line.status === "answer owed");
+  const armUndecided = lines.some(line => line.status === "undecided");
   const unreadComparisons =
     specification.implementation === undefined
       ? []
@@ -706,7 +715,7 @@ export async function evaluateSpecification(
   const verdict: Verdict =
     !adequate || armGap
       ? "not_satisfied"
-      : comparisons.status === "partial"
+      : comparisons.status === "partial" || armUndecided
         ? "undetermined"
         : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")
@@ -920,6 +929,9 @@ export function generationReport(
       if ([...rows, ...generated].some(row => takes(row.given, way))) {
         continue;
       }
+      if (feasibilityOf(way, scopeOf(implementation!, tag)).kind === "infeasible") {
+        continue;
+      }
       const composed = composeForWay(way, tag);
       if (composed !== undefined && takes(composed.given, way)) {
         offer({
@@ -1086,20 +1098,19 @@ function measureRules(
   );
   const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
     taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
-  const rules = decisions.flatMap(decision =>
+  const rules = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
-      : waysOf(decision).map(
-          (way): RuleCoverage => ({
-            decision: decision.id,
-            way: describeWay(way),
-            status: took(met, decision.id, way.steps)
-              ? "met"
-              : took(owed, decision.id, way.steps)
-                ? "answer owed"
-                : "gap",
-          }),
-        ),
+      : waysOf(decision).map((way): RuleCoverage => {
+          const base = { decision: decision.id, way: describeWay(way) };
+          if (took(met, decision.id, way.steps)) {
+            return { ...base, status: "met" };
+          }
+          if (took(owed, decision.id, way.steps)) {
+            return { ...base, status: "answer owed" };
+          }
+          return { ...base, ...unmetStatus([feasibilityOf(way, scopeOf(implementation, tag))]) };
+        }),
   );
   if (notRead.length === 0) {
     return { status: "complete", rules };
@@ -1123,23 +1134,35 @@ function measureArms(
   );
   const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
-  const arms = decisions.flatMap(decision => {
+  const arms = Object.entries(implementation.cases).flatMap(([tag, decision]) => {
     if (decision.kind !== "rules") {
       return [];
     }
-    const statusOf = (index: number, arm: string): ArmCoverage["status"] =>
+    const ways = waysOf(decision).map(way => ({
+      way,
+      feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
+    }));
+    const through = (index: number, arm: string) =>
+      ways.filter(({ way }) =>
+        index === decision.guards.length
+          ? way.exit === "case" && way.steps[way.steps.length - 1]?.outcome === arm
+          : arm === "else"
+            ? way.exit === index
+            : typeof way.exit !== "number" || way.exit > index,
+      );
+    const statusOf = (index: number, arm: string): Pick<ArmCoverage, "status" | "reason"> =>
       took(met, decision.id, index, arm)
-        ? "met"
+        ? { status: "met" }
         : took(owed, decision.id, index, arm)
-          ? "answer owed"
-          : "gap";
+          ? { status: "answer owed" }
+          : unmetStatus(through(index, arm).map(item => item.feasibility));
     const guarded = decision.guards.flatMap((candidate, index) =>
       (["holds", "else"] as const).map(
         (arm): ArmCoverage => ({
           decision: decision.id,
           guard: describeRule(candidate.condition),
           arm,
-          status: statusOf(index, arm),
+          ...statusOf(index, arm),
         }),
       ),
     );
@@ -1152,7 +1175,7 @@ function measureArms(
               decision: decision.id,
               guard: `match ${describeTerm(otherwise.on)}`,
               arm,
-              status: statusOf(decision.guards.length, arm),
+              ...statusOf(decision.guards.length, arm),
             }),
           );
     return [...guarded, ...matched];
@@ -1163,6 +1186,23 @@ function measureArms(
   return arms.length === 0
     ? { status: "unavailable", reason: "not measured", notRead }
     : { status: "partial", arms, notRead };
+}
+
+function unmetStatus(
+  feasibilities: readonly Feasibility[],
+): { readonly status: "gap" | "no row owed" | "undecided"; readonly reason?: string } {
+  if (feasibilities.length === 0 || feasibilities.some(item => item.kind === "feasible")) {
+    return { status: "gap" };
+  }
+  const undecided = feasibilities.find(item => item.kind === "undecided");
+  if (undecided !== undefined) {
+    return { status: "undecided", reason: undecided.reason };
+  }
+  return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
+}
+
+function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnySchema {
+  return implementation.behavior.input.variants[tag] as AnySchema;
 }
 
 function coverage(all: readonly string[], covered: ReadonlySet<string>): Coverage {

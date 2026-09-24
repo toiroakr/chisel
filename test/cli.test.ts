@@ -97,6 +97,16 @@ describe("chisel check with a position the invariants leave empty", () => {
   });
 });
 
+describe("chisel check with a way no row can take", () => {
+  it("counts the way under its reason instead of listing it as a gap", async () => {
+    const result = await run(["check", fixture("test/fixtures/infeasible-way.ts")]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^    行は不要 \(no row owed\): ガードの条件がこの値について両立しない — 1件$/m,
+    );
+  });
+});
+
 describe("chisel generate", () => {
   it("prints ready-to-paste example rows for uncovered input variants", async () => {
     const result = await run([

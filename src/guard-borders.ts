@@ -254,7 +254,7 @@ function partitionAt(
   return { path, classes, excluded };
 }
 
-function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {
+export function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {
   const [key, ...rest] = keys;
   const unwrapped =
     scope.kind === "optional" ? (scope as OptionalSchema<unknown>).schema : scope;
