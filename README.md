@@ -53,7 +53,7 @@ export const cancelOrder = behavior({
 chisel generate ./cancel-order.spec.ts
 ```
 
-Chisel emits TypeScript rows for every uncovered input variant.
+Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)).
 
 ```ts
 export const cancelOrderExamples = examples(cancelOrder, [
@@ -103,7 +103,7 @@ example(cancelOrder, "cancel a paid order", {
 });
 ```
 
-Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants.
+Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants, classes and border points, each composed from an answered row with only the position in question moved.
 
 ## 4. Implement the model
 
@@ -171,7 +171,7 @@ node dist/cli.js check ./cancel-order.spec.ts
 node dist/cli.js check ./cancel-order.spec.ts --strict
 ```
 
-`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example.
+`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants, classes or border points are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example. It never fails because a measure could not be made: that is reported as an `undetermined` verdict instead.
 
 ## Progressive demo
 
@@ -181,9 +181,23 @@ The [hotel reservation demo](./examples/progressive-demo/README.md) runs the com
 npm run demo
 ```
 
-## Analysis boundary
+## Analysis
 
-The current analyzer measures declared input, result, and effect variants. Free-form TypeScript inside a decision may contain branches Chisel cannot discover, so internal decision coverage remains `undetermined`. A future rule and partition API can make those branches enumerable.
+The analyzer follows the example-adequacy model of [Souther](https://github.com/souther-lang/souther). It measures what the model itself states and nothing else:
+
+- **Cases** of the input, result and effect sums. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
+- **Classes** of each input position, derived from the types: an `optional` field is absent or present, a `boolean` true or false, a sum field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
+- **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `integer`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named.
+
+```ts
+const Line = object({
+  quantity: integer().invariant(v => ge(v, 1)),
+  unitPrice: integer().invariant(v => ge(v, 0)),
+});
+const Lines = array(Line).invariant(v => ge(length(v), 1));
+```
+
+Free-form TypeScript inside a decision may contain branches Chisel cannot read, so the arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. A declarative rule API for decisions is planned to make those branches readable.
 
 ## Conformance
 
