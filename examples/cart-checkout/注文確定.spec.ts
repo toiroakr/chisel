@@ -1,0 +1,106 @@
+import {
+  array,
+  behavior,
+  defineSpecification,
+  example,
+  examples,
+  number,
+  object,
+  optional,
+  string,
+  sum,
+} from "../../src/index.js";
+
+const カートID = string("カートID");
+const 商品ID = string("商品ID");
+const クーポンコード = string("クーポンコード");
+
+const 明細 = object({
+  商品ID,
+  数量: number(),
+  単価: number(),
+  在庫数: number(),
+});
+
+const カート = sum("状態", {
+  空: object({ カートID }),
+  商品あり: object({
+    カートID,
+    明細: array(明細),
+    クーポン: optional(クーポンコード),
+  }),
+  確定済み: object({ カートID }),
+});
+
+const 確定結果 = sum("結果", {
+  確定: object({ カートID, 合計金額: number() }),
+  不可: object({ 理由: string("確定不可理由") }),
+});
+
+const 確定作用 = sum("種類", {
+  在庫引当: object({ 商品ID, 数量: number() }),
+  決済要求: object({ カートID, 金額: number() }),
+  クーポン消費: object({ クーポンコード }),
+});
+
+export const 注文を確定する = behavior({
+  name: "注文を確定する",
+  input: カート,
+  result: 確定結果,
+  effects: 確定作用,
+  dependsOn: ["在庫引当", "決済要求", "クーポン消費"],
+});
+
+const 具体例 = examples(注文を確定する, [
+  example(注文を確定する, "空のカートは確定できない", {
+    given: { 状態: "空", カートID: "カート-1" },
+    expect: {
+      result: { 結果: "不可", 理由: "カートが空" },
+      effects: [],
+    },
+  }),
+  example(注文を確定する, "在庫が足りれば明細ごとに在庫を引き当ててから決済する", {
+    given: {
+      状態: "商品あり",
+      カートID: "カート-2",
+      明細: [
+        { 商品ID: "商品-A", 数量: 2, 単価: 500, 在庫数: 10 },
+        { 商品ID: "商品-B", 数量: 1, 単価: 1500, 在庫数: 3 },
+      ],
+    },
+    expect: {
+      result: { 結果: "確定", カートID: "カート-2", 合計金額: 2500 },
+      effects: [
+        { 種類: "在庫引当", 商品ID: "商品-A", 数量: 2 },
+        { 種類: "在庫引当", 商品ID: "商品-B", 数量: 1 },
+        { 種類: "決済要求", カートID: "カート-2", 金額: 2500 },
+      ],
+    },
+  }),
+  example(注文を確定する, "在庫が足りない明細が1件でもあれば確定しない", {
+    given: {
+      状態: "商品あり",
+      カートID: "カート-3",
+      明細: [
+        { 商品ID: "商品-A", 数量: 2, 単価: 500, 在庫数: 10 },
+        { 商品ID: "商品-B", 数量: 4, 単価: 1500, 在庫数: 3 },
+      ],
+    },
+    expect: {
+      result: { 結果: "不可", 理由: "在庫不足" },
+      effects: [],
+    },
+  }),
+  example(注文を確定する, "確定済みのカートは二重に確定できない", {
+    given: { 状態: "確定済み", カートID: "カート-3" },
+    expect: {
+      result: { 結果: "不可", 理由: "確定済み" },
+      effects: [],
+    },
+  }),
+]);
+
+export const 注文確定の仕様 = defineSpecification({
+  name: "注文確定",
+  examples: 具体例,
+});
