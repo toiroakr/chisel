@@ -10,8 +10,10 @@ import {
   guard,
   implement,
   integer,
+  ge,
   le,
   object,
+  or,
   rules,
   runImplementation,
   string,
@@ -198,5 +200,59 @@ describe("verdict over a rules decision", () => {
     );
 
     expect(report.measures.arms).toMatchObject({ status: "partial", notRead: ["何もしない"] });
+  });
+});
+
+describe("rules of a decision", () => {
+  const 割引を判定する = behavior({
+    name: "割引を判定する",
+    input: sum("状態", { 入力済み: object({ 会員歴: integer(), 購入額: integer() }) }),
+    result: sum("結果", { 割引: object({}), 定価: object({}) }),
+    effects: sum("種類", {}),
+  });
+  const 会員歴か購入額 = implement(割引を判定する, {
+    cases: {
+      入力済み: rules(
+        "会員歴か購入額",
+        入力 => [
+          guard(or(ge(入力.会員歴, 3), ge(入力.購入額, 10000)), () => ({
+            result: { 結果: "定価" },
+            effects: [],
+          })),
+        ],
+        () => ({ result: { 結果: "割引" }, effects: [] }),
+      ),
+    },
+  });
+  const 会員歴で = example(割引を判定する, "会員歴が長い", {
+    given: { 状態: "入力済み", 会員歴: 5, 購入額: 0 },
+    expect: { result: { 結果: "割引" }, effects: [] },
+  });
+
+  it("lists each way through the body, carrying only the distinctions that way consulted", async () => {
+    const report = await evaluateSpecification(
+      defineSpecification({
+        name: "割引",
+        examples: examples(割引を判定する, [会員歴で]),
+        implementation: 会員歴か購入額,
+      }),
+    );
+
+    expect(report.measures.rules).toStrictEqual({
+      status: "complete",
+      rules: [
+        { decision: "会員歴か購入額", way: "$.会員歴 >= 3 holds → otherwise", status: "met" },
+        {
+          decision: "会員歴か購入額",
+          way: "$.会員歴 >= 3 fails, $.購入額 >= 10000 holds → otherwise",
+          status: "gap",
+        },
+        {
+          decision: "会員歴か購入額",
+          way: "$.会員歴 >= 3 fails, $.購入額 >= 10000 fails → else of guard 1",
+          status: "gap",
+        },
+      ],
+    });
   });
 });

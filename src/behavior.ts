@@ -5,7 +5,14 @@ import type {
   Tags,
   VariantOf,
 } from "./schema.js";
-import type { CompareRule, ComparisonObserver, Rule, TermOf } from "./rule.js";
+import type {
+  CompareRule,
+  ComparisonObserver,
+  Distinction,
+  DistinctionObserver,
+  Rule,
+  TermOf,
+} from "./rule.js";
 import { holds, selfTerm } from "./rule.js";
 import { tagOf } from "./schema.js";
 
@@ -181,6 +188,11 @@ export interface ComparisonReached {
   readonly scope: unknown;
 }
 
+export interface WayTaken {
+  readonly decision: string;
+  readonly steps: readonly { readonly distinction: Distinction; readonly outcome: boolean }[];
+}
+
 export interface ArmTaken {
   readonly decision: string;
   readonly guard: number;
@@ -201,6 +213,7 @@ export async function runTraced<B extends AnyBehavior>(
   readonly execution: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
   readonly arms: readonly ArmTaken[];
   readonly comparisons: readonly ComparisonReached[];
+  readonly way: WayTaken | undefined;
 }> {
   const definition = implementation.behavior;
   const parsedInput = definition.input.parse(input);
@@ -225,9 +238,16 @@ export async function runTraced<B extends AnyBehavior>(
 
   const arms: ArmTaken[] = [];
   const comparisons: ComparisonReached[] = [];
+  const steps: { distinction: Distinction; outcome: boolean }[] = [];
   const execution =
     selected.kind === "rules"
-      ? decide(selected, parsedInput.value, arms, (rule, scope) => comparisons.push({ rule, scope }))
+      ? decide(
+          selected,
+          parsedInput.value,
+          arms,
+          (rule, scope) => comparisons.push({ rule, scope }),
+          (distinction, outcome) => steps.push({ distinction, outcome }),
+        )
       : await selected.run(parsedInput.value as never);
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
@@ -252,6 +272,7 @@ export async function runTraced<B extends AnyBehavior>(
     },
     arms,
     comparisons,
+    way: selected.kind === "rules" ? { decision: selected.id, steps } : undefined,
   };
 }
 
@@ -279,9 +300,10 @@ function decide<Result, Effect>(
   input: unknown,
   arms: ArmTaken[],
   observe: ComparisonObserver,
+  distinguish: DistinctionObserver,
 ): Execution<Result, Effect> {
   for (const [index, candidate] of decision.guards.entries()) {
-    if (!holds(candidate.condition, input, observe)) {
+    if (!holds(candidate.condition, input, observe, distinguish)) {
       arms.push({ decision: decision.id, guard: index, arm: "else" });
       return candidate.orElse(input);
     }

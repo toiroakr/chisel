@@ -8,7 +8,8 @@ import type {
   Execution,
   Implementation,
 } from "./behavior.js";
-import type { ArmTaken, ComparisonReached } from "./behavior.js";
+import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
+import { describeWay, sameSteps, waysOf } from "./ways.js";
 import { guardBordersOf, guardPartitionsOf } from "./guard-borders.js";
 import { comparisonsReached, runImplementation, runTraced } from "./behavior.js";
 import { describeRule } from "./rule.js";
@@ -117,7 +118,7 @@ export interface AdequacyReport {
     readonly result: readonly ResultCaseEvidence[];
     readonly effects: readonly ResultCaseEvidence[];
   };
-  readonly measures: { readonly arms: Measure };
+  readonly measures: { readonly arms: Measure; readonly rules: RulesMeasure };
   readonly adequate: boolean;
   readonly verdict: Verdict;
 }
@@ -130,6 +131,26 @@ export interface ArmCoverage {
   readonly arm: "holds" | "else";
   readonly status: "met" | "gap" | "answer owed";
 }
+
+export interface RuleCoverage {
+  readonly decision: string;
+  readonly way: string;
+  readonly status: "met" | "gap" | "answer owed";
+}
+
+export type RulesMeasure =
+  | { readonly status: "complete"; readonly rules: readonly RuleCoverage[] }
+  | {
+      readonly status: "partial";
+      readonly rules: readonly RuleCoverage[];
+      readonly notRead: readonly string[];
+    }
+  | { readonly status: "unavailable"; readonly reason: "not applicable" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: "not measured";
+      readonly notRead: readonly string[];
+    };
 
 export type Measure =
   | { readonly status: "complete"; readonly arms: readonly ArmCoverage[] }
@@ -271,6 +292,8 @@ export async function evaluateSpecification(
   const armsMet: ArmTaken[] = [];
   const armsOwed: ArmTaken[] = [];
   const reached: ComparisonReached[] = [];
+  const waysMet: WayTaken[] = [];
+  const waysOwed: WayTaken[] = [];
   const observe = (
     inputTag: string,
     actual: unknown,
@@ -318,6 +341,9 @@ export async function evaluateSpecification(
           const traced = await runTraced(implementation, row.given);
           observe(inputTag!, traced.execution);
           armsOwed.push(...traced.arms);
+          if (traced.way !== undefined) {
+            waysOwed.push(traced.way);
+          }
         } catch (error) {
           failures.push({
             name: row.name,
@@ -370,6 +396,9 @@ export async function evaluateSpecification(
           const traced = await runTraced(implementation, input);
           armsMet.push(...traced.arms);
           reached.push(...traced.comparisons);
+          if (traced.way !== undefined) {
+            waysMet.push(traced.way);
+          }
           return traced.execution;
         },
       );
@@ -535,7 +564,11 @@ export async function evaluateSpecification(
     borders.every(border => border.points.every(point => point.status !== "gap"));
 
   const arms = measureArms(specification.implementation, armsMet, armsOwed);
-  const armGap = arms.status !== "unavailable" && arms.arms.some(arm => arm.status !== "met");
+  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed);
+  const armGap =
+    (arms.status !== "unavailable" && arms.arms.some(arm => arm.status !== "met")) ||
+    (rulesMeasure.status !== "unavailable" &&
+      rulesMeasure.rules.some(rule => rule.status !== "met"));
   const verdict: Verdict =
     !adequate || armGap
       ? "not_satisfied"
@@ -581,7 +614,7 @@ export async function evaluateSpecification(
         verified: verifiedEffects.has(tag),
       })),
     },
-    measures: { arms },
+    measures: { arms, rules: rulesMeasure },
     adequate: adequate && !armGap,
     verdict,
   };
@@ -719,6 +752,43 @@ export async function verifyConformance<B extends AnyBehavior>(
     }
   }
   return failures;
+}
+
+function measureRules(
+  implementation: Implementation<AnyBehavior> | undefined,
+  met: readonly WayTaken[],
+  owed: readonly WayTaken[],
+): RulesMeasure {
+  if (implementation === undefined) {
+    return { status: "unavailable", reason: "not applicable" };
+  }
+  const decisions = Object.values(implementation.cases);
+  const notRead = decisions.flatMap(decision =>
+    decision.kind === "decision" ? [decision.id] : [],
+  );
+  const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
+    taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
+  const rules = decisions.flatMap(decision =>
+    decision.kind !== "rules"
+      ? []
+      : waysOf(decision).map(
+          (way): RuleCoverage => ({
+            decision: decision.id,
+            way: describeWay(way),
+            status: took(met, decision.id, way.steps)
+              ? "met"
+              : took(owed, decision.id, way.steps)
+                ? "answer owed"
+                : "gap",
+          }),
+        ),
+  );
+  if (notRead.length === 0) {
+    return { status: "complete", rules };
+  }
+  return rules.length === 0
+    ? { status: "unavailable", reason: "not measured", notRead }
+    : { status: "partial", rules, notRead };
 }
 
 function measureArms(

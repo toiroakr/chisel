@@ -105,6 +105,8 @@ export type {
   PartitionCoverage,
   PendingDecision,
   ResultCaseEvidence,
+  RuleCoverage,
+  RulesMeasure,
   Specification,
   Unanswered,
   UnansweredExample,

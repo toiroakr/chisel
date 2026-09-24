@@ -196,6 +196,15 @@ describe("cli run() with a rules decision", () => {
     ]).toStrictEqual([true, true, true]);
   });
 
+  it("prints the rules of the decision with the way each one goes", async () => {
+    const text = await output("check");
+
+    expect([
+      /^  道筋 +計測済み \(complete\)$/m.test(text),
+      /^    在庫を確かめる: all\(\$\.明細, \$\.明細\[\]\.数量 <= \$\.明細\[\]\.在庫数\) holds → otherwise +met$/m.test(text),
+    ]).toStrictEqual([true, true]);
+  });
+
   it("generates rows at the points of a guard border", async () => {
     expect(await output("generate")).toMatch(/在庫数 OFF \(= 1\)/);
   });

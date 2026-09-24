@@ -21,6 +21,7 @@ import type {
   GeneratedExample,
   Measure,
   PartitionCoverage,
+  RulesMeasure,
   Specification,
   Verdict,
 } from "./specification.js";
@@ -137,6 +138,8 @@ function formatReport(report: AdequacyReport): string {
     `  実装                 ${implementation}`,
     `  分岐                 ${formatMeasure(report.measures.arms)}`,
     ...formatArms(report.measures.arms),
+    `  道筋                 ${formatMeasure(report.measures.rules)}`,
+    ...formatRules(report.measures.rules),
   ];
 
   for (const row of report.unanswered) {
@@ -256,7 +259,16 @@ function formatArms(measure: Measure): string[] {
   );
 }
 
-function formatMeasure(measure: Measure): string {
+function formatRules(measure: RulesMeasure): string[] {
+  if (measure.status === "unavailable") {
+    return [];
+  }
+  return measure.rules.map(
+    rule => `    ${rule.decision}: ${rule.way} ${armStatusLabels[rule.status]}`,
+  );
+}
+
+function formatMeasure(measure: Measure | RulesMeasure): string {
   switch (measure.status) {
     case "complete":
       return "計測済み (complete)";
