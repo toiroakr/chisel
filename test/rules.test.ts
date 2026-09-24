@@ -445,11 +445,31 @@ describe("what match can branch on", () => {
           確定済み: rules(
             "宅配だけ",
             () => [],
+            // @ts-expect-error a match must have a case for every case of the sum
             match(注文 => 注文.配送.方法, { 宅配: 何もしない }),
           ),
         },
       }),
     ).toThrow(new SpecificationError("match in 宅配だけ has no case for 店頭受取"));
+  });
+
+  it("refuses at compile time a case the sum does not have", () => {
+    expect(() =>
+      implement(送る, {
+        cases: {
+          確定済み: rules(
+            "郵送もある",
+            () => [],
+            match(注文 => 注文.配送.方法, {
+              宅配: 何もしない,
+              店頭受取: 何もしない,
+              // @ts-expect-error 郵送 is not a case of the sum
+              郵送: 何もしない,
+            }),
+          ),
+        },
+      }),
+    ).toThrow(SpecificationError);
   });
 });
 

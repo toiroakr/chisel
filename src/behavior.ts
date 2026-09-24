@@ -165,9 +165,11 @@ export function guard<Input, Result, Effect, Deps = unknown>(
   return { kind: "guard", condition, orElse };
 }
 
-export function match<Input, Result, Effect, Deps = unknown>(
-  select: (input: TermOf<Input>) => Term<string>,
-  cases: Readonly<Record<string, (input: Input, deps: Deps) => Execution<Result, Effect>>>,
+export function match<Input, Result, Effect, Deps = unknown, Tag extends string = string>(
+  select: (input: TermOf<Input>) => Term<Tag>,
+  cases: {
+    readonly [Case in Tag]: (input: Input, deps: Deps) => Execution<Result, Effect>;
+  },
 ): Match<Input, Result, Effect, Deps> {
   return { kind: "match", on: select(selfTerm<Input>()), cases };
 }
