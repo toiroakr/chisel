@@ -113,6 +113,9 @@ export function stepInto(rule: Rule, key: string): Rule | undefined {
 export function holds(rule: Rule, value: unknown): boolean {
   const left = read(rule.left, value);
   const right = read(rule.right, value);
+  if (left === undefined || right === undefined) {
+    return true;
+  }
   const order = ordering(left, right);
   switch (rule.operator) {
     case "<":
@@ -229,7 +232,10 @@ function read(operand: unknown, value: unknown): unknown {
         : undefined,
     value,
   );
-  return measure === "length" ? (found as string | readonly unknown[]).length : found;
+  if (found === undefined || measure === "value") {
+    return found;
+  }
+  return (found as string | readonly unknown[]).length;
 }
 
 function ordering(left: unknown, right: unknown): number {

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { array, ge, gt, instant, integer, le, length, lt, object, string } from "../src/index.js";
+import {
+  array,
+  ge,
+  gt,
+  instant,
+  integer,
+  le,
+  length,
+  lt,
+  object,
+  optional,
+  string,
+} from "../src/index.js";
 
 describe("invariant", () => {
   const 数量 = integer().invariant(v => ge(v, 1));
@@ -54,6 +66,12 @@ describe("invariant", () => {
       success: false,
       issues: [{ path: "$.期間", message: "Invariant violated: $.期間.開始 < $.期間.終了" }],
     });
+  });
+
+  it("holds of an absent optional field, which has no value to compare", () => {
+    const 注文 = object({ 割引額: optional(integer()) }).invariant(v => ge(v.割引額, 1));
+
+    expect(注文.parse({}).success).toBe(true);
   });
 
   it("does not let a comparison mix values of different types", () => {
