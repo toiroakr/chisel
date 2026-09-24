@@ -534,6 +534,12 @@
             "type": "string"
           }
         },
+        "fakeWarnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "evidence": {
           "type": "object",
           "properties": {
@@ -914,6 +920,7 @@
         "borders",
         "pairs",
         "fakeIssues",
+        "fakeWarnings",
         "evidence",
         "measures",
         "adequate",

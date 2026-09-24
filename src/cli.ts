@@ -198,6 +198,9 @@ function formatReport(report: AdequacyReport): string {
   for (const issue of report.fakeIssues) {
     lines.push(`  ! fake の誤り: ${issue}`);
   }
+  for (const warning of report.fakeWarnings) {
+    lines.push(`  ! fake と記録済みの例の不一致（警告）: ${warning}`);
+  }
   for (const failure of report.failures) {
     lines.push(`  ✗ ${failure.name}: ${failure.message}`);
   }

@@ -1,5 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
+import type { Rule } from "./rule.js";
+import { holds } from "./rule.js";
 import type { Schema } from "./schema.js";
+import { isSumSchema, tagOf } from "./schema.js";
 
 export interface ValueDependency<Output> {
   readonly kind: "dependency";
@@ -12,7 +15,34 @@ export interface FunctionDependency<Input, Output> {
   readonly takes: "input";
   readonly input: Schema<Input>;
   readonly output: Schema<Output>;
+  readonly injected?: Injected;
 }
+
+interface InjectedBehavior {
+  readonly kind: "behavior";
+  readonly name: string;
+  readonly input: Schema<unknown>;
+  readonly result: Schema<unknown>;
+  readonly ensures: readonly {
+    readonly name: string;
+    readonly cases: readonly string[] | undefined;
+    readonly rule: Rule;
+  }[];
+}
+
+interface RecordedRow {
+  readonly name: string;
+  readonly given: unknown;
+  readonly expect: { readonly kind?: string; readonly result?: unknown };
+}
+
+interface Injected {
+  readonly behavior: InjectedBehavior;
+  readonly rows: readonly RecordedRow[];
+}
+
+type InputOf<B> = B extends { readonly input: Schema<infer Input> } ? Input : never;
+type ResultOf<B> = B extends { readonly result: Schema<infer Result> } ? Result : never;
 
 export type AnyDependency = ValueDependency<any> | FunctionDependency<any, any>;
 
@@ -34,18 +64,47 @@ export type ValueDependencies<R> = {
     : never;
 };
 
+export function dependency<const B extends InjectedBehavior>(
+  behavior: B,
+): FunctionDependency<InputOf<B>, ResultOf<B>>;
+export function dependency<const B extends InjectedBehavior>(examples: {
+  readonly kind: "example-set";
+  readonly behavior: B;
+  readonly rows: readonly RecordedRow[];
+}): FunctionDependency<InputOf<B>, ResultOf<B>>;
 export function dependency<Output>(output: Schema<Output>): ValueDependency<Output>;
 export function dependency<Input, Output>(
   input: Schema<Input>,
   output: Schema<Output>,
 ): FunctionDependency<Input, Output>;
 export function dependency(
-  first: Schema<unknown>,
+  first:
+    | Schema<unknown>
+    | InjectedBehavior
+    | { readonly kind: "example-set"; readonly behavior: InjectedBehavior; readonly rows: readonly RecordedRow[] },
   second?: Schema<unknown>,
 ): AnyDependency {
+  if (first.kind === "behavior") {
+    return injectedDependency({ behavior: first as InjectedBehavior, rows: [] });
+  }
+  if (first.kind === "example-set") {
+    const set = first as { readonly behavior: InjectedBehavior; readonly rows: readonly RecordedRow[] };
+    return injectedDependency({ behavior: set.behavior, rows: set.rows });
+  }
+  const schema = first as Schema<unknown>;
   return second === undefined
-    ? { kind: "dependency", takes: "nothing", output: first }
-    : { kind: "dependency", takes: "input", input: first, output: second };
+    ? { kind: "dependency", takes: "nothing", output: schema }
+    : { kind: "dependency", takes: "input", input: schema, output: second };
+}
+
+function injectedDependency(injected: Injected): FunctionDependency<unknown, unknown> {
+  return {
+    kind: "dependency",
+    takes: "input",
+    input: injected.behavior.input,
+    output: injected.behavior.result,
+    injected,
+  };
 }
 
 export interface FakeTable {
@@ -145,6 +204,16 @@ export function fakeIssuesOf(
           issue: `Fake ${name} row ${index + 1} answers a value the dependency cannot: ${output.issues[0]!.message}`,
         });
       }
+      const broken =
+        input.success && output.success && declared.injected !== undefined
+          ? brokenBy(declared.injected.behavior, input.value, output.value)
+          : undefined;
+      if (broken !== undefined) {
+        issues.push({
+          table,
+          issue: `Fake ${name} row ${index + 1} breaks ensures ${broken} of ${declared.injected!.behavior.name}`,
+        });
+      }
       const earlier = table.rows.findIndex(([other]) => isDeepStrictEqual(other, asked));
       if (earlier < index) {
         issues.push({
@@ -164,4 +233,36 @@ export function fakeIssuesOf(
     }
   }
   return issues;
+}
+
+function brokenBy(behavior: InjectedBehavior, input: unknown, value: unknown): string | undefined {
+  const tag = isSumSchema(behavior.result) ? tagOf(behavior.result, value) : undefined;
+  return behavior.ensures.find(
+    clause =>
+      (clause.cases === undefined || (tag !== undefined && clause.cases.includes(tag))) &&
+      !holds(clause.rule, { input, value }),
+  )?.name;
+}
+
+export function fakeWarningsOf(requires: Requirements, tables: readonly FakeTable[]): readonly string[] {
+  return tables.flatMap(table => {
+    const declared = requires[table.dependency];
+    if (declared?.takes !== "input" || declared.injected === undefined) {
+      return [];
+    }
+    const { behavior, rows } = declared.injected;
+    return table.rows.flatMap(([asked, answer], index) =>
+      rows
+        .filter(
+          row =>
+            row.expect.kind !== "unanswered" &&
+            isDeepStrictEqual(row.given, asked) &&
+            !isDeepStrictEqual(row.expect.result, answer),
+        )
+        .map(
+          row =>
+            `Fake ${table.dependency} row ${index + 1} answers ${JSON.stringify(answer)} where ${behavior.name} example ${row.name} answers ${JSON.stringify(row.expect.result)}`,
+        ),
+    );
+  });
 }

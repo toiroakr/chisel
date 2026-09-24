@@ -12,7 +12,7 @@ import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
-import { answerFrom, fakeIssuesOf } from "./dependency.js";
+import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
@@ -147,6 +147,7 @@ export interface AdequacyReport {
   readonly borders: readonly BorderCoverage[];
   readonly pairs: readonly PairCount[];
   readonly fakeIssues: readonly string[];
+  readonly fakeWarnings: readonly string[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -768,6 +769,7 @@ export async function evaluateSpecification(
     borders,
     pairs: countPairs(pairablesOf(positions, guardPartitions), answeredGivens),
     fakeIssues: fakeIssues.map(item => item.issue),
+    fakeWarnings: fakeWarningsOf(definition.requires, specification.fakes),
     evidence: {
       input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,

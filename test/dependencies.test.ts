@@ -6,6 +6,7 @@ import {
   boolean,
   defineSpecification,
   dependency,
+  eq,
   evaluateSpecification,
   example,
   examples,
@@ -481,5 +482,90 @@ describe("a value dependency read inside all", () => {
     );
 
     expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
+  });
+});
+
+describe("a dependency declared as another behavior", () => {
+  const 在庫を照会する = behavior({
+    name: "在庫を照会する",
+    input: sum("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
+    result: object({ 商品ID: string("商品ID"), 在庫数: integer() }),
+    effects: sum("種類", {}),
+    ensures: clause => [
+      clause.always("照会した商品を答える", (問い, 答え) => eq(答え.商品ID, 問い.商品ID)),
+    ],
+  });
+  const 在庫照会の例 = examples(在庫を照会する, [
+    example(在庫を照会する, "商品-Aは10個", {
+      given: { 種別: "商品", 商品ID: "商品-A" },
+      expect: { result: { 商品ID: "商品-A", 在庫数: 10 }, effects: [] },
+    }),
+  ]);
+  const 注文する = behavior({
+    name: "注文する",
+    input: sum("状態", { 入力済み: object({ 商品ID: string("商品ID") }) }),
+    result: object({ 在庫あり: boolean() }),
+    effects: sum("種類", {}),
+    requires: { 在庫: dependency(在庫照会の例) },
+  });
+  const 在庫で決める = implement(注文する, {
+    cases: {
+      入力済み: {
+        kind: "decision",
+        id: "在庫で決める",
+        run: (注文, 依存) => ({
+          result: { 在庫あり: 依存.在庫({ 種別: "商品", 商品ID: 注文.商品ID }).在庫数 > 0 },
+          effects: [],
+        }),
+      },
+    },
+  });
+
+  async function reportWith(rows: Parameters<typeof fake<typeof 注文する, "在庫">>[2]) {
+    return evaluateSpecification(
+      defineSpecification({
+        name: "注文",
+        examples: examples(注文する, [
+          example(注文する, "商品-A", {
+            given: { 状態: "入力済み", 商品ID: "商品-A" },
+            expect: { result: { 在庫あり: true }, effects: [] },
+          }),
+        ]),
+        implementation: 在庫で決める,
+        fakes: [fake(注文する, "在庫", rows)],
+      }),
+    );
+  }
+
+  it("stands in with a fake table typed by the behavior's input and result", async () => {
+    const report = await reportWith([
+      [{ 種別: "商品", 商品ID: "商品-A" }, { 商品ID: "商品-A", 在庫数: 10 }],
+    ]);
+
+    expect({ failures: report.failures, issues: report.fakeIssues, warnings: report.fakeWarnings }).toStrictEqual({
+      failures: [],
+      issues: [],
+      warnings: [],
+    });
+  });
+
+  it("warns where a fake row answers differently from a recorded row of the behavior", async () => {
+    const report = await reportWith([
+      [{ 種別: "商品", 商品ID: "商品-A" }, { 商品ID: "商品-A", 在庫数: 3 }],
+    ]);
+
+    expect(report.fakeWarnings).toStrictEqual([
+      'Fake 在庫 row 1 answers {"商品ID":"商品-A","在庫数":3} where 在庫を照会する example 商品-Aは10個 answers {"商品ID":"商品-A","在庫数":10}',
+    ]);
+  });
+
+  it("refuses a fake row that breaks what the behavior ensures", async () => {
+    const report = await reportWith([
+      [{ 種別: "商品", 商品ID: "商品-A" }, { 商品ID: "商品-B", 在庫数: 10 }],
+    ]);
+
+    expect(report.fakeIssues).toStrictEqual([
+      "Fake 在庫 row 1 breaks ensures 照会した商品を答える of 在庫を照会する",
+    ]);
   });
 });
