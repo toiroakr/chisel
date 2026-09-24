@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   array,
   boolean,
+  ge,
+  gt,
+  integer,
+  le,
+  length,
+  lt,
   instant,
   number,
   object,
@@ -159,5 +165,117 @@ describe("DividedPosition.classify", () => {
         明細: [{ 軽減税率: true }, { 軽減税率: false }],
       }),
     ).toStrictEqual(["true", "false"]);
+  });
+});
+
+describe("borders an invariant draws", () => {
+  function bordersAt(schema: Parameters<typeof object>[0][string]) {
+    const [position] = positionsOf(sum("状態", { 商品あり: object({ 数量: schema }) }));
+    return position!.borders.map(border => ({
+      rule: border.rule,
+      points: border.points.map(({ role, relation, status }) => ({ role, relation, status })),
+    }));
+  }
+
+  it("owes ON and IN at a closed lower bound of an integer and excludes OFF and OUT", () => {
+    expect(bordersAt(integer().invariant(v => ge(v, 1)))).toStrictEqual([
+      {
+        rule: "invariant $ >= 1",
+        points: [
+          { role: "ON", relation: "= 1", status: "owed" },
+          { role: "OFF", relation: "= 0", status: "excluded" },
+          { role: "IN", relation: "> 1", status: "owed" },
+          { role: "OUT", relation: "< 0", status: "excluded" },
+        ],
+      },
+    ]);
+  });
+
+  it("puts ON one step inside an open bound and OFF on the value the rule names", () => {
+    expect(bordersAt(integer().invariant(v => gt(v, 0)))[0]!.points).toStrictEqual([
+      { role: "ON", relation: "= 1", status: "owed" },
+      { role: "OFF", relation: "= 0", status: "excluded" },
+      { role: "IN", relation: "> 1", status: "owed" },
+      { role: "OUT", relation: "< 0", status: "excluded" },
+    ]);
+  });
+
+  it("mirrors the points for an upper bound", () => {
+    expect(bordersAt(integer().invariant(v => lt(v, 100)))[0]!.points).toStrictEqual([
+      { role: "ON", relation: "= 99", status: "owed" },
+      { role: "OFF", relation: "= 100", status: "excluded" },
+      { role: "IN", relation: "< 99", status: "owed" },
+      { role: "OUT", relation: "> 100", status: "excluded" },
+    ]);
+  });
+
+  it("names no OFF point on a number, which has no neighbouring value", () => {
+    expect(bordersAt(number().invariant(v => ge(v, 0)))[0]!.points).toStrictEqual([
+      { role: "ON", relation: "= 0", status: "owed" },
+      { role: "OFF", relation: "neighbour not named", status: "not named" },
+      { role: "IN", relation: "> 0", status: "owed" },
+      { role: "OUT", relation: "< 0", status: "excluded" },
+    ]);
+  });
+
+  it("draws no border for a strict bound on a number, whose cut is a value the type refuses", () => {
+    expect(bordersAt(number().invariant(v => gt(v, 0)))).toStrictEqual([]);
+  });
+
+  it("steps an instant by a nanosecond", () => {
+    const 受付開始 = Temporal.Instant.from("2026-01-01T00:00:00Z");
+
+    expect(bordersAt(instant().invariant(v => gt(v, 受付開始)))[0]!.points[0]).toStrictEqual({
+      role: "ON",
+      relation: "= 2026-01-01T00:00:00.000000001Z",
+      status: "owed",
+    });
+  });
+
+  it("draws a border on the length of a string", () => {
+    expect(bordersAt(string("商品ID").invariant(v => ge(length(v), 3)))).toStrictEqual([
+      {
+        rule: "invariant length($) >= 3",
+        points: [
+          { role: "ON", relation: "= 3", status: "owed" },
+          { role: "OFF", relation: "= 2", status: "excluded" },
+          { role: "IN", relation: "> 3", status: "owed" },
+          { role: "OUT", relation: "< 2", status: "excluded" },
+        ],
+      },
+    ]);
+  });
+
+  it("has no IN point where the rules leave the side one value wide", () => {
+    const 固定 = integer()
+      .invariant(v => ge(v, 1))
+      .invariant(v => le(v, 1));
+
+    expect(bordersAt(固定).map(border => border.points[2])).toStrictEqual([
+      { role: "IN", relation: "> 1", status: "excluded" },
+      { role: "IN", relation: "< 1", status: "excluded" },
+    ]);
+  });
+});
+
+describe("where an object invariant draws its border", () => {
+  it("places the border on the one field it compares with a constant", () => {
+    const Cart = sum("状態", {
+      商品あり: object({ 在庫数: integer() }).invariant(v => ge(v.在庫数, 0)),
+    });
+
+    expect(positionsOf(Cart).map(p => ({ path: p.path, rules: p.borders.map(b => b.rule) }))).toStrictEqual([
+      { path: "@商品あり.在庫数", rules: ["invariant $ >= 0"] },
+    ]);
+  });
+
+  it("draws no border for a rule relating two fields", () => {
+    const Cart = sum("状態", {
+      商品あり: object({ 数量: integer(), 在庫数: integer() }).invariant(v =>
+        le(v.数量, v.在庫数),
+      ),
+    });
+
+    expect(positionsOf(Cart).map(p => p.borders.length)).toStrictEqual([0, 0]);
   });
 });

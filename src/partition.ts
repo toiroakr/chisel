@@ -6,6 +6,16 @@ import type {
   ObjectShape,
   OptionalSchema,
 } from "./schema.js";
+import type { Border, Carrier } from "./border.js";
+import {
+  bordersOf,
+  instantCarrier,
+  integerCarrier,
+  numberCarrier,
+  stringCarrier,
+} from "./border.js";
+import type { Rule } from "./rule.js";
+import { boundTermPath, stepInto } from "./rule.js";
 import { isSumSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -14,13 +24,15 @@ export interface DividedPosition {
   readonly kind: "divided";
   readonly path: string;
   readonly classes: readonly string[];
+  readonly borders: readonly Border[];
   classify(given: unknown): readonly string[];
   place(given: unknown, className: string): unknown;
 }
 
 export interface UndividedPosition {
-  readonly kind: "not-derivable";
+  readonly kind: "not-derivable" | "bounded";
   readonly path: string;
+  readonly borders: readonly Border[];
 }
 
 interface Focus {
@@ -51,22 +63,41 @@ function fieldsOf(
   schema: ObjectSchema<ObjectShape>,
   path: string,
   focus: Focus,
+  inherited: readonly Rule[] = [],
 ): Position[] {
+  const rules = [...schema.invariants, ...inherited];
   return Object.entries(schema.shape).flatMap(([key, field]) =>
-    positionAt(field, `${path}.${key}`, {
-      reach: given =>
-        focus.reach(given).map(value => (value as Readonly<Record<string, unknown>>)[key]),
-      update: (given, change) =>
-        focus.update(given, value => {
-          const { [key]: current, ...rest } = value as Readonly<Record<string, unknown>>;
-          const next = change(current);
-          return next === undefined ? rest : { ...rest, [key]: next };
-        }),
-    }),
+    positionAt(
+      field,
+      `${path}.${key}`,
+      {
+        reach: given =>
+          focus.reach(given).map(value => (value as Readonly<Record<string, unknown>>)[key]),
+        update: (given, change) =>
+          focus.update(given, value => {
+            const { [key]: current, ...rest } = value as Readonly<Record<string, unknown>>;
+            const next = change(current);
+            return next === undefined ? rest : { ...rest, [key]: next };
+          }),
+      },
+      rules.flatMap(rule => {
+        const inner = stepInto(rule, key);
+        return inner === undefined ? [] : [inner];
+      }),
+    ),
   );
 }
 
-function positionAt(schema: AnySchema, path: string, focus: Focus): Position[] {
+function positionAt(
+  schema: AnySchema,
+  path: string,
+  focus: Focus,
+  inherited: readonly Rule[] = [],
+): Position[] {
+  const borders = bordersOf(
+    [...schema.invariants, ...inherited].filter(rule => boundTermPath(rule)?.length === 0),
+    measure => carrierOf(schema, measure),
+  );
   if (schema.kind === "optional") {
     const inner = (schema as OptionalSchema<unknown>).schema;
     return [
@@ -99,7 +130,7 @@ function positionAt(schema: AnySchema, path: string, focus: Focus): Position[] {
     });
   }
   if (schema.kind === "object") {
-    return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus);
+    return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, inherited);
   }
   if (isSumSchema(schema)) {
     return [
@@ -113,7 +144,25 @@ function positionAt(schema: AnySchema, path: string, focus: Focus): Position[] {
       ...underCases(schema, path, focus),
     ];
   }
-  return [{ kind: "not-derivable", path }];
+  return [{ kind: borders.length === 0 ? "not-derivable" : "bounded", path, borders }];
+}
+
+function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
+  if (measure === "length") {
+    return integerCarrier;
+  }
+  switch (schema.kind) {
+    case "integer":
+      return integerCarrier;
+    case "number":
+      return numberCarrier;
+    case "instant":
+      return instantCarrier;
+    case "string":
+      return stringCarrier;
+    default:
+      return undefined;
+  }
 }
 
 function divided(
@@ -127,6 +176,7 @@ function divided(
     kind: "divided",
     path,
     classes: [...classes],
+    borders: [],
     classify: given =>
       focus
         .reach(given)

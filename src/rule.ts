@@ -88,6 +88,28 @@ export function termData(term: Term<unknown>): TermData {
   return term[TERM];
 }
 
+export function boundTermPath(rule: Rule): readonly string[] | undefined {
+  if (isTerm(rule.left) !== isTerm(rule.right)) {
+    return termData((isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>).path;
+  }
+  return undefined;
+}
+
+export function stepInto(rule: Rule, key: string): Rule | undefined {
+  const path = boundTermPath(rule);
+  if (path === undefined || path[0] !== key) {
+    return undefined;
+  }
+  const shift = (operand: unknown): unknown => {
+    if (!isTerm(operand)) {
+      return operand;
+    }
+    const data = termData(operand);
+    return termAt(data.path.slice(1), data.measure);
+  };
+  return { ...rule, left: shift(rule.left), right: shift(rule.right) };
+}
+
 export function holds(rule: Rule, value: unknown): boolean {
   const left = read(rule.left, value);
   const right = read(rule.right, value);

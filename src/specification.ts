@@ -146,7 +146,7 @@ export type PartitionCoverage =
       readonly covered: readonly string[];
       readonly missing: readonly string[];
     }
-  | { readonly path: string; readonly kind: "not-derivable" };
+  | { readonly path: string; readonly kind: "not-derivable" | "bounded" };
 
 export interface Coverage {
   readonly covered: readonly string[];
@@ -402,8 +402,8 @@ export async function evaluateSpecification(
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
   const partitions = positions.map((position, index): PartitionCoverage => {
-    if (position.kind === "not-derivable") {
-      return { path: position.path, kind: "not-derivable" };
+    if (position.kind !== "divided") {
+      return { path: position.path, kind: position.kind };
     }
     const { covered, missing } = coverage(position.classes, coveredClasses[index]!);
     return { path: position.path, kind: "divided", covered, missing };
@@ -419,7 +419,7 @@ export async function evaluateSpecification(
     result.missing.length === 0 &&
     effects.missing.length === 0 &&
     partitions.every(
-      partition => partition.kind === "not-derivable" || partition.missing.length === 0,
+      partition => partition.kind !== "divided" || partition.missing.length === 0,
     );
 
   const arms: Measure =
