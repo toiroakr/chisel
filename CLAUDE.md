@@ -21,15 +21,18 @@ Requires Node.js >= 26 (uses the built-in `Temporal` API — see `mise.toml` for
 
 ```sh
 npm run typecheck   # tsc --noEmit
-npm test            # tsx --test (node:test auto-discovers test/**/*.test.ts)
+npm test            # vitest run (see vitest.config.ts: test.include is test/**/*.test.ts)
 npm run check        # typecheck + test
+npm run coverage     # vitest run --coverage (v8 provider, src/** only)
 npm run build        # tsc -p tsconfig.build.json -> dist/
 npm run demo         # runs examples/progressive-demo/run.ts end-to-end
 ```
 
 CI (`.github/workflows/check.yml`) runs `npm ci && npm run check` on push to `main` and on every pull request.
 
-Run a single test file directly with tsx, e.g. `npx tsx --test test/chisel.test.ts`. Tests use node's built-in `node:test` + `node:assert/strict`, not a third-party runner.
+Run a single test file directly with vitest, e.g. `npx vitest run test/chisel.test.ts`. Tests use Vitest (`describe`/`it`/`expect` imported explicitly from `"vitest"`, no globals). `expect(...).toStrictEqual(...)` (not `toEqual`) is the standard equality assertion here — it distinguishes `{ note: undefined }` from `{}` the same way `node:assert.deepStrictEqual` did, which matters for the `optional()` invariant below.
+
+`src/cli.ts` exports `run(argv): Promise<{ exitCode, stdout, stderr }>` — a pure argv-in/lines-out function with no direct `console.log`/`process.exit` calls — plus a top-level `isRunAsScript()` guard (comparing `import.meta.url` against the `realpathSync`'d `process.argv[1]`, so it resolves correctly through the `dist/cli.js` bin symlink too) that calls `run` and does the actual I/O only when the file is executed directly. `test/cli.test.ts` calls `run(...)` in-process for nearly all cases (fast, fully covered by `npm run coverage`) and keeps exactly one `spawnSync` subprocess test to prove the shebang/`isRunAsScript` wiring itself works end-to-end — that one test's process boundary is the only part of `cli.ts` Vitest's V8 coverage can't see.
 
 The CLI can load `.ts` spec files directly (via `tsx/esm/api`'s `tsImport`), no build step required:
 

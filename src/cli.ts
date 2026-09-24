@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tsImport } from "tsx/esm/api";
@@ -25,38 +26,47 @@ interface LoadedTarget {
   readonly existingRows: number;
 }
 
-const [command, file, ...flags] = process.argv.slice(2);
+export interface CliResult {
+  readonly exitCode: number;
+  readonly stdout: readonly string[];
+  readonly stderr: readonly string[];
+}
 
-if ((command !== "check" && command !== "generate") || file === undefined) {
-  usage();
-  process.exitCode = 2;
-} else {
+export async function run(argv: readonly string[]): Promise<CliResult> {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const [command, file, ...flags] = argv;
+
+  if ((command !== "check" && command !== "generate") || file === undefined) {
+    stderr.push(usage());
+    return { exitCode: 2, stdout, stderr };
+  }
+
   const targets = await loadTargets(file);
   if (targets.length === 0) {
-    console.error(`${file}にexportされたbehaviorまたはspecificationがありません`);
-    process.exitCode = 2;
-  } else if (command === "check") {
+    stderr.push(`${file}にexportされたbehaviorまたはspecificationがありません`);
+    return { exitCode: 2, stdout, stderr };
+  }
+
+  if (command === "check") {
     const reports = await Promise.all(
       targets.map(target => evaluateSpecification(target.specification)),
     );
     for (const report of reports) {
-      console.log(formatReport(report));
+      stdout.push(formatReport(report));
     }
-    if (flags.includes("--strict") && reports.some(report => !report.adequate)) {
-      process.exitCode = 1;
-    }
-  } else {
-    for (const target of targets) {
-      const generated = generateExamples(target.specification.examples);
-      console.log(
-        formatGeneratedExamples(
-          target.behaviorBinding,
-          generated,
-          target.existingRows,
-        ),
-      );
-    }
+    const exitCode =
+      flags.includes("--strict") && reports.some(report => !report.adequate) ? 1 : 0;
+    return { exitCode, stdout, stderr };
   }
+
+  for (const target of targets) {
+    const generated = generateExamples(target.specification.examples);
+    stdout.push(
+      formatGeneratedExamples(target.behaviorBinding, generated, target.existingRows),
+    );
+  }
+  return { exitCode: 0, stdout, stderr };
 }
 
 async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
@@ -188,6 +198,28 @@ function toIdentifier(value: string): string {
   return [first, ...rest.map(word => word[0]?.toUpperCase() + word.slice(1))].join("");
 }
 
-function usage(): void {
-  console.error("Usage: chisel <check|generate> <spec.ts> [--strict]");
+function usage(): string {
+  return "Usage: chisel <check|generate> <spec.ts> [--strict]";
+}
+
+function isRunAsScript(): boolean {
+  if (process.argv[1] === undefined) {
+    return false;
+  }
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isRunAsScript()) {
+  const result = await run(process.argv.slice(2));
+  for (const line of result.stdout) {
+    console.log(line);
+  }
+  for (const line of result.stderr) {
+    console.error(line);
+  }
+  process.exitCode = result.exitCode;
 }
