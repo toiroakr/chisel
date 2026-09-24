@@ -255,4 +255,15 @@ describe("rules of a decision", () => {
       ],
     });
   });
+
+  it("describes the way through a decision with no guard as going straight to what follows", async () => {
+    const 常に定価 = implement(割引を判定する, {
+      cases: { 入力済み: rules("常に定価", () => [], () => ({ result: { 結果: "定価" }, effects: [] })) },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "定価", examples: examples(割引を判定する, []), implementation: 常に定価 }),
+    );
+
+    expect(report.measures.rules).toMatchObject({ rules: [{ way: "otherwise" }] });
+  });
 });

@@ -46,7 +46,7 @@ export function describeWay(way: Way): string {
     .map(step => `${describeRule(step.distinction)} ${step.outcome ? "holds" : "fails"}`)
     .join(", ");
   const exit = way.exit === "otherwise" ? "otherwise" : `else of guard ${way.exit + 1}`;
-  return `${steps} → ${exit}`;
+  return steps === "" ? exit : `${steps} → ${exit}`;
 }
 
 function outcomesOf(rule: Rule): readonly Outcome[] {
