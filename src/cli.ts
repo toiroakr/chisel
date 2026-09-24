@@ -203,6 +203,7 @@ const pointStatusLabels: Readonly<Record<BorderCoverage["points"][number]["statu
   gap: "! 行がない (gap)",
   excluded: "除外 (excluded)",
   "not named": "隣の値なし (not named)",
+  "no point": "点なし (no point)",
 };
 
 function formatBorders(borders: readonly BorderCoverage[]): string[] {

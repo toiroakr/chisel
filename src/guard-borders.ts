@@ -128,7 +128,10 @@ function partitionAt(
   const cuts = rules.flatMap(rule => {
     const { operator, bound } = normalize(rule)!;
     return operator === "==" || operator === "!="
-      ? []
+      ? [
+          { value: bound, lowerHoldsIt: false },
+          { value: bound, lowerHoldsIt: true },
+        ]
       : [{ value: bound, lowerHoldsIt: operator === "<=" || operator === ">" }];
   });
   const unique = cuts
@@ -174,11 +177,19 @@ function partitionAt(
     if (witness === undefined || !contains(witness)) {
       continue;
     }
-    const name = [
-      from === undefined ? "" : `${carrier.format(from.value)} ${from.inclusive ? "<=" : "<"} `,
-      "v",
-      to === undefined ? "" : ` ${to.inclusive ? "<=" : "<"} ${carrier.format(to.value)}`,
-    ].join("");
+    const single =
+      from !== undefined &&
+      to !== undefined &&
+      from.inclusive &&
+      to.inclusive &&
+      carrier.compare(from.value, to.value) === 0;
+    const name = single
+      ? `v = ${carrier.format(from.value)}`
+      : [
+          from === undefined ? "" : `${carrier.format(from.value)} ${from.inclusive ? "<=" : "<"} `,
+          "v",
+          to === undefined ? "" : ` ${to.inclusive ? "<=" : "<"} ${carrier.format(to.value)}`,
+        ].join("");
     classes.push({ name, witness, contains });
   }
   return { path, classes };

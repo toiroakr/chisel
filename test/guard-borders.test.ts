@@ -6,6 +6,7 @@ import {
   defineSpecification,
   evaluateSpecification,
   example,
+  eq,
   examples,
   ge,
   generateExamples,
@@ -14,6 +15,7 @@ import {
   implement,
   integer,
   le,
+  ne,
   number,
   object,
   rules,
@@ -379,5 +381,68 @@ describe("classes a guard's threshold divides a position into", () => {
     expect(names.filter(name => name.includes(" = "))).toStrictEqual([
       "注文を受け付ける: @入力済み.合計 = 100000 < v",
     ]);
+  });
+});
+
+describe("borders of a rule that names one value", () => {
+  const 判定する = behavior({
+    name: "判定する",
+    input: sum("状態", { 入力済み: object({ 数量: integer() }) }),
+    result: object({}),
+    effects: sum("種類", {}),
+  });
+  const pointsOf = async (condition: (入力: TermOf<{ readonly 数量: number }>) => Rule) => {
+    const 判定 = implement(判定する, {
+      cases: {
+        入力済み: rules(
+          "判定",
+          入力 => [guard(condition(入力), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "判定", examples: examples(判定する, []), implementation: 判定 }),
+    );
+    return report.borders[0]!.points;
+  };
+
+  it("owes an OFF point on each side of an equality and says it has no IN point", async () => {
+    expect(await pointsOf(入力 => eq(入力.数量, 10))).toStrictEqual([
+      { role: "ON", relation: "= 10", status: "gap" },
+      { role: "OFF", relation: "= 9", status: "gap" },
+      { role: "OFF", relation: "= 11", status: "gap" },
+      { role: "IN", relation: "none: the rule keeps a single value", status: "no point" },
+      { role: "OUT", relation: "< 9", status: "gap" },
+      { role: "OUT", relation: "> 11", status: "gap" },
+    ]);
+  });
+
+  it("owes an ON point on each side of an inequality and says it has no OUT point", async () => {
+    expect(await pointsOf(入力 => ne(入力.数量, 10))).toStrictEqual([
+      { role: "ON", relation: "= 9", status: "gap" },
+      { role: "ON", relation: "= 11", status: "gap" },
+      { role: "OFF", relation: "= 10", status: "gap" },
+      { role: "IN", relation: "< 9", status: "gap" },
+      { role: "IN", relation: "> 11", status: "gap" },
+      { role: "OUT", relation: "none: the rule leaves out a single value", status: "no point" },
+    ]);
+  });
+
+  it("parts the value an equality names from the values on either side of it", async () => {
+    const 判定 = implement(判定する, {
+      cases: {
+        入力済み: rules(
+          "判定",
+          入力 => [guard(eq(入力.数量, 10), () => ({ result: {}, effects: [] }))],
+          () => ({ result: {}, effects: [] }),
+        ),
+      },
+    });
+    const report = await evaluateSpecification(
+      defineSpecification({ name: "判定", examples: examples(判定する, []), implementation: 判定 }),
+    );
+
+    expect(report.partitions).toMatchObject([{ missing: ["v < 10", "v = 10", "10 < v"] }]);
   });
 });

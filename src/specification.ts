@@ -186,7 +186,7 @@ export interface BorderCoverage {
   readonly points: readonly {
     readonly role: PointRole;
     readonly relation: string;
-    readonly status: "met" | "gap" | "excluded" | "not named";
+    readonly status: "met" | "gap" | "excluded" | "not named" | "no point";
   }[];
 }
 

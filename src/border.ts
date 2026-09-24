@@ -2,7 +2,7 @@ import type { Operator, Rule } from "./rule.js";
 import { describeRule, isTerm, termData } from "./rule.js";
 
 export type PointRole = "ON" | "OFF" | "IN" | "OUT";
-export type PointStatus = "owed" | "excluded" | "not named";
+export type PointStatus = "owed" | "excluded" | "not named" | "no point";
 
 export interface BorderPoint {
   readonly role: PointRole;
@@ -75,8 +75,14 @@ export function bordersOf(
     return border === undefined ? [] : [border];
   });
   return drawn.map(current => {
+    if (current.namesValue === true) {
+      return current.border;
+    }
     const others = drawn.filter(
-      other => other !== current && other.border.measure === current.border.measure,
+      other =>
+        other !== current &&
+        other.namesValue !== true &&
+        other.border.measure === current.border.measure,
     );
     return oneValueWide(current, others)
       ? withoutInPoint(current.border)
@@ -125,6 +131,7 @@ function withoutInPoint(border: Border): Border {
 }
 
 interface Drawn {
+  readonly namesValue?: boolean;
   readonly border: Border;
   readonly carrier: Carrier;
   readonly on: unknown;
@@ -155,8 +162,11 @@ function borderOf(
   }
   const { operator, bound, measure } = normalized;
   const carrier = carrierFor(measure);
-  if (carrier === undefined || operator === "==" || operator === "!=") {
+  if (carrier === undefined) {
     return undefined;
+  }
+  if (operator === "==" || operator === "!=") {
+    return namedValueBorder(rule, operator, bound, measure, carrier, drawing);
   }
   const lower = operator === ">" || operator === ">=";
   const closed = operator === ">=" || operator === "<=";
@@ -226,6 +236,91 @@ function borderOf(
     on: inner,
     lower,
     admits: value => at(inner)(value) || inside(inner)(value),
+  };
+}
+
+function namedValueBorder(
+  rule: Rule,
+  operator: "==" | "!=",
+  bound: unknown,
+  measure: Border["measure"],
+  carrier: Carrier,
+  drawing: Drawing,
+): Drawn {
+  const keeps = operator === "==";
+  const guarded = drawing.source === "guard";
+  const at = (edge: unknown) => (value: unknown) => carrier.compare(value, edge) === 0;
+  const below = carrier.step?.(bound, -1);
+  const above = carrier.step?.(bound, 1);
+  const beyond = (edge: unknown, direction: 1 | -1) =>
+    carrier.step?.(edge, direction) ?? carrier.past?.(edge, direction);
+  const statusFor = (witness: unknown, inside: boolean): PointStatus =>
+    witness === undefined || !drawing.admits(witness)
+      ? "excluded"
+      : inside || guarded
+        ? "owed"
+        : "excluded";
+  const neighbour = (role: PointRole, edge: unknown, inside: boolean): BorderPoint =>
+    edge === undefined
+      ? { role, relation: "neighbour not named", status: "not named", contains: () => false }
+      : {
+          role,
+          relation: `= ${carrier.format(edge)}`,
+          status: statusFor(edge, inside),
+          witness: edge,
+          contains: at(edge),
+        };
+  const run = (role: PointRole, direction: 1 | -1, inside: boolean): BorderPoint => {
+    const edge = (direction === 1 ? above : below) ?? bound;
+    const witness = beyond(edge, direction);
+    return {
+      role,
+      relation: `${direction === 1 ? ">" : "<"} ${carrier.format(edge)}`,
+      status: statusFor(witness, inside),
+      witness,
+      contains: value => carrier.compare(value, edge) * direction > 0,
+    };
+  };
+  const points: BorderPoint[] = keeps
+    ? [
+        neighbour("ON", bound, true),
+        neighbour("OFF", below, false),
+        neighbour("OFF", above, false),
+        {
+          role: "IN",
+          relation: "none: the rule keeps a single value",
+          status: "no point",
+          contains: () => false,
+        },
+        run("OUT", -1, false),
+        run("OUT", 1, false),
+      ]
+    : [
+        neighbour("ON", below, true),
+        neighbour("ON", above, true),
+        neighbour("OFF", bound, false),
+        run("IN", -1, true),
+        run("IN", 1, true),
+        {
+          role: "OUT",
+          relation: "none: the rule leaves out a single value",
+          status: "no point",
+          contains: () => false,
+        },
+      ];
+  return {
+    border: {
+      source: drawing.source,
+      measure,
+      rule: `${drawing.source} ${drawing.describe(rule)}`,
+      closed: keeps,
+      points,
+    },
+    carrier,
+    on: bound,
+    lower: true,
+    namesValue: true,
+    admits: value => at(bound)(value) === keeps,
   };
 }
 
