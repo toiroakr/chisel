@@ -1,3 +1,4 @@
+import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnySumSchema,
   Infer,
@@ -26,39 +27,39 @@ export interface Pending {
   readonly reason: string;
 }
 
-export interface Decision<Input, Result, Effect> {
+export interface Decision<Input, Result, Effect, Deps = unknown> {
   readonly kind: "decision";
   readonly id: string;
   readonly dependsOn?: readonly string[];
-  run(input: Input): Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
+  run(input: Input, deps: Deps): Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
 }
 
-export interface Guard<Input, Result, Effect> {
+export interface Guard<Input, Result, Effect, Deps = unknown> {
   readonly kind: "guard";
   readonly condition: Rule;
-  orElse(input: Input): Execution<Result, Effect>;
+  orElse(input: Input, deps: Deps): Execution<Result, Effect>;
 }
 
-export type Handler<Input, Result, Effect> = {
-  bivariant(input: Input): Execution<Result, Effect>;
+export type Handler<Input, Result, Effect, Deps = unknown> = {
+  bivariant(input: Input, deps: Deps): Execution<Result, Effect>;
 }["bivariant"];
 
-export interface Match<Input, Result, Effect> {
+export interface Match<Input, Result, Effect, Deps = unknown> {
   readonly kind: "match";
   readonly on: Term<string>;
-  readonly cases: Readonly<Record<string, Handler<Input, Result, Effect>>>;
+  readonly cases: Readonly<Record<string, Handler<Input, Result, Effect, Deps>>>;
 }
 
-export type Otherwise<Input, Result, Effect> =
-  | Handler<Input, Result, Effect>
-  | Match<Input, Result, Effect>;
+export type Otherwise<Input, Result, Effect, Deps = unknown> =
+  | Handler<Input, Result, Effect, Deps>
+  | Match<Input, Result, Effect, Deps>;
 
-export interface RulesDecision<Input, Result, Effect> {
+export interface RulesDecision<Input, Result, Effect, Deps = unknown> {
   readonly kind: "rules";
   readonly id: string;
   readonly dependsOn?: readonly string[];
-  readonly guards: readonly Guard<Input, Result, Effect>[];
-  readonly otherwise: Otherwise<Input, Result, Effect>;
+  readonly guards: readonly Guard<Input, Result, Effect, Deps>[];
+  readonly otherwise: Otherwise<Input, Result, Effect, Deps>;
 }
 
 export type Branch = Distinction | Match<unknown, unknown, unknown>;
@@ -96,6 +97,7 @@ export interface Behavior<
   InputSchema extends AnySumSchema,
   ResultSchema extends Schema<unknown>,
   EffectSchema extends AnySumSchema,
+  Requires extends Requirements = {},
 > {
   readonly kind: "behavior";
   readonly name: string;
@@ -103,37 +105,32 @@ export interface Behavior<
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
   readonly dependsOn: readonly string[];
+  readonly requires: Requires;
   readonly ensures: readonly EnsuresClause[];
 }
 
-export type AnyBehavior = Behavior<
-  AnySumSchema,
-  Schema<unknown>,
-  AnySumSchema
->;
+export type AnyBehavior = Behavior<AnySumSchema, Schema<unknown>, AnySumSchema, Requirements>;
 
-export type BehaviorInput<B> = B extends Behavior<infer Input, Schema<unknown>, AnySumSchema>
-  ? Infer<Input>
-  : never;
-export type BehaviorResult<B> = B extends Behavior<
-  AnySumSchema,
-  infer Result,
-  AnySumSchema
->
+export type BehaviorInput<B> = B extends { readonly input: infer Input } ? Infer<Input> : never;
+export type BehaviorResult<B> = B extends { readonly result: infer Result }
   ? Infer<Result>
   : never;
-export type BehaviorEffect<B> = B extends Behavior<
-  AnySumSchema,
-  Schema<unknown>,
-  infer Effect
->
+export type BehaviorEffect<B> = B extends { readonly effects: infer Effect }
   ? Infer<Effect>
+  : never;
+export type BehaviorDeps<B> = B extends { readonly requires: infer Requires }
+  ? Resolved<Requires>
   : never;
 
 export type ImplementationCases<B extends AnyBehavior> = {
   readonly [Tag in Tags<B["input"]>]:
-    | Decision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>>
-    | RulesDecision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>>
+    | Decision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+    | RulesDecision<
+        VariantOf<B["input"], Tag>,
+        BehaviorResult<B>,
+        BehaviorEffect<B>,
+        BehaviorDeps<B>
+      >
     | Pending;
 };
 
@@ -153,27 +150,27 @@ export class SpecificationError extends Error {
   }
 }
 
-export function guard<Input, Result, Effect>(
+export function guard<Input, Result, Effect, Deps = unknown>(
   condition: Rule,
-  orElse: (input: Input) => Execution<Result, Effect>,
-): Guard<Input, Result, Effect> {
+  orElse: (input: Input, deps: Deps) => Execution<Result, Effect>,
+): Guard<Input, Result, Effect, Deps> {
   return { kind: "guard", condition, orElse };
 }
 
-export function match<Input, Result, Effect>(
+export function match<Input, Result, Effect, Deps = unknown>(
   select: (input: TermOf<Input>) => Term<string>,
-  cases: Readonly<Record<string, (input: Input) => Execution<Result, Effect>>>,
-): Match<Input, Result, Effect> {
+  cases: Readonly<Record<string, (input: Input, deps: Deps) => Execution<Result, Effect>>>,
+): Match<Input, Result, Effect, Deps> {
   return { kind: "match", on: select(selfTerm<Input>()), cases };
 }
 
-export function rules<Input, Result, Effect>(
+export function rules<Input, Result, Effect, Deps = unknown>(
   id: string,
   build: (
     input: TermOf<NoInfer<Input>>,
-  ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>>[],
-  otherwise: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>>,
-): RulesDecision<Input, Result, Effect> {
+  ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>[],
+  otherwise: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>,
+): RulesDecision<Input, Result, Effect, Deps> {
   return { kind: "rules", id, guards: build(selfTerm<NoInfer<Input>>()), otherwise };
 }
 
@@ -185,16 +182,18 @@ export function behavior<
   const InputSchema extends AnySumSchema,
   const ResultSchema extends Schema<unknown>,
   const EffectSchema extends AnySumSchema,
+  const Requires extends Requirements = {},
 >(options: {
   readonly name: string;
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
   readonly dependsOn?: readonly string[];
+  readonly requires?: Requires;
   readonly ensures?: (
     clause: EnsuresBuilder<Infer<InputSchema>, ResultSchema>,
   ) => readonly EnsuresClause[];
-}): Behavior<InputSchema, ResultSchema, EffectSchema> {
+}): Behavior<InputSchema, ResultSchema, EffectSchema, Requires> {
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
   for (const clause of clauses) {
     const roots = new Set(termPaths(clause.rule).map(path => path[0]));
@@ -211,6 +210,7 @@ export function behavior<
     result: options.result,
     effects: options.effects,
     dependsOn: options.dependsOn ?? [],
+    requires: options.requires ?? ({} as Requires),
     ensures: clauses,
   };
 }
@@ -289,13 +289,15 @@ export interface ArmTaken {
 export async function runImplementation<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
+  deps?: BehaviorDeps<B>,
 ): Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>> {
-  return (await runTraced(implementation, input)).execution;
+  return (await runTraced(implementation, input, deps)).execution;
 }
 
 export async function runTraced<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
+  deps?: BehaviorDeps<B>,
 ): Promise<{
   readonly execution: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
   readonly arms: readonly ArmTaken[];
@@ -331,11 +333,12 @@ export async function runTraced<B extends AnyBehavior>(
       ? decide(
           selected,
           parsedInput.value,
+          deps,
           arms,
           (rule, scope) => comparisons.push({ rule, scope }),
           (distinction, outcome) => steps.push({ distinction, outcome }),
         )
-      : await selected.run(parsedInput.value as never);
+      : await selected.run(parsedInput.value as never, deps as never);
   const parsedResult = definition.result.parse(execution.result);
   if (!parsedResult.success) {
     throw new SpecificationError(formatIssues("Invalid result", parsedResult.issues));
@@ -373,6 +376,7 @@ export async function runTraced<B extends AnyBehavior>(
 export function traceSync(
   implementation: AnyImplementation,
   input: unknown,
+  deps?: unknown,
 ): { readonly comparisons: readonly ComparisonReached[]; readonly way: WayTaken | undefined } {
   const parsed = implementation.behavior.input.parse(input);
   const tag = parsed.success ? tagOf(implementation.behavior.input, parsed.value) : undefined;
@@ -386,6 +390,7 @@ export function traceSync(
     decide(
       decision,
       parsed.value,
+      deps,
       [],
       (rule, scope) => comparisons.push({ rule, scope }),
       (distinction, outcome) => steps.push({ distinction, outcome }),
@@ -406,6 +411,7 @@ export function comparisonsReached(
 function decide<Result, Effect>(
   decision: RulesDecision<unknown, Result, Effect>,
   input: unknown,
+  deps: unknown,
   arms: ArmTaken[],
   observe: ComparisonObserver,
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
@@ -413,13 +419,13 @@ function decide<Result, Effect>(
   for (const [index, candidate] of decision.guards.entries()) {
     if (!holds(candidate.condition, input, observe, distinguish)) {
       arms.push({ decision: decision.id, guard: index, arm: "else" });
-      return candidate.orElse(input);
+      return candidate.orElse(input, deps);
     }
     arms.push({ decision: decision.id, guard: index, arm: "holds" });
   }
   const { otherwise } = decision;
   if (typeof otherwise === "function") {
-    return otherwise(input);
+    return otherwise(input, deps);
   }
   const tag = readOperand(otherwise.on, input);
   const selected = typeof tag === "string" ? otherwise.cases[tag] : undefined;
@@ -428,7 +434,7 @@ function decide<Result, Effect>(
   }
   arms.push({ decision: decision.id, guard: decision.guards.length, arm: tag as string });
   distinguish(otherwise as Match<unknown, unknown, unknown>, tag as string);
-  return selected(input);
+  return selected(input, deps);
 }
 
 function formatIssues(

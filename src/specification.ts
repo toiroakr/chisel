@@ -11,6 +11,7 @@ import type {
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
 import { describeWay, sameSteps, waysOf } from "./ways.js";
+import type { ValueDependencies } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
@@ -65,10 +66,15 @@ export interface Unanswered {
   readonly reason: string;
 }
 
+export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
+  ? Partial<ValueDependencies<Requires>>
+  : never;
+
 export interface Example<B extends AnyBehavior> {
   readonly kind: "example";
   readonly name: string;
   readonly given: BehaviorInput<B>;
+  readonly with?: BehaviorWith<B>;
   readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
 }
 
@@ -264,6 +270,7 @@ export function example<B extends AnyBehavior>(
   name: string,
   value: {
     readonly given: BehaviorInput<B>;
+    readonly with?: BehaviorWith<B>;
     readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
   },
 ): Example<B> {
@@ -321,6 +328,11 @@ export async function evaluateSpecification(
   const reached: ComparisonReached[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
+  const standIns = (row: Example<AnyBehavior>): unknown => ({ ...(row.with ?? {}) });
+  const unstoodFor = (row: Example<AnyBehavior>): string | undefined =>
+    Object.keys(definition.requires).find(
+      name => !(name in ((row.with ?? {}) as Readonly<Record<string, unknown>>)),
+    );
   const observe = (
     inputTag: string,
     actual: unknown,
@@ -363,9 +375,16 @@ export async function evaluateSpecification(
         implementation === undefined || inputTag === undefined
           ? undefined
           : implementation.cases[inputTag];
-      if (implementation !== undefined && decision !== undefined && decision.kind !== "pending") {
+      const unstoodOwed = unstoodFor(row);
+      if (implementation !== undefined && unstoodOwed !== undefined) {
+        failures.push({ name: row.name, message: `No stand-in for dependency ${unstoodOwed}` });
+      } else if (
+        implementation !== undefined &&
+        decision !== undefined &&
+        decision.kind !== "pending"
+      ) {
         try {
-          const traced = await runTraced(implementation, row.given);
+          const traced = await runTraced(implementation, row.given, standIns(row) as never);
           observe(inputTag!, traced.execution);
           armsOwed.push(...traced.arms);
           if (traced.way !== undefined) {
@@ -422,13 +441,16 @@ export async function evaluateSpecification(
     }
 
     const implementation = specification.implementation;
-    if (implementation !== undefined) {
+    const unstood = unstoodFor(row);
+    if (implementation !== undefined && unstood !== undefined) {
+      failures.push({ name: row.name, message: `No stand-in for dependency ${unstood}` });
+    } else if (implementation !== undefined) {
       const { actual, failure } = await runAndCompare(
         row.name,
         row.given,
         row.expect,
         async input => {
-          const traced = await runTraced(implementation, input);
+          const traced = await runTraced(implementation, input, standIns(row) as never);
           armsMet.push(...traced.arms);
           reached.push(...traced.comparisons);
           if (traced.way !== undefined) {

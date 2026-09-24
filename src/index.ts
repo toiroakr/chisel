@@ -40,6 +40,16 @@ export type { Comparable, InvariantRule, Operand, Operator, Rule, Term, TermOf }
 
 export { formatTypeScriptValue } from "./codegen.js";
 
+export { dependency } from "./dependency.js";
+export type {
+  AnyDependency,
+  FunctionDependency,
+  Requirements,
+  Resolved,
+  ValueDependencies,
+  ValueDependency,
+} from "./dependency.js";
+
 export type { Border, BorderPoint, PointRole, PointStatus } from "./border.js";
 
 export { positionsOf } from "./partition.js";
@@ -64,6 +74,7 @@ export type {
   AnyBehavior,
   AnyImplementation,
   Behavior,
+  BehaviorDeps,
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
@@ -97,6 +108,7 @@ export {
 export type {
   AdequacyReport,
   ArmCoverage,
+  BehaviorWith,
   BorderCoverage,
   ComparisonsMeasure,
   ConformanceSubject,
