@@ -110,7 +110,6 @@ export interface AdequacyReport {
     readonly result: readonly ResultCaseEvidence[];
   };
   readonly measures: { readonly arms: Measure };
-  readonly internalDecisionCoverage: "undetermined";
   readonly adequate: boolean;
   readonly verdict: Verdict;
 }
@@ -449,7 +448,6 @@ export async function evaluateSpecification(
         : [],
     },
     measures: { arms },
-    internalDecisionCoverage: "undetermined",
     adequate,
     verdict,
   };
