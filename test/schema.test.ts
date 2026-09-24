@@ -3,6 +3,7 @@ import {
   array,
   boolean,
   instant,
+  integer,
   isSumSchema,
   literal,
   number,
@@ -169,6 +170,24 @@ describe("number", () => {
 
   it("uses 0 as its placeholder", () => {
     expect(number().placeholder()).toBe(0);
+  });
+});
+
+describe("integer", () => {
+  it("accepts a whole number", () => {
+    expect(integer().parse(3)).toStrictEqual({ success: true, value: 3 });
+  });
+
+  it("rejects a number with a fractional part", () => {
+    expect(integer().parse(1.5).success).toBe(false);
+  });
+
+  it("rejects a value that is not a number", () => {
+    expect(integer().parse("3").success).toBe(false);
+  });
+
+  it("uses 0 as its placeholder", () => {
+    expect(integer().placeholder()).toBe(0);
   });
 });
 

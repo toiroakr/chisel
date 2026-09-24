@@ -27,6 +27,10 @@ export interface NumberSchema extends Schema<number> {
   readonly kind: "number";
 }
 
+export interface IntegerSchema extends Schema<number> {
+  readonly kind: "integer";
+}
+
 export interface BooleanSchema extends Schema<boolean> {
   readonly kind: "boolean";
 }
@@ -157,6 +161,20 @@ export function number(): NumberSchema {
     return typeof value === "number" && Number.isFinite(value)
       ? valid(value)
       : invalid(path, "Expected a finite number");
+  }
+}
+
+export function integer(): IntegerSchema {
+  return {
+    kind: "integer",
+    parse,
+    placeholder: () => 0,
+  };
+
+  function parse(value: unknown, path = "$"): ValidationResult<number> {
+    return Number.isSafeInteger(value)
+      ? valid(value as number)
+      : invalid(path, "Expected an integer");
   }
 }
 
