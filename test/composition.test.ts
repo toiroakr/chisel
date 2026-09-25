@@ -210,6 +210,23 @@ describe("compose", () => {
     ).toThrow(new SpecificationError("支払方法を返す answers @有効.支払@カード, which 現金だけ受け取る does not declare"));
   });
 
+  it("still refuses a nested field that only shares its name with the discriminant", () => {
+    const 詳細を返す = behavior("詳細を返す", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", { 有効: object({ 詳細: object({ 結果: string("結果") }) }) }),
+      effects: variants("種類", {}),
+    });
+    const 空の詳細で受け取る = behavior("空の詳細で受け取る", {
+      input: variants("結果", { 有効: object({ 詳細: object({}) }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      compose("詳細の合成", [external(詳細を返す, "別のチーム"), external(空の詳細で受け取る, "別のチーム")]),
+    ).toThrow(new SpecificationError("詳細を返す answers @有効.詳細.結果, which 空の詳細で受け取る does not declare"));
+  });
+
   describe("a nested sum the second stage takes as a plain object", () => {
     const 支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string("番号"), 暗証: string("暗証") }) });
     const 段 = (taken: AnySchema) =>
