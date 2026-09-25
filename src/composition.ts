@@ -228,10 +228,12 @@ function mismatchOf(
     const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
     return (
       firstFound(Object.entries(answeredShape), ([key, field]) =>
-        Object.hasOwn(takenShape, key)
-          ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
-          : key === enclosing?.discriminant
-            ? undefined
+        key === enclosing?.discriminant
+          ? Object.hasOwn(takenShape, key)
+            ? mismatchOf(literal(enclosing.tag), takenShape[key]!, `${path}.${key}`)
+            : undefined
+          : Object.hasOwn(takenShape, key)
+            ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
             : undeclared(`${path}.${key}`),
       ) ??
       firstFound(Object.entries(takenShape), ([key, field]) =>

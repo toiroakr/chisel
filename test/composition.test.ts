@@ -392,6 +392,23 @@ describe("compose", () => {
     ).toThrow(new SpecificationError("方法で返す answers @有効.支払.方法, which 種別で受け取る does not declare"));
   });
 
+  it("compares the tag itself, not the type a first stage's case declares for its discriminant", () => {
+    const 文字列で宣言する = behavior("文字列で宣言する", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", { 有効: object({ 結果: string("結果"), 番号: int() }) }),
+      effects: variants("種類", {}),
+    });
+    const リテラルで受け取る = behavior("リテラルで受け取る", {
+      input: variants("結果", { 有効: object({ 結果: literal("有効"), 番号: int() }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      compose("判別キーは値で比べる", [external(文字列で宣言する, "別のチーム"), external(リテラルで受け取る, "別のチーム")]),
+    ).not.toThrow();
+  });
+
   it("compares the tag that flows with a discriminant the second stage's case declares for itself", () => {
     const 返す = behavior("状態を宣言せず返す", {
       input: variants("状態", { 申込: object({}) }),
