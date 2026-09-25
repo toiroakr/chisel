@@ -415,7 +415,7 @@ export function variants<
 
     const source = value as Readonly<Record<string, unknown>>;
     const tag = source[discriminant];
-    if (typeof tag !== "string" || !(tag in variants)) {
+    if (typeof tag !== "string" || !Object.hasOwn(variants, tag)) {
       return invalid(
         `${path}.${discriminant}`,
         `Expected one of ${variantTags.join(", ")}`,

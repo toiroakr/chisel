@@ -326,6 +326,12 @@ describe("variants", () => {
     expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.state"]);
   });
 
+  it("rejects a discriminant named like an Object.prototype member instead of throwing", () => {
+    const result = Shape.parse({ state: "toString", id: "a" });
+
+    expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.state"]);
+  });
+
   it("rejects a value missing the discriminant field entirely", () => {
     expect(Shape.parse({ id: "a" }).success).toBe(false);
   });
