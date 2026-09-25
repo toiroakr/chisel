@@ -2,13 +2,13 @@ import {
   all,
   array,
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
   guard,
   implement,
-  integer,
-  le,
+  int,
+  lte,
   object,
   rules,
   string,
@@ -18,7 +18,7 @@ import {
 const 注文を確定する = behavior({
   name: "注文を確定する",
   input: sum("状態", {
-    商品あり: object({ 明細: array(object({ 数量: integer(), 在庫数: integer() })) }),
+    商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
   }),
   result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
   effects: sum("種類", {}),
@@ -29,7 +29,7 @@ const 在庫を確かめる = implement(注文を確定する, {
     商品あり: rules(
       "在庫を確かめる",
       カート => [
-        guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+        guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
@@ -39,7 +39,7 @@ const 在庫を確かめる = implement(注文を確定する, {
   },
 });
 
-export const 注文確定 = defineSpecification({
+export const 注文確定 = spec({
   name: "注文確定",
   examples: examples(注文を確定する, [
     example(注文を確定する, "ちょうど在庫分", {

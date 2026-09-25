@@ -1,14 +1,14 @@
 import {
   behavior,
   compose,
-  defineSpecification,
+  spec,
   example,
   examples,
-  ge,
+  gte,
   guard,
   implement,
   implementComposition,
-  integer,
+  int,
   object,
   rules,
   string,
@@ -17,21 +17,21 @@ import {
 
 const 検証する = behavior({
   name: "検証する",
-  input: sum("状態", { 申込: object({ 数量: integer() }) }),
-  result: sum("結果", { 有効: object({ 数量: integer() }), 無効: object({ 理由: string("理由") }) }),
+  input: sum("状態", { 申込: object({ 数量: int() }) }),
+  result: sum("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string("理由") }) }),
   effects: sum("種類", {}),
 });
 
 const 価格を付ける = behavior({
   name: "価格を付ける",
-  input: sum("結果", { 有効: object({ 数量: integer() }) }),
-  result: sum("結果", { 見積: object({ 金額: integer() }) }),
+  input: sum("結果", { 有効: object({ 数量: int() }) }),
+  result: sum("結果", { 見積: object({ 金額: int() }) }),
   effects: sum("種類", {}),
 });
 
 export const 見積もる = compose(検証する, 価格を付ける);
 
-export const 見積 = defineSpecification({
+export const 見積 = spec({
   name: "見積",
   examples: examples(見積もる, [
     example(見積もる, "2個", {
@@ -46,7 +46,7 @@ export const 見積 = defineSpecification({
         申込: rules(
           "数量を確かめる",
           申込 => [
-            guard(ge(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
+            guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
           ],
           申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
         ),

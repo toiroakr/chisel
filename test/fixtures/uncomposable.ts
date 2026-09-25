@@ -7,7 +7,7 @@ import {
   rules,
   string,
   sum,
-  defineSpecification,
+  spec,
   examples,
 } from "../../src/index.js";
 
@@ -28,7 +28,7 @@ const 名前順 = implement(並べる, {
   },
 });
 
-export const 並び = defineSpecification({
+export const 並び = spec({
   name: "並び",
   examples: examples(並べる, []),
   implementation: 名前順,

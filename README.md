@@ -53,7 +53,7 @@ export const cancelOrder = behavior({
 chisel generate ./cancel-order.spec.ts
 ```
 
-Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `defineSpecification` wraps yet, the output also carries the `import` line and a `defineSpecification` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` array.
+Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `spec` wraps yet, the output also carries the `import` line and a `spec` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` array.
 
 ```ts
 export const cancelOrderExamples = examples(cancelOrder, [
@@ -146,7 +146,7 @@ const implementation = implement(cancelOrder, {
   },
 });
 
-export const cancellation = defineSpecification({
+export const cancellation = spec({
   name: "order cancellation",
   examples: cancelOrderExamples,
   implementation,
@@ -187,14 +187,14 @@ The analyzer follows the example-adequacy model of [Souther](https://github.com/
 
 - **Cases** of the input, result and effect sums. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
 - **Classes** of each input position, derived from the types: an `optional` field is absent or present, a `boolean` true or false, a sum field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`sum(...).invariant(v => ne(v.state, "archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
-- **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `integer`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named. A point one bound owes is excluded when another bound refuses it, and bounds that leave nothing admitted (`$ >= 10` with `$ <= 5`) are reported as a model error rather than as gaps. A length is never negative, so a point that would lie below zero has no point there (`none: a length is never negative`) and no row is asked for at it, whether the border comes from an invariant or a guard.
+- **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `int`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named. A point one bound owes is excluded when another bound refuses it, and bounds that leave nothing admitted (`$ >= 10` with `$ <= 5`) are reported as a model error rather than as gaps. A length is never negative, so a point that would lie below zero has no point there (`none: a length is never negative`) and no row is asked for at it, whether the border comes from an invariant or a guard.
 
 ```ts
 const Line = object({
-  quantity: integer().invariant(v => ge(v, 1)),
-  unitPrice: integer().invariant(v => ge(v, 0)),
+  quantity: int().invariant(v => gte(v, 1)),
+  unitPrice: int().invariant(v => gte(v, 0)),
 });
-const Lines = array(Line).invariant(v => ge(length(v), 1));
+const Lines = array(Line).invariant(v => gte(length(v), 1));
 ```
 
 - **Arms and rules** of a decision written with `rules`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
@@ -205,7 +205,7 @@ const implementation = implement(checkout, {
     withItems: rules(
       "check stock, then confirm",
       cart => [
-        guard(all(cart.lines, line => le(line.quantity, line.stock)), () => ({
+        guard(all(cart.lines, line => lte(line.quantity, line.stock)), () => ({
           result: { type: "rejected", reason: "out of stock" },
           effects: [],
         })),
@@ -249,7 +249,7 @@ Every answer an example writes, the model produces or a conformance subject retu
 const quote = compose(validate, price); // validate: order -> valid | invalid, price: valid -> quoted
 // quote: order -> invalid | quoted
 
-export const quoteSpec = defineSpecification({
+export const quoteSpec = spec({
   name: "quote",
   examples: examples(quote, [/* rows expecting quoted, and invalid */]),
   implementation: implementComposition(quote, validateImpl, priceImpl),

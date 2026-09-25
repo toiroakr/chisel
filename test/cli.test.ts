@@ -156,11 +156,11 @@ describe("chisel generate", () => {
     expect(stdout).toMatch(/expect: unanswered\(/);
   });
 
-  it("wraps rows for a behavior with no specification in imports and defineSpecification", async () => {
+  it("wraps rows for a behavior with no specification in imports and spec", async () => {
     const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts")]);
 
     expect(stdoutOf(result).match(/^import .* from "chisel";$/gm)).toStrictEqual([
-      'import { defineSpecification, example, examples, unanswered } from "chisel";',
+      'import { spec, example, examples, unanswered } from "chisel";',
     ]);
     expect(stdoutOf(result)).toContain(
       [
@@ -176,7 +176,7 @@ describe("chisel generate", () => {
     );
     expect(stdoutOf(result)).toContain(
       [
-        "export const unreferencedBehaviorSpecification = defineSpecification({",
+        "export const unreferencedBehaviorSpecification = spec({",
         '  name: "unreferenced",',
         "  examples: unreferencedBehaviorExamples,",
         "});",

@@ -31,7 +31,7 @@ export interface NumberSchema extends Schema<number> {
   readonly kind: "number";
 }
 
-export interface IntegerSchema extends Schema<number> {
+export interface IntSchema extends Schema<number> {
   readonly kind: "integer";
 }
 
@@ -195,8 +195,8 @@ export function number(): NumberSchema {
   }
 }
 
-export function integer(): IntegerSchema {
-  return refinable<IntegerSchema>({
+export function int(): IntSchema {
+  return refinable<IntSchema>({
     kind: "integer",
     parse,
     placeholder: () => 0,

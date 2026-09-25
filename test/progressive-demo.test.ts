@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  defineSpecification,
+  spec,
   evaluateSpecification,
   examples,
   generateExamples,
@@ -15,7 +15,7 @@ import {
 
 describe("progressive specification demo", () => {
   it("moves from explicit gaps to an accepted specification", async () => {
-    const 段階1のスケッチ = defineSpecification({
+    const 段階1のスケッチ = spec({
       name: "段階1",
       examples: examples(段階1の振る舞い, []),
     });

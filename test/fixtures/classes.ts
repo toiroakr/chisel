@@ -1,6 +1,6 @@
 import {
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
   implement,
@@ -22,7 +22,7 @@ const 注文を確定する = behavior({
   effects: sum("種類", { 決済要求: object({ カートID: string("カートID") }) }),
 });
 
-export const 注文確定 = defineSpecification({
+export const 注文確定 = spec({
   name: "注文確定",
   examples: examples(注文を確定する, [
     example(注文を確定する, "クーポンなしで確定する", {

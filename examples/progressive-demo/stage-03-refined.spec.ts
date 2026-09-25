@@ -1,6 +1,6 @@
 import {
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
   instant,
@@ -80,7 +80,7 @@ const 具体例 = examples(予約をキャンセルする, [
   }),
 ]);
 
-export const 詳細化した仕様 = defineSpecification({
+export const 詳細化した仕様 = spec({
   name: "段階3: dataとbehaviorを詳細化する",
   examples: 具体例,
 });

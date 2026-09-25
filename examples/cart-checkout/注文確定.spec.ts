@@ -2,14 +2,14 @@ import {
   all,
   array,
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
-  ge,
+  gte,
   guard,
   implement,
-  integer,
-  le,
+  int,
+  lte,
   length,
   number,
   object,
@@ -25,16 +25,16 @@ const クーポンコード = string("クーポンコード");
 
 const 明細 = object({
   商品ID,
-  数量: integer().invariant(v => ge(v, 1)),
-  単価: integer().invariant(v => ge(v, 0)),
-  在庫数: integer().invariant(v => ge(v, 0)),
+  数量: int().invariant(v => gte(v, 1)),
+  単価: int().invariant(v => gte(v, 0)),
+  在庫数: int().invariant(v => gte(v, 0)),
 });
 
 const カート = sum("状態", {
   空: object({ カートID }),
   商品あり: object({
     カートID,
-    明細: array(明細).invariant(v => ge(length(v), 1)),
+    明細: array(明細).invariant(v => gte(length(v), 1)),
     クーポン: optional(クーポンコード),
   }),
   確定済み: object({ カートID }),
@@ -118,7 +118,7 @@ const 実装 = implement(注文を確定する, {
     商品あり: rules(
       "在庫を確かめて確定する",
       カート => [
-        guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+        guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
@@ -151,7 +151,7 @@ const 実装 = implement(注文を確定する, {
   },
 });
 
-export const 注文確定の仕様 = defineSpecification({
+export const 注文確定の仕様 = spec({
   name: "注文確定",
   examples: 具体例,
   implementation: 実装,

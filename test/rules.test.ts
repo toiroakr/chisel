@@ -4,7 +4,7 @@ import {
   and,
   array,
   behavior,
-  defineSpecification,
+  spec,
   eq,
   evaluateSpecification,
   example,
@@ -13,9 +13,9 @@ import {
   generationReport,
   guard,
   implement,
-  integer,
-  ge,
-  le,
+  int,
+  gte,
+  lte,
   length,
   lt,
   match,
@@ -35,7 +35,7 @@ const 注文を確定する = behavior({
   input: sum("状態", {
     商品あり: object({
       カートID: string("カートID"),
-      明細: array(object({ 数量: integer(), 在庫数: integer() })),
+      明細: array(object({ 数量: int(), 在庫数: int() })),
     }),
   }),
   result: sum("結果", {
@@ -50,7 +50,7 @@ const 在庫を確かめて確定する = implement(注文を確定する, {
     商品あり: rules(
       "在庫を確かめて確定する",
       カート => [
-        guard(all(カート.明細, 明細 => le(明細.数量, 明細.在庫数)), () => ({
+        guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
@@ -91,7 +91,7 @@ describe("arms of a rules decision", () => {
 
   it("measures the arms completely and marks the arm an answered row went through", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "注文確定",
         examples: examples(注文を確定する, [在庫あり]),
         implementation: 在庫を確かめて確定する,
@@ -119,7 +119,7 @@ describe("arms of a rules decision", () => {
 
   it("says an arm only a row whose answer is owed went through is owed an answer", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "注文確定",
         examples: examples(注文を確定する, [
           在庫あり,
@@ -152,7 +152,7 @@ describe("verdict over a rules decision", () => {
 
   it("is not_satisfied while an arm has no answered row through it", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "注文確定",
         examples: examples(注文を確定する, [在庫あり]),
         implementation: 在庫を確かめて確定する,
@@ -164,7 +164,7 @@ describe("verdict over a rules decision", () => {
 
   it("is satisfied when every measure was made and none found a gap", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "注文確定",
         examples: examples(注文を確定する, [
           在庫あり,
@@ -189,7 +189,7 @@ describe("verdict over a rules decision", () => {
     const 二つの状態 = behavior({
       name: "二つの状態",
       input: sum("状態", {
-        商品あり: object({ 数量: integer() }),
+        商品あり: object({ 数量: int() }),
         確定済み: object({}),
       }),
       result: object({}),
@@ -199,14 +199,14 @@ describe("verdict over a rules decision", () => {
       cases: {
         商品あり: rules(
           "数量を確かめる",
-          入力 => [guard(le(入力.数量, 10), () => ({ result: {}, effects: [] }))],
+          入力 => [guard(lte(入力.数量, 10), () => ({ result: {}, effects: [] }))],
           () => ({ result: {}, effects: [] }),
         ),
         確定済み: { kind: "decision", id: "何もしない", run: () => ({ result: {}, effects: [] }) },
       },
     });
     const report = await evaluateSpecification(
-      defineSpecification({ name: "混在", examples: examples(二つの状態, []), implementation: 混在 }),
+      spec({ name: "混在", examples: examples(二つの状態, []), implementation: 混在 }),
     );
 
     expect(report.measures.arms).toMatchObject({ status: "partial", notRead: ["何もしない"] });
@@ -216,7 +216,7 @@ describe("verdict over a rules decision", () => {
 describe("rules of a decision", () => {
   const 割引を判定する = behavior({
     name: "割引を判定する",
-    input: sum("状態", { 入力済み: object({ 会員歴: integer(), 購入額: integer() }) }),
+    input: sum("状態", { 入力済み: object({ 会員歴: int(), 購入額: int() }) }),
     result: sum("結果", { 割引: object({}), 定価: object({}) }),
     effects: sum("種類", {}),
   });
@@ -225,7 +225,7 @@ describe("rules of a decision", () => {
       入力済み: rules(
         "会員歴か購入額",
         入力 => [
-          guard(or(ge(入力.会員歴, 3), ge(入力.購入額, 10000)), () => ({
+          guard(or(gte(入力.会員歴, 3), gte(入力.購入額, 10000)), () => ({
             result: { 結果: "定価" },
             effects: [],
           })),
@@ -241,7 +241,7 @@ describe("rules of a decision", () => {
 
   it("lists each way through the body, carrying only the distinctions that way consulted", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "割引",
         examples: examples(割引を判定する, [会員歴で]),
         implementation: 会員歴か購入額,
@@ -271,7 +271,7 @@ describe("rules of a decision", () => {
       cases: { 入力済み: rules("常に定価", () => [], () => ({ result: { 結果: "定価" }, effects: [] })) },
     });
     const report = await evaluateSpecification(
-      defineSpecification({ name: "定価", examples: examples(割引を判定する, []), implementation: 常に定価 }),
+      spec({ name: "定価", examples: examples(割引を判定する, []), implementation: 常に定価 }),
     );
 
     expect(report.measures.rules).toMatchObject({ rules: [{ way: "otherwise" }] });
@@ -286,7 +286,7 @@ describe("match over a sum field", () => {
         配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
       }),
     }),
-    result: object({ 送料: integer() }),
+    result: object({ 送料: int() }),
     effects: sum("種類", {}),
   });
   const 方法で決める = implement(送料を決める, {
@@ -314,7 +314,7 @@ describe("match over a sum field", () => {
 
   it("counts every case of a match as an arm", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({ name: "送料", examples: examples(送料を決める, [宅配]), implementation: 方法で決める }),
+      spec({ name: "送料", examples: examples(送料を決める, [宅配]), implementation: 方法で決める }),
     );
 
     expect(report.measures.arms).toStrictEqual({
@@ -328,7 +328,7 @@ describe("match over a sum field", () => {
 
   it("ends a way at the case it went to", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({ name: "送料", examples: examples(送料を決める, [宅配]), implementation: 方法で決める }),
+      spec({ name: "送料", examples: examples(送料を決める, [宅配]), implementation: 方法で決める }),
     );
 
     expect(report.measures.rules).toMatchObject({
@@ -350,18 +350,18 @@ describe("match over a sum field", () => {
       name: "重さで決める",
       input: sum("状態", {
         確定済み: object({
-          重さ: integer(),
+          重さ: int(),
           配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
         }),
       }),
-      result: object({ 送料: integer() }),
+      result: object({ 送料: int() }),
       effects: sum("種類", {}),
     });
     const 重さと方法 = implement(重さで決める, {
       cases: {
         確定済み: rules(
           "重さと方法",
-          注文 => [guard(ge(注文.重さ, 1), () => ({ result: { 送料: 0 }, effects: [] }))],
+          注文 => [guard(gte(注文.重さ, 1), () => ({ result: { 送料: 0 }, effects: [] }))],
           match(注文 => 注文.配送.方法, {
             宅配: () => ({ result: { 送料: 500 }, effects: [] }),
             店頭受取: () => ({ result: { 送料: 0 }, effects: [] }),
@@ -473,17 +473,17 @@ describe("what match can branch on", () => {
   });
 });
 
-describe("rules written inline in defineSpecification", () => {
+describe("rules written inline in spec", () => {
   const 受け付ける = behavior({
     name: "受け付ける",
-    input: sum("状態", { 入力済み: object({ 合計: integer() }) }),
+    input: sum("状態", { 入力済み: object({ 合計: int() }) }),
     result: sum("結果", { 受付: object({}), 審査: object({}) }),
     effects: sum("種類", {}),
   });
 
   it("keeps the result literals of an implementation written inside the specification", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "受付",
         examples: examples(受け付ける, [
           example(受け付ける, "少額", {
@@ -495,7 +495,7 @@ describe("rules written inline in defineSpecification", () => {
           cases: {
             入力済み: rules(
               "上限",
-              入力 => [guard(le(入力.合計, 100), () => ({ result: { 結果: "審査" }, effects: [] }))],
+              入力 => [guard(lte(入力.合計, 100), () => ({ result: { 結果: "審査" }, effects: [] }))],
               () => ({ result: { 結果: "受付" }, effects: [] }),
             ),
           },
@@ -507,7 +507,7 @@ describe("rules written inline in defineSpecification", () => {
   });
 
   it("refuses a result case the behavior does not answer, inline as well", () => {
-    defineSpecification({
+    spec({
       name: "受付",
       examples: examples(受け付ける, []),
       implementation: implement(受け付ける, {
@@ -525,10 +525,10 @@ describe("ways no row can take", () => {
     name: "受け付ける",
     input: sum("状態", {
       入力済み: object({
-        数量: integer().invariant(v => ge(v, 0)),
-        上限: integer(),
-        最低: integer().invariant(v => ge(v, 10)),
-        明細: array(integer()),
+        数量: int().invariant(v => gte(v, 0)),
+        上限: int(),
+        最低: int().invariant(v => gte(v, 10)),
+        明細: array(int()),
       }),
     }),
     result: sum("結果", { 受付: object({}), 却下: object({}) }),
@@ -539,7 +539,7 @@ describe("ways no row can take", () => {
 
   async function statuses(implementation: Implementation<typeof 受け付ける>) {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "受付",
         examples: examples(受け付ける, []),
         implementation,
@@ -560,7 +560,7 @@ describe("ways no row can take", () => {
   it("owes no row at a way whose conditions leave nothing on one value", async () => {
     const 二段 = implement(受け付ける, {
       cases: {
-        入力済み: rules("二段", 入力 => [guard(and(ge(入力.数量, 10), ge(入力.数量, 5)), 却下)], 受付),
+        入力済み: rules("二段", 入力 => [guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), 却下)], 受付),
       },
     });
 
@@ -573,7 +573,7 @@ describe("ways no row can take", () => {
 
   it("owes no row at a way or an arm the invariants of the position leave nothing at", async () => {
     const 非負 = implement(受け付ける, {
-      cases: { 入力済み: rules("非負", 入力 => [guard(ge(入力.数量, 0), 却下)], 受付) },
+      cases: { 入力済み: rules("非負", 入力 => [guard(gte(入力.数量, 0), 却下)], 受付) },
     });
 
     expect(await statuses(非負)).toStrictEqual({
@@ -587,7 +587,7 @@ describe("ways no row can take", () => {
       cases: {
         入力済み: rules(
           "最低と比べる",
-          入力 => [guard(and(le(入力.数量, 5), ge(入力.数量, 入力.最低)), 却下)],
+          入力 => [guard(and(lte(入力.数量, 5), gte(入力.数量, 入力.最低)), 却下)],
           受付,
         ),
       },
@@ -605,7 +605,7 @@ describe("ways no row can take", () => {
       cases: {
         入力済み: rules(
           "明細を見る",
-          入力 => [guard(and(all(入力.明細, 行 => ge(行, 1)), ge(length(入力.明細), 1)), 却下)],
+          入力 => [guard(and(all(入力.明細, 行 => gte(行, 1)), gte(length(入力.明細), 1)), 却下)],
           受付,
         ),
       },
@@ -623,7 +623,7 @@ describe("a term from outside all read inside each", () => {
   const 上限を守る = behavior({
     name: "上限を守る",
     input: sum("状態", {
-      入力済み: object({ 上限: integer(), 明細: array(object({ 数量: integer() })) }),
+      入力済み: object({ 上限: int(), 明細: array(object({ 数量: int() })) }),
     }),
     result: sum("結果", { 受付: object({}), 超過: object({}) }),
     effects: sum("種類", {}),
@@ -633,7 +633,7 @@ describe("a term from outside all read inside each", () => {
       入力済み: rules(
         "上限で断る",
         注文 => [
-          guard(all(注文.明細, 行 => le(行.数量, 注文.上限)), () => ({
+          guard(all(注文.明細, 行 => lte(行.数量, 注文.上限)), () => ({
             result: { 結果: "超過" },
             effects: [],
           })),
@@ -651,7 +651,7 @@ describe("a term from outside all read inside each", () => {
 
   it("is described from the scope it was written in", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({ name: "上限", examples: examples(上限を守る, []), implementation: 上限で断る }),
+      spec({ name: "上限", examples: examples(上限を守る, []), implementation: 上限で断る }),
     );
 
     expect(
@@ -663,7 +663,7 @@ describe("a term from outside all read inside each", () => {
 
   it("draws the border between the element and the outer position", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({ name: "上限", examples: examples(上限を守る, []), implementation: 上限で断る }),
+      spec({ name: "上限", examples: examples(上限を守る, []), implementation: 上限で断る }),
     );
 
     expect(
@@ -672,8 +672,8 @@ describe("a term from outside all read inside each", () => {
   });
 
   it("is enforced in an invariant", () => {
-    const 注文 = object({ 上限: integer(), 明細: array(integer()) }).invariant(v =>
-      all(v.明細, 行 => le(行, v.上限)),
+    const 注文 = object({ 上限: int(), 明細: array(int()) }).invariant(v =>
+      all(v.明細, 行 => lte(行, v.上限)),
     );
 
     expect(注文.parse({ 上限: 1, 明細: [5] }).success).toBe(false);

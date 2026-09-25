@@ -1,12 +1,12 @@
 import {
   behavior,
   boolean,
-  defineSpecification,
+  spec,
   eq,
   example,
   examples,
-  ge,
-  integer,
+  gte,
+  int,
   object,
   sum,
 } from "../../src/index.js";
@@ -15,7 +15,7 @@ const 数量を確定する = behavior({
   name: "数量を確定する",
   input: sum("状態", {
     入力済み: object({
-      数量: integer().invariant(v => ge(v, 1)),
+      数量: int().invariant(v => gte(v, 1)),
       同意: boolean().invariant(v => eq(v, true)),
     }),
   }),
@@ -23,7 +23,7 @@ const 数量を確定する = behavior({
   effects: sum("種類", {}),
 });
 
-export const 数量確定 = defineSpecification({
+export const 数量確定 = spec({
   name: "数量確定",
   examples: examples(数量を確定する, [
     example(数量を確定する, "数量1", {

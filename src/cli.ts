@@ -10,7 +10,7 @@ import { isBehavior } from "./behavior.js";
 import type { AnyBehavior } from "./behavior.js";
 import { formatTypeScriptValue } from "./codegen.js";
 import {
-  defineSpecification,
+  spec,
   evaluateSpecification,
   examples,
   generationReport,
@@ -79,7 +79,7 @@ const generateCommand = defineCommand({
   run: async args => {
     const targets = await loadTargets(args.file);
     if (targets.some(target => target.synthesized)) {
-      console.log('import { defineSpecification, example, examples, unanswered } from "chisel";\n');
+      console.log('import { spec, example, examples, unanswered } from "chisel";\n');
     }
     for (const target of targets) {
       const { rows: generated, notComposed } = generationReport(
@@ -139,7 +139,7 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
     }
     targets.push({
       behaviorBinding: binding,
-      specification: defineSpecification({
+      specification: spec({
         name: definition.name,
         examples: examples(definition, []),
       }),
@@ -413,7 +413,7 @@ function formatGeneratedExamples(
   return [
     `export const ${binding}Examples = examples(${binding}, [\n${rows}]);`,
     "",
-    `export const ${binding}Specification = defineSpecification({`,
+    `export const ${binding}Specification = spec({`,
     `  name: ${JSON.stringify(target.specification.name)},`,
     `  examples: ${binding}Examples,`,
     "});",

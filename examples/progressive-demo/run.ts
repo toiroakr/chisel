@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  defineSpecification,
+  spec,
   evaluateSpecification,
   examples,
   formatTypeScriptValue,
@@ -18,7 +18,7 @@ import { 最初の回答 } from "./stage-02-first-answer.spec.js";
 import { 詳細化した仕様 } from "./stage-03-refined.spec.js";
 import { 完成した仕様 } from "./stage-04-complete.spec.js";
 
-const 段階1のスケッチ = defineSpecification({
+const 段階1のスケッチ = spec({
   name: "段階1: dataとbehaviorの宣言",
   examples: examples(段階1の振る舞い, []),
 });

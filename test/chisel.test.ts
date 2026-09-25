@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   behavior,
-  defineSpecification,
+  spec,
   evaluateSpecification,
   example,
   examples,
@@ -100,7 +100,7 @@ describe("chisel", () => {
         expect: unanswered("A human must decide repeated publication"),
       }),
     ]);
-    const specification = defineSpecification({ name: "publishing", examples: rows });
+    const specification = spec({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
 
@@ -144,7 +144,7 @@ describe("chisel", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,
@@ -200,7 +200,7 @@ describe("dependency issues", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,
@@ -244,7 +244,7 @@ describe("dependency issues", () => {
         },
       },
     });
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: examples(definition, []),
       implementation,
@@ -265,7 +265,7 @@ describe("dependency issues", () => {
       effects: Effect,
       dependsOn: ["mail"],
     });
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: examples(definition, []),
     });
@@ -291,7 +291,7 @@ describe("evaluateSpecification failure reporting", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,
@@ -325,7 +325,7 @@ describe("evaluateSpecification failure reporting", () => {
         },
       },
     });
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: examples(definition, []),
       implementation,
@@ -362,7 +362,7 @@ describe("evaluateSpecification failure reporting", () => {
       },
       controls: {},
     });
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: examples(definition, []),
       implementation,
@@ -400,7 +400,7 @@ describe("evaluateSpecification failure reporting", () => {
         notify: pending("制御方針が未確定です"),
       },
     });
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: examples(definition, []),
       implementation,
@@ -606,9 +606,9 @@ describe("isBehavior", () => {
 });
 
 describe("isSpecification", () => {
-  it("is true for a value built with defineSpecification()", () => {
+  it("is true for a value built with spec()", () => {
     const definition = publishingBehavior();
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: examples(definition, []),
     });
@@ -669,7 +669,7 @@ describe("evaluateSpecification example validation", () => {
         expect: { result: { type: "accepted", id: "a" }, effects: [] },
       }),
     ]);
-    const specification = defineSpecification({ name: "publishing", examples: rows });
+    const specification = spec({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
 
@@ -686,7 +686,7 @@ describe("evaluateSpecification example validation", () => {
         expect: { result: { type: "unknown-type" } as never, effects: [] },
       }),
     ]);
-    const specification = defineSpecification({ name: "publishing", examples: rows });
+    const specification = spec({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
 
@@ -732,7 +732,7 @@ describe("evaluateSpecification example validation", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,
@@ -783,7 +783,7 @@ describe("coverage-driven adequacy vetoes", () => {
         expect: { result: "already-published", effects: [] },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,
@@ -840,7 +840,7 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,
@@ -917,7 +917,7 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       }),
     ]);
-    const specification = defineSpecification({
+    const specification = spec({
       name: "publishing",
       examples: rows,
       implementation,

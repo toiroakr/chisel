@@ -7,15 +7,15 @@ import {
   boolean,
   eq,
   example,
-  ge,
+  gte,
   gt,
   guard,
   implement,
-  le,
+  lte,
   rules,
   examples,
   generateExamples,
-  integer,
+  int,
   length,
   number,
   object,
@@ -122,7 +122,7 @@ describe("generateExamples for border points", () => {
   const 数量を確定する = behavior({
     name: "数量を確定する",
     input: sum("状態", {
-      入力済み: object({ 数量: integer().invariant(v => ge(v, 1)) }),
+      入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
     }),
     result: object({}),
     effects: sum("種類", {}),
@@ -147,7 +147,7 @@ describe("generateExamples for border points", () => {
     const 登録する = behavior({
       name: "登録する",
       input: sum("状態", {
-        入力済み: object({ 商品ID: string("ID").invariant(v => ge(length(v), 4)) }),
+        入力済み: object({ 商品ID: string("ID").invariant(v => gte(length(v), 4)) }),
       }),
       result: object({}),
       effects: sum("種類", {}),
@@ -165,8 +165,8 @@ describe("generateExamples for border points", () => {
       input: sum("状態", {
         入力済み: object({
           割合: number()
-            .invariant(v => ge(v, 0))
-            .invariant(v => le(v, 0.5)),
+            .invariant(v => gte(v, 0))
+            .invariant(v => lte(v, 0.5)),
         }),
       }),
       result: object({}),
@@ -201,7 +201,7 @@ describe("generateExamples and excluded classes", () => {
     const 並べる = behavior({
       name: "並べる",
       input: sum("状態", {
-        入力済み: object({ 見出し: string("見出し").invariant(v => ge(v, "m")) }),
+        入力済み: object({ 見出し: string("見出し").invariant(v => gte(v, "m")) }),
       }),
       result: object({}),
       effects: sum("種類", {}),
@@ -218,7 +218,7 @@ describe("rows generate cannot make valid", () => {
   it("names a row whose composed value the input schema refuses instead of offering it", () => {
     const 数える = behavior({
       name: "数える",
-      input: sum("状態", { 入力済み: object({ 個数: integer().invariant(v => not(eq(v, 0))) }) }),
+      input: sum("状態", { 入力済み: object({ 個数: int().invariant(v => not(eq(v, 0))) }) }),
       result: object({}),
       effects: sum("種類", {}),
     });
@@ -265,7 +265,7 @@ describe("generateExamples below a length of zero", () => {
 describe("generateExamples for a guard on an array with no invariant", () => {
   const 明細を確かめる = behavior({
     name: "明細を確かめる",
-    input: sum("状態", { 入力済み: object({ 明細: array(integer()) }) }),
+    input: sum("状態", { 入力済み: object({ 明細: array(int()) }) }),
     result: sum("結果", { 受付: object({}), 空: object({}) }),
     effects: sum("種類", {}),
   });
@@ -298,7 +298,7 @@ describe("guard points generate cannot compose", () => {
   it("names each point it could not compose instead of leaving it out", () => {
     const 比べる = behavior({
       name: "比べる",
-      input: sum("状態", { 入力済み: object({ 数量: integer(), 上限: optional(integer()) }) }),
+      input: sum("状態", { 入力済み: object({ 数量: int(), 上限: optional(int()) }) }),
       result: sum("結果", { 受付: object({}), 却下: object({}) }),
       effects: sum("種類", {}),
     });
@@ -306,7 +306,7 @@ describe("guard points generate cannot compose", () => {
       cases: {
         入力済み: rules(
           "上限と比べる",
-          入力 => [guard(le(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
+          入力 => [guard(lte(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
           () => ({ result: { 結果: "受付" }, effects: [] }),
         ),
       },

@@ -1,6 +1,6 @@
 import {
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
   implement,
@@ -224,7 +224,7 @@ const 実装 = implement(予約をキャンセルする, {
   },
 });
 
-export const 完成した仕様 = defineSpecification({
+export const 完成した仕様 = spec({
   name: "段階4: exampleを満たすmodelを実装する",
   examples: 具体例,
   implementation: 実装,

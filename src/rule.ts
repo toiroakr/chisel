@@ -129,7 +129,7 @@ export function lt<T extends Comparable>(left: Operand<T>, right: Operand<T>): R
   return compare("<", left, right);
 }
 
-export function le<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
+export function lte<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
   return compare("<=", left, right);
 }
 
@@ -137,7 +137,7 @@ export function gt<T extends Comparable>(left: Operand<T>, right: Operand<T>): R
   return compare(">", left, right);
 }
 
-export function ge<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
+export function gte<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
   return compare(">=", left, right);
 }
 

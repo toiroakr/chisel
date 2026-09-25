@@ -1,6 +1,6 @@
 import {
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
   implement,
@@ -176,7 +176,7 @@ const cancellationExamples = examples(cancelOrder, [
   }),
 ]);
 
-export const orderCancellation = defineSpecification({
+export const orderCancellation = spec({
   name: "order cancellation",
   examples: cancellationExamples,
   implementation,

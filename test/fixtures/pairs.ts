@@ -1,4 +1,4 @@
-import { behavior, boolean, defineSpecification, example, examples, object, sum } from "../../src/index.js";
+import { behavior, boolean, spec, example, examples, object, sum } from "../../src/index.js";
 
 const 送る = behavior({
   name: "送る",
@@ -7,7 +7,7 @@ const 送る = behavior({
   effects: sum("種類", {}),
 });
 
-export const 送付 = defineSpecification({
+export const 送付 = spec({
   name: "送付",
   examples: examples(送る, [
     example(送る, "ギフトを速達で", {

@@ -4,7 +4,7 @@ import {
   array,
   behavior,
   boolean,
-  defineSpecification,
+  spec,
   dependency,
   eq,
   evaluateSpecification,
@@ -15,12 +15,12 @@ import {
   generationReport,
   guard,
   implement,
-  le,
+  lte,
   lt,
   match,
   rules,
   runImplementation,
-  integer,
+  int,
   instant,
   object,
   optional,
@@ -50,7 +50,7 @@ describe("a value dependency", () => {
   it("is stood in for by the value a row writes with with", async () => {
     const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "受付",
         examples: examples(受付する, [
           example(受付する, "今の時刻で受け付ける", {
@@ -68,7 +68,7 @@ describe("a value dependency", () => {
 
   it("reports a row that runs the model without standing in for a dependency it needs", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "受付",
         examples: examples(受付する, [
           example(受付する, "時刻を書き忘れた", {
@@ -90,7 +90,7 @@ describe("a value dependency", () => {
 
   it("says the row was not observed, and why", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "受付",
         examples: examples(受付する, [
           example(受付する, "時刻を書き忘れた", {
@@ -118,7 +118,7 @@ describe("a value dependency", () => {
 describe("a value a row writes for a dependency", () => {
   it("is held to what the dependency answers", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "受付",
         examples: examples(受付する, [
           example(受付する, "時刻を文字列で書いた", {
@@ -149,7 +149,7 @@ describe("a function dependency", () => {
     input: sum("状態", { 注文済み: object({ 商品ID: string("商品ID") }) }),
     result: object({ 在庫あり: boolean() }),
     effects: sum("種類", {}),
-    requires: { 在庫を照会する: dependency(string("商品ID"), integer()) },
+    requires: { 在庫を照会する: dependency(string("商品ID"), int()) },
   });
   const 照会して答える = implement(在庫を確かめる, {
     cases: {
@@ -171,7 +171,7 @@ describe("a function dependency", () => {
 
   it("is stood in for by a fake table matched on the input it is asked", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "在庫",
         examples: examples(在庫を確かめる, [商品で("商品-A", true), 商品で("商品-B", false)]),
         implementation: 照会して答える,
@@ -184,7 +184,7 @@ describe("a function dependency", () => {
 
   it("reports an input a fake table has no row and no default for", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "在庫",
         examples: examples(在庫を確かめる, [商品で("商品-C", false)]),
         implementation: 照会して答える,
@@ -199,7 +199,7 @@ describe("a function dependency", () => {
 
   it("answers an input no row states with the table's default", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "在庫",
         examples: examples(在庫を確かめる, [商品で("商品-C", false)]),
         implementation: 照会して答える,
@@ -210,10 +210,10 @@ describe("a function dependency", () => {
     expect(report.failures).toStrictEqual([]);
   });
 
-  const issuesOf = async (fakes: Parameters<typeof defineSpecification>[0]["fakes"]) =>
+  const issuesOf = async (fakes: Parameters<typeof spec>[0]["fakes"]) =>
     (
       await evaluateSpecification(
-        defineSpecification({
+        spec({
           name: "在庫",
           examples: examples(在庫を確かめる, []),
           implementation: 照会して答える,
@@ -276,9 +276,9 @@ describe("generated rows and dependencies", () => {
       input: sum("状態", {
         確定済み: object({ 配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }) }),
       }),
-      result: object({ 送料: integer() }),
+      result: object({ 送料: int() }),
       effects: sum("種類", {}),
-      requires: { 料金表: dependency(string("方法"), integer()) },
+      requires: { 料金表: dependency(string("方法"), int()) },
     });
     const 料金表で決める = implement(送料を決める, {
       cases: {
@@ -359,7 +359,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("is evaluated against the value a row writes with with", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "予約",
         examples: examples(予約する, [
           行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
@@ -375,7 +375,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("draws its border on the difference between the position and the dependency", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "予約",
         examples: examples(予約する, [
           行("ちょうど1ns後", 今.add({ nanoseconds: 1 }), "受付"),
@@ -406,7 +406,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("is a comparison Chisel reads", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "予約",
         examples: examples(予約する, []),
         implementation: 過去を断る,
@@ -438,11 +438,11 @@ describe("a value dependency read inside all", () => {
   const 注文する = behavior({
     name: "注文する",
     input: sum("状態", {
-      入力済み: object({ 明細: array(object({ 数量: integer() })) }),
+      入力済み: object({ 明細: array(object({ 数量: int() })) }),
     }),
     result: sum("結果", { 受付: object({}), 上限超過: object({}) }),
     effects: sum("種類", {}),
-    requires: { 上限: dependency(integer()) },
+    requires: { 上限: dependency(int()) },
   });
   const 上限で断る = implement(注文する, {
     cases: {
@@ -450,7 +450,7 @@ describe("a value dependency read inside all", () => {
         "上限で断る",
         (注文, 依存) => [
           guard(
-            all(注文.明細, (行) => le(行.数量, 依存.上限)),
+            all(注文.明細, (行) => lte(行.数量, 依存.上限)),
             () => ({
               result: { 結果: "上限超過" },
               effects: [],
@@ -474,7 +474,7 @@ describe("a value dependency read inside all", () => {
 
   it("is a comparison Chisel reads inside all", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "注文",
         examples: examples(注文する, []),
         implementation: 上限で断る,
@@ -489,7 +489,7 @@ describe("a dependency declared as another behavior", () => {
   const 在庫を照会する = behavior({
     name: "在庫を照会する",
     input: sum("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
-    result: object({ 商品ID: string("商品ID"), 在庫数: integer() }),
+    result: object({ 商品ID: string("商品ID"), 在庫数: int() }),
     effects: sum("種類", {}),
     ensures: clause => [
       clause.always("照会した商品を答える", (問い, 答え) => eq(答え.商品ID, 問い.商品ID)),
@@ -523,7 +523,7 @@ describe("a dependency declared as another behavior", () => {
 
   async function reportWith(rows: Parameters<typeof fake<typeof 注文する, "在庫">>[2]) {
     return evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "注文",
         examples: examples(注文する, [
           example(注文する, "商品-A", {

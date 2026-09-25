@@ -313,7 +313,7 @@ export function examples<
   return { kind: "example-set", behavior, rows };
 }
 
-export function defineSpecification<B extends AnyBehavior>(options: {
+export function spec<B extends AnyBehavior>(options: {
   readonly name: string;
   readonly examples: ExampleSet<B>;
   readonly implementation?: Implementation<B>;

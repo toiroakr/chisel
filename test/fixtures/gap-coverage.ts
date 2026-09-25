@@ -1,6 +1,6 @@
 import {
   behavior,
-  defineSpecification,
+  spec,
   example,
   examples,
   implement,
@@ -58,7 +58,7 @@ const implementation = implement(definition, {
   },
 });
 
-export const inlineSpec = defineSpecification({
+export const inlineSpec = spec({
   name: "inline check",
   examples: examples(definition, [
     example(definition, "ready", {

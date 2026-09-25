@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   behavior,
   compose,
-  defineSpecification,
+  spec,
   evaluateSpecification,
   example,
   examples,
   generateExamples,
   implement,
   implementComposition,
-  integer,
+  int,
   object,
   rules,
   guard,
-  ge,
+  gte,
   runImplementation,
   SpecificationError,
   string,
@@ -23,9 +23,9 @@ import {
 
 const 検証する = behavior({
   name: "検証する",
-  input: sum("状態", { 申込: object({ 数量: integer() }) }),
+  input: sum("状態", { 申込: object({ 数量: int() }) }),
   result: sum("結果", {
-    有効: object({ 数量: integer() }),
+    有効: object({ 数量: int() }),
     無効: object({ 理由: string("理由") }),
   }),
   effects: sum("種類", {}),
@@ -33,9 +33,9 @@ const 検証する = behavior({
 
 const 価格を付ける = behavior({
   name: "価格を付ける",
-  input: sum("結果", { 有効: object({ 数量: integer() }) }),
-  result: sum("結果", { 見積: object({ 金額: integer() }) }),
-  effects: sum("種類", { 通知: object({ 金額: integer() }) }),
+  input: sum("結果", { 有効: object({ 数量: int() }) }),
+  result: sum("結果", { 見積: object({ 金額: int() }) }),
+  effects: sum("種類", { 通知: object({ 金額: int() }) }),
 });
 
 const 見積もる = compose(検証する, 価格を付ける);
@@ -44,7 +44,7 @@ const 数量を確かめる = implement(検証する, {
   cases: {
     申込: rules(
       "数量を確かめる",
-      申込 => [guard(ge(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] }))],
+      申込 => [guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] }))],
       申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
     ),
   },
@@ -99,7 +99,7 @@ describe("compose", () => {
   it("refuses a case that would be both departed and answered by the second stage", () => {
     const 無効も返す = behavior({
       name: "無効も返す",
-      input: sum("結果", { 有効: object({ 数量: integer() }) }),
+      input: sum("結果", { 有効: object({ 数量: int() }) }),
       result: sum("結果", { 無効: object({ 理由: string("理由") }) }),
       effects: sum("種類", {}),
     });
@@ -131,7 +131,7 @@ describe("running a composition", () => {
     const 無効を受ける = behavior({
       name: "無効を受ける",
       input: sum("結果", {
-        見積: object({ 金額: integer() }),
+        見積: object({ 金額: int() }),
         無効: object({ 理由: string("理由") }),
       }),
       result: sum("結果", { 完了: object({}) }),
@@ -172,7 +172,7 @@ describe("the adequacy of a composition", () => {
 
   it("is measured over the composition's own cases, including one that departed early", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({ name: "見積", examples: examples(見積もる, 行), implementation: 見積もり }),
+      spec({ name: "見積", examples: examples(見積もる, 行), implementation: 見積もり }),
     );
 
     expect({
@@ -200,7 +200,7 @@ describe("the adequacy of a composition", () => {
 describe("a composition row whose answer is owed", () => {
   it("still runs the composition, so the case it reached is executed", async () => {
     const report = await evaluateSpecification(
-      defineSpecification({
+      spec({
         name: "見積",
         examples: examples(見積もる, [
           example(見積もる, "3個", { given: { 状態: "申込", 数量: 3 }, expect: unanswered("未定") }),
