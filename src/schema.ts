@@ -19,19 +19,34 @@ export interface Schema<T> {
   refine(rule: InvariantRule<T>): this;
 }
 
+// Shorthands for the bounds a rule most often states; each one desugars to the
+// same rule refine() would take, so the analysis reads them alike.
+interface ValueBounds {
+  min(bound: number): this;
+  max(bound: number): this;
+  gt(bound: number): this;
+  lt(bound: number): this;
+}
+
+interface LengthBounds {
+  min(length: number): this;
+  max(length: number): this;
+  length(length: number): this;
+}
+
 export type AnySchema = Schema<unknown>;
 export type Infer<S> = S extends Schema<infer T> ? T : never;
 
-export interface StringSchema extends Schema<string> {
+export interface StringSchema extends Schema<string>, LengthBounds {
   readonly kind: "string";
   readonly name: string;
 }
 
-export interface NumberSchema extends Schema<number> {
+export interface NumberSchema extends Schema<number>, ValueBounds {
   readonly kind: "number";
 }
 
-export interface IntSchema extends Schema<number> {
+export interface IntSchema extends Schema<number>, ValueBounds {
   readonly kind: "integer";
 }
 
@@ -49,7 +64,7 @@ export interface LiteralSchema<T extends string | number | boolean | null>
   readonly value: T;
 }
 
-export interface ArraySchema<T> extends Schema<readonly T[]> {
+export interface ArraySchema<T> extends Schema<readonly T[]>, LengthBounds {
   readonly kind: "array";
   readonly element: Schema<T>;
 }
@@ -59,7 +74,7 @@ export interface OptionalSchema<T> extends Schema<T | undefined> {
   readonly schema: Schema<T>;
 }
 
-export interface RecordSchema<T> extends Schema<Readonly<Record<string, T>>> {
+export interface RecordSchema<T> extends Schema<Readonly<Record<string, T>>>, LengthBounds {
   readonly kind: "record";
   readonly value: Schema<T>;
 }
@@ -139,10 +154,10 @@ function invalid(path: string, message: string): ValidationResult<never> {
   return { success: false, issues: [{ path, message }] };
 }
 
-type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "refine">;
+type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "refine" | "min" | "max" | "gt" | "lt" | "length">;
 
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
-  return {
+  const schema = {
     ...core,
     invariants,
     parse(value: unknown, path = "$") {
@@ -163,7 +178,24 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
     },
-  } as unknown as S;
+  };
+  const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
+  if (core.kind === "number" || core.kind === "integer") {
+    Object.assign(schema, {
+      min: (bound: number) => refine(v => v.gte(bound)),
+      max: (bound: number) => refine(v => v.lte(bound)),
+      gt: (bound: number) => refine(v => v.gt(bound)),
+      lt: (bound: number) => refine(v => v.lt(bound)),
+    });
+  }
+  if (core.kind === "string" || core.kind === "array" || core.kind === "record") {
+    Object.assign(schema, {
+      min: (length: number) => refine(v => v.length().gte(length)),
+      max: (length: number) => refine(v => v.length().lte(length)),
+      length: (length: number) => refine(v => v.length().eq(length)),
+    });
+  }
+  return schema as unknown as S;
 }
 
 export function string(name = "string"): StringSchema {

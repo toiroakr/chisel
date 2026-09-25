@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
+import type { AnySchema } from "../src/index.js";
 import {
   array,
+  behavior,
+  check,
+  examples,
   instant,
   int,
   object,
+  number,
   optional,
+  record,
+  spec,
   string,
+  variants,
 } from "../src/index.js";
 
 describe("terms", () => {
@@ -165,5 +173,61 @@ describe("placeholder under a combined invariant", () => {
     const 期間 = object({ 開始: instant(), 終了: instant() }).refine(v => v.$開始.lt(v.$終了));
 
     expect(期間.parse(期間.placeholder()).success).toBe(true);
+  });
+});
+
+describe("bound shorthands", () => {
+  const bordersOf = async (値: AnySchema) => {
+    const 測る = behavior("測る", {
+      input: variants("状態", { 入力済み: object({ 値 }) }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("測る", { examples: examples(測る, {}) }));
+    return report.borders.map(border => ({ rule: border.rule, points: border.points.map(point => point.relation) }));
+  };
+
+  it("draws the border of gte from min on a number", async () => {
+    expect(await bordersOf(int().min(1))).toStrictEqual(await bordersOf(int().refine(v => v.gte(1))));
+  });
+
+  it("draws the border of lte from max on a number", async () => {
+    expect(await bordersOf(int().max(9))).toStrictEqual(await bordersOf(int().refine(v => v.lte(9))));
+  });
+
+  it("draws the border of gt from gt on a number", async () => {
+    expect(await bordersOf(number().gt(0))).toStrictEqual(await bordersOf(number().refine(v => v.gt(0))));
+  });
+
+  it("draws the border of lt from lt on a number", async () => {
+    expect(await bordersOf(int().lt(10))).toStrictEqual(await bordersOf(int().refine(v => v.lt(10))));
+  });
+
+  it("draws a length border from min on an array", async () => {
+    expect(await bordersOf(array(int()).min(1))).toStrictEqual(
+      await bordersOf(array(int()).refine(v => v.length().gte(1))),
+    );
+  });
+
+  it("draws a length border from max on a string", async () => {
+    expect(await bordersOf(string().max(8))).toStrictEqual(
+      await bordersOf(string().refine(v => v.length().lte(8))),
+    );
+  });
+
+  it("draws an exact length border from length on a record", async () => {
+    expect(await bordersOf(record(int()).length(2))).toStrictEqual(
+      await bordersOf(record(int()).refine(v => v.length().eq(2))),
+    );
+  });
+
+  it("holds every shorthand of a chain", () => {
+    const 範囲 = int().min(1).max(9);
+
+    expect([範囲.parse(0).success, 範囲.parse(5).success, 範囲.parse(10).success]).toStrictEqual([
+      false,
+      true,
+      false,
+    ]);
   });
 });
