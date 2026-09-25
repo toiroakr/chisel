@@ -352,6 +352,18 @@ describe("compose", () => {
       );
     });
 
+    it("refuses a number literal the number parser does not take, such as Infinity", () => {
+      expect(() => compose("無限大", 段(literal(Infinity), number()))).toThrow(
+        new SpecificationError("返す answers @有効.値 as literal Infinity, which 受け取る takes as number"),
+      );
+    });
+
+    it("refuses an integer literal beyond the safe integers the integer parser takes", () => {
+      expect(() => compose("大きすぎる整数", 段(literal(2 ** 53), int()))).toThrow(
+        new SpecificationError("返す answers @有効.値 as literal 9007199254740992, which 受け取る takes as integer"),
+      );
+    });
+
     it("leaves invariants to run time", () => {
       expect(() => compose("範囲は実行時", 段(int(), int().invariant(v => gte(v, 1))))).not.toThrow();
     });
@@ -372,6 +384,23 @@ describe("compose", () => {
     expect(() =>
       compose("判別キー違いの合成", [external(方法で返す, "別のチーム"), external(種別で受け取る, "別のチーム")]),
     ).toThrow(new SpecificationError("方法で返す answers @有効.支払.方法, which 種別で受け取る does not declare"));
+  });
+
+  it("compares the tag that flows with a discriminant the second stage's case declares for itself", () => {
+    const 返す = behavior("状態を宣言せず返す", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", { 有効: object({ 番号: int() }) }),
+      effects: variants("種類", {}),
+    });
+    const 受け取る = behavior("別の状態で受け取る", {
+      input: variants("結果", { 有効: object({ 結果: literal("無効"), 番号: int() }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() => compose("状態違い", [external(返す, "別のチーム"), external(受け取る, "別のチーム")])).toThrow(
+      new SpecificationError('状態を宣言せず返す answers @有効.結果 as literal "有効", which 別の状態で受け取る takes as literal "無効"'),
+    );
   });
 
   it("still refuses a nested field that only shares its name with the discriminant", () => {

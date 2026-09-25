@@ -141,7 +141,7 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
       firstResult.variants[tag]!,
       second.input.variants[tag]!,
       `@${tag}`,
-      firstResult.discriminant,
+      { discriminant: firstResult.discriminant, tag },
     );
     if (mismatch !== undefined) {
       throw new SpecificationError(
@@ -195,36 +195,24 @@ function incompatible(path: string, answered: string, taken: string): Mismatch {
 
 function takes(answered: AnySchema, taken: AnySchema): boolean {
   if (answered.kind === "literal") {
-    const value = (answered as LiteralSchema<string | number | boolean | null>).value;
-    switch (taken.kind) {
-      case "literal":
-        return (taken as LiteralSchema<string | number | boolean | null>).value === value;
-      case "string":
-        return typeof value === "string";
-      case "number":
-        return typeof value === "number";
-      case "integer":
-        return Number.isInteger(value);
-      case "boolean":
-        return typeof value === "boolean";
-      default:
-        return false;
-    }
+    return taken.parse((answered as LiteralSchema<string | number | boolean | null>).value).success;
   }
   return answered.kind === taken.kind || (answered.kind === "integer" && taken.kind === "number");
 }
 
 function kindOf(schema: AnySchema): string {
-  return schema.kind === "literal"
-    ? `literal ${JSON.stringify((schema as LiteralSchema<string | number | boolean | null>).value)}`
-    : schema.kind;
+  if (schema.kind !== "literal") {
+    return schema.kind;
+  }
+  const value = (schema as LiteralSchema<string | number | boolean | null>).value;
+  return `literal ${typeof value === "string" ? JSON.stringify(value) : String(value)}`;
 }
 
 function mismatchOf(
   answered: AnySchema,
   taken: AnySchema,
   path: string,
-  discriminant?: string,
+  enclosing?: { readonly discriminant: string; readonly tag: string },
 ): Mismatch | undefined {
   if (answered.kind === "optional") {
     const held = (answered as OptionalSchema<unknown>).schema as AnySchema;
@@ -242,14 +230,18 @@ function mismatchOf(
       firstFound(Object.entries(answeredShape), ([key, field]) =>
         Object.hasOwn(takenShape, key)
           ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
-          : key === discriminant
+          : key === enclosing?.discriminant
             ? undefined
             : undeclared(`${path}.${key}`),
       ) ??
       firstFound(Object.entries(takenShape), ([key, field]) =>
-        field.kind === "optional" || key === discriminant || Object.hasOwn(answeredShape, key)
+        Object.hasOwn(answeredShape, key)
           ? undefined
-          : missing(`${path}.${key}`),
+          : key === enclosing?.discriminant
+            ? mismatchOf(literal(enclosing.tag), field, `${path}.${key}`)
+            : field.kind === "optional"
+              ? undefined
+              : missing(`${path}.${key}`),
       )
     );
   }
@@ -290,22 +282,15 @@ function mismatchOf(
       );
     }
     return taken.variantTags.includes(tag)
-      ? mismatchOf(answered, taken.variants[tag], path, taken.discriminant)
+      ? mismatchOf(answered, taken.variants[tag], path, { discriminant: taken.discriminant, tag })
       : undeclared(`${path}@${tag}`);
   }
   if (isVariantsSchema(answered) && taken.kind === "object") {
-    const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
-    const takenDiscriminant = Object.hasOwn(takenShape, answered.discriminant)
-      ? takenShape[answered.discriminant]
-      : undefined;
-    return takenDiscriminant === undefined
-      ? undeclared(`${path}.${answered.discriminant}`)
-      : firstFound(
-          answered.variantTags,
-          tag =>
-            mismatchOf(literal(tag), takenDiscriminant, `${path}@${tag}.${answered.discriminant}`) ??
-            mismatchOf(answered.variants[tag], taken, `${path}@${tag}`, answered.discriminant),
-        );
+    return Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)
+      ? firstFound(answered.variantTags, tag =>
+          mismatchOf(answered.variants[tag], taken, `${path}@${tag}`, { discriminant: answered.discriminant, tag }),
+        )
+      : undeclared(`${path}.${answered.discriminant}`);
   }
   if (isVariantsSchema(answered) && taken.kind === "record") {
     const value = (taken as RecordSchema<unknown>).value as AnySchema;
@@ -322,7 +307,10 @@ function mismatchOf(
     }
     return firstFound(answered.variantTags, tag =>
       taken.variantTags.includes(tag)
-        ? mismatchOf(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, answered.discriminant)
+        ? mismatchOf(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, {
+            discriminant: answered.discriminant,
+            tag,
+          })
         : undeclared(`${path}@${tag}`),
     );
   }
