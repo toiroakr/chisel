@@ -40,7 +40,6 @@ export interface Todo {
 export interface Decision<Input, Result, Effect, Deps = unknown> {
   readonly kind: "decision";
   readonly id: string;
-  readonly dependsOn?: readonly string[];
   run(input: Input, deps: Deps): Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
 }
 
@@ -67,7 +66,6 @@ export type Otherwise<Input, Result, Effect, Deps = unknown> =
 export interface RulesDecision<Input, Result, Effect, Deps = unknown> {
   readonly kind: "rules";
   readonly id: string;
-  readonly dependsOn?: readonly string[];
   readonly guards: readonly Guard<Input, Result, Effect, Deps>[];
   readonly otherwise: Otherwise<Input, Result, Effect, Deps>;
 }
@@ -114,7 +112,6 @@ export interface Behavior<
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
-  readonly dependsOn: readonly string[];
   readonly requires: Requires;
   readonly ensures: readonly EnsuresClause[];
 }
@@ -201,7 +198,6 @@ export function action<Input, Result, Effect, Deps = unknown>(
       deps: TermOf<ValueDepsOf<NoInfer<Deps>>>,
     ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>[];
     readonly run: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>;
-    readonly dependsOn?: readonly string[];
   },
 ): RulesDecision<Input, Result, Effect, Deps> {
   return {
@@ -210,7 +206,6 @@ export function action<Input, Result, Effect, Deps = unknown>(
     guards:
       body.guards?.(selfTerm<NoInfer<Input>>(), depsTerm<ValueDepsOf<NoInfer<Deps>>>()) ?? [],
     otherwise: body.run,
-    ...(body.dependsOn === undefined ? {} : { dependsOn: body.dependsOn }),
   };
 }
 
@@ -235,7 +230,6 @@ export function behavior<
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
-  readonly dependsOn?: readonly string[];
   readonly requires?: Requires;
   readonly ensures?: (
     clause: EnsuresBuilder<Infer<InputSchema>, ResultSchema>,
@@ -262,7 +256,6 @@ export function behavior<
     input: options.input,
     result: options.result,
     effects: options.effects,
-    dependsOn: options.dependsOn ?? [],
     requires: options.requires ?? ({} as Requires),
     ensures: clauses,
   };

@@ -32,7 +32,6 @@ function inlineBehavior() {
     input: Input,
     result: Result,
     effects: Effect,
-    dependsOn: ["mail"],
   });
 }
 

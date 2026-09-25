@@ -30,5 +30,4 @@ export const 予約をキャンセルする = c.behavior("予約をキャンセ�
   input: 予約,
   result: キャンセル結果,
   effects: キャンセル作用,
-  dependsOn: ["返金", "部屋を解放"],
 });

@@ -187,10 +187,6 @@ function formatReport(report: AdequacyReport): string {
   for (const gap of report.controlGaps) {
     lines.push(`  ! 制御未決定: ${gap.effect} — ${gap.reason}`);
   }
-  for (const issue of report.dependencyIssues) {
-    const scope = issue.variant === undefined ? "behavior" : issue.variant;
-    lines.push(`  ! 依存関係の誤り (${scope}): ${issue.reason}`);
-  }
   for (const item of report.incompleteness) {
     if (!report.failures.some(failure => failure.name === item.subject)) {
       lines.push(`  ! 実行できなかった行: ${item.subject} — ${item.reason}`);

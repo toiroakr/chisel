@@ -38,7 +38,6 @@ function publishingBehavior() {
     input: Input,
     result: Result,
     effects: Effect,
-    dependsOn: ["notify"],
   });
 }
 
@@ -154,119 +153,39 @@ describe("chisel", () => {
     );
 
     expect(report.adequate).toBe(true);
-    expect(report.dependencyIssues).toStrictEqual([]);
     expect(failures).toStrictEqual([]);
   });
 });
 
-describe("behavior.dependsOn defaults", () => {
-  it("defaults dependsOn to an empty array when omitted", () => {
-    const definition = behavior("no-deps", {
+describe("effects as the only vocabulary of side effects", () => {
+  it("does not accept a dependsOn list on a behavior", () => {
+    behavior("publish", {
       input: Input,
       result: Result,
       effects: Effect,
+      // @ts-expect-error effects already name every effect a behavior may emit
+      dependsOn: ["notify"],
     });
-
-    expect(definition.dependsOn).toStrictEqual([]);
-  });
-});
-
-describe("dependency issues", () => {
-  it("reports an unknown effect named in the behavior's dependsOn", async () => {
-    const definition = behavior("publish", {
-      input: Input,
-      result: Result,
-      effects: Effect,
-      dependsOn: ["mail"],
-    });
-    const implementation = publishingImplementation(definition);
-    const rows = examples(definition, {
-      "publish draft": {
-        given: { state: "draft", id: "a" },
-        expect: {
-          result: { type: "accepted", id: "a" },
-          effects: [{ type: "notify", id: "a" }],
-        },
-      },
-      "reject published": {
-        given: { state: "published", id: "b" },
-        expect: {
-          result: { type: "rejected", reason: "already-published" },
-          effects: [],
-        },
-      },
-    });
-    const specification = spec("publishing", {
-      examples: rows,
-      implementation,
-    });
-
-    const report = await check(specification);
-
-    expect(report.dependencyIssues).toStrictEqual([
-      { variant: undefined, reason: "未知の作用'mail'に依存すると宣言されています" },
-    ]);
-    expect(report.adequate).toBe(false);
   });
 
-  it("reports an unknown effect named in a decision's dependsOn", async () => {
+  it("does not accept a dependsOn list on an action", () => {
+    action("publish-draft", {
+      // @ts-expect-error effects already name every effect a behavior may emit
+      dependsOn: ["notify"],
+      run: () => ({ result: { type: "rejected", reason: "never" }, effects: [] }),
+    });
+  });
+
+  it("leaves dependency issues out of the report", async () => {
     const definition = publishingBehavior();
-    const implementation = implement(definition, {
-      cases: {
-        draft: {
-          kind: "decision",
-          id: "publish-draft",
-          dependsOn: ["mail"],
-          run: input => ({
-            result: { type: "accepted", id: input.id },
-            effects: [{ type: "notify", id: input.id }],
-          }),
-        },
-        published: {
-          kind: "decision",
-          id: "reject-published",
-          run: () => ({
-            result: { type: "rejected", reason: "already-published" },
-            effects: [],
-          }),
-        },
-      },
-      controls: {
-        notify: {
-          execution: "queue",
-          idempotency: "required",
-          compensation: "none",
-        },
-      },
-    });
-    const specification = spec("publishing", {
-      examples: examples(definition, {}),
-      implementation,
-    });
+    const report = await check(
+      spec("publishing", {
+        examples: examples(definition, {}),
+        implementation: publishingImplementation(definition),
+      }),
+    );
 
-    const report = await check(specification);
-
-    expect(report.dependencyIssues).toStrictEqual([
-      { variant: "draft", reason: "未知の作用'mail'に依存すると宣言されています" },
-    ]);
-  });
-
-  it("reports an unknown behavior-level dependency even without an implementation", async () => {
-    const definition = behavior("publish", {
-      input: Input,
-      result: Result,
-      effects: Effect,
-      dependsOn: ["mail"],
-    });
-    const specification = spec("publishing", {
-      examples: examples(definition, {}),
-    });
-
-    const report = await check(specification);
-
-    expect(report.dependencyIssues).toStrictEqual([
-      { variant: undefined, reason: "未知の作用'mail'に依存すると宣言されています" },
-    ]);
+    expect("dependencyIssues" in report).toBe(false);
   });
 });
 

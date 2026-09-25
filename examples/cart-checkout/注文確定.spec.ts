@@ -36,7 +36,6 @@ export const 注文を確定する = c.behavior("注文を確定する", {
   input: カート,
   result: 確定結果,
   effects: 確定作用,
-  dependsOn: ["在庫引当", "決済要求", "クーポン消費"],
 });
 
 const 具体例 = c.examples(注文を確定する, {
