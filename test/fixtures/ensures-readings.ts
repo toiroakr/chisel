@@ -1,7 +1,6 @@
 import { behavior, eq, gte, int, object, string, variants } from "../../src/index.js";
 
-export const 見積もる = behavior({
-  name: "見積もる",
+export const 見積もる = behavior("見積もる", {
   input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string("商品ID") }) }),
   result: variants("結果", {
     見積: object({ 数量: int(), 商品ID: string("商品ID") }),

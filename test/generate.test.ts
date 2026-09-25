@@ -31,8 +31,7 @@ const Cart = variants("状態", {
   }),
 });
 
-const 注文を確定する = behavior({
-  name: "注文を確定する",
+const 注文を確定する = behavior("注文を確定する", {
   input: Cart,
   result: object({}),
   effects: variants("種類", {}),
@@ -79,8 +78,7 @@ describe("generateExamples for classes", () => {
   });
 
   it("moves a sum field into the case a position stands under", () => {
-    const 配送する = behavior({
-      name: "配送する",
+    const 配送する = behavior("配送する", {
       input: variants("状態", {
         確定済み: object({
           配送: variants("方法", {
@@ -101,8 +99,7 @@ describe("generateExamples for classes", () => {
   });
 
   it("writes an element into an array so a class of its elements can be stood in", () => {
-    const 計算する = behavior({
-      name: "計算する",
+    const 計算する = behavior("計算する", {
       input: variants("状態", {
         商品あり: object({ 明細: array(object({ 軽減税率: boolean() })) }),
       }),
@@ -118,8 +115,7 @@ describe("generateExamples for classes", () => {
 });
 
 describe("generateExamples for border points", () => {
-  const 数量を確定する = behavior({
-    name: "数量を確定する",
+  const 数量を確定する = behavior("数量を確定する", {
     input: variants("状態", {
       入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
     }),
@@ -143,8 +139,7 @@ describe("generateExamples for border points", () => {
   });
 
   it("writes a value of the length a point on a length border asks for", () => {
-    const 登録する = behavior({
-      name: "登録する",
+    const 登録する = behavior("登録する", {
       input: variants("状態", {
         入力済み: object({ 商品ID: string("ID").invariant(v => gte(length(v), 4)) }),
       }),
@@ -159,8 +154,7 @@ describe("generateExamples for border points", () => {
   });
 
   it("finds a value inside both bounds of a number", () => {
-    const 割合を決める = behavior({
-      name: "割合を決める",
+    const 割合を決める = behavior("割合を決める", {
       input: variants("状態", {
         入力済み: object({
           割合: number()
@@ -182,8 +176,7 @@ describe("generateExamples for border points", () => {
 
 describe("generateExamples and excluded classes", () => {
   it("offers no row for a class the rules refuse", () => {
-    const 同意する = behavior({
-      name: "同意する",
+    const 同意する = behavior("同意する", {
       input: variants("状態", {
         入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
       }),
@@ -197,8 +190,7 @@ describe("generateExamples and excluded classes", () => {
   });
 
   it("offers rows on both sides of a border on a string value, which has no step", () => {
-    const 並べる = behavior({
-      name: "並べる",
+    const 並べる = behavior("並べる", {
       input: variants("状態", {
         入力済み: object({ 見出し: string("見出し").invariant(v => gte(v, "m")) }),
       }),
@@ -215,8 +207,7 @@ describe("generateExamples and excluded classes", () => {
 
 describe("rows generate cannot make valid", () => {
   it("names a row whose composed value the input schema refuses instead of offering it", () => {
-    const 数える = behavior({
-      name: "数える",
+    const 数える = behavior("数える", {
       input: variants("状態", { 入力済み: object({ 個数: int().invariant(v => not(eq(v, 0))) }) }),
       result: object({}),
       effects: variants("種類", {}),
@@ -230,8 +221,7 @@ describe("rows generate cannot make valid", () => {
 });
 
 describe("generateExamples below a length of zero", () => {
-  const 見出しを確かめる = behavior({
-    name: "見出しを確かめる",
+  const 見出しを確かめる = behavior("見出しを確かめる", {
     input: variants("状態", { 入力済み: object({ 見出し: string("見出し") }) }),
     result: variants("結果", { 受付: object({}), 空: object({}) }),
     effects: variants("種類", {}),
@@ -261,8 +251,7 @@ describe("generateExamples below a length of zero", () => {
 });
 
 describe("generateExamples for a guard on an array with no invariant", () => {
-  const 明細を確かめる = behavior({
-    name: "明細を確かめる",
+  const 明細を確かめる = behavior("明細を確かめる", {
     input: variants("状態", { 入力済み: object({ 明細: array(int()) }) }),
     result: variants("結果", { 受付: object({}), 空: object({}) }),
     effects: variants("種類", {}),
@@ -293,8 +282,7 @@ describe("generateExamples for a guard on an array with no invariant", () => {
 
 describe("guard points generate cannot compose", () => {
   it("names each point it could not compose instead of leaving it out", () => {
-    const 比べる = behavior({
-      name: "比べる",
+    const 比べる = behavior("比べる", {
       input: variants("状態", { 入力済み: object({ 数量: int(), 上限: optional(int()) }) }),
       result: variants("結果", { 受付: object({}), 却下: object({}) }),
       effects: variants("種類", {}),

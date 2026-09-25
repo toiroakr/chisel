@@ -27,8 +27,7 @@ import {
   variants,
 } from "../src/index.js";
 
-const 受付する = behavior({
-  name: "受付する",
+const 受付する = behavior("受付する", {
   input: variants("状態", { 申込済み: object({ 申込ID: string("申込ID") }) }),
   result: object({ 受付日時: instant() }),
   effects: variants("種類", {}),
@@ -49,8 +48,7 @@ describe("a value dependency", () => {
   it("is stood in for by the value a row writes with with", async () => {
     const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受付する, {
           "今の時刻で受け付ける": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
@@ -67,8 +65,7 @@ describe("a value dependency", () => {
 
   it("reports a row that runs the model without standing in for a dependency it needs", async () => {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受付する, {
           "時刻を書き忘れた": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
@@ -89,8 +86,7 @@ describe("a value dependency", () => {
 
   it("says the row was not observed, and why", async () => {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受付する, {
           "時刻を書き忘れた": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
@@ -117,8 +113,7 @@ describe("a value dependency", () => {
 describe("a value a row writes for a dependency", () => {
   it("is held to what the dependency answers", async () => {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受付する, {
           "時刻を文字列で書いた": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
@@ -143,8 +138,7 @@ describe("a value a row writes for a dependency", () => {
 });
 
 describe("a function dependency", () => {
-  const 在庫を確かめる = behavior({
-    name: "在庫を確かめる",
+  const 在庫を確かめる = behavior("在庫を確かめる", {
     input: variants("状態", { 注文済み: object({ 商品ID: string("商品ID") }) }),
     result: object({ 在庫あり: boolean() }),
     effects: variants("種類", {}),
@@ -170,8 +164,7 @@ describe("a function dependency", () => {
 
   it("is stood in for by a fake table matched on the input it is asked", async () => {
     const report = await check(
-      spec({
-        name: "在庫",
+      spec("在庫", {
         examples: examples(在庫を確かめる, { ...商品で("商品-A", true), ...商品で("商品-B", false) }),
         implementation: 照会して答える,
         fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10], ["商品-B", 0]])],
@@ -183,8 +176,7 @@ describe("a function dependency", () => {
 
   it("reports an input a fake table has no row and no default for", async () => {
     const report = await check(
-      spec({
-        name: "在庫",
+      spec("在庫", {
         examples: examples(在庫を確かめる, { ...商品で("商品-C", false) }),
         implementation: 照会して答える,
         fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10]])],
@@ -198,8 +190,7 @@ describe("a function dependency", () => {
 
   it("answers an input no row states with the table's default", async () => {
     const report = await check(
-      spec({
-        name: "在庫",
+      spec("在庫", {
         examples: examples(在庫を確かめる, { ...商品で("商品-C", false) }),
         implementation: 照会して答える,
         fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10]], { otherwise: 0 })],
@@ -209,11 +200,10 @@ describe("a function dependency", () => {
     expect(report.failures).toStrictEqual([]);
   });
 
-  const issuesOf = async (fakes: Parameters<typeof spec>[0]["fakes"]) =>
+  const issuesOf = async (fakes: Parameters<typeof spec>[1]["fakes"]) =>
     (
       await check(
-        spec({
-          name: "在庫",
+        spec("在庫", {
           examples: examples(在庫を確かめる, {}),
           implementation: 照会して答える,
           ...(fakes === undefined ? {} : { fakes }),
@@ -247,8 +237,7 @@ describe("a function dependency", () => {
 
 describe("generated rows and dependencies", () => {
   it("carries the values the answered row it was composed from stands in with", () => {
-    const 受付する2 = behavior({
-      name: "受付する2",
+    const 受付する2 = behavior("受付する2", {
       input: variants("状態", { 申込済み: object({ 紹介コード: optional(string("紹介コード")) }) }),
       result: object({ 受付日時: instant() }),
       effects: variants("種類", {}),
@@ -270,8 +259,7 @@ describe("generated rows and dependencies", () => {
   });
 
   it("follows the way of a row whose handler needs a stand-in generate does not have", () => {
-    const 送料を決める = behavior({
-      name: "送料を決める",
+    const 送料を決める = behavior("送料を決める", {
       input: variants("状態", {
         確定済み: object({ 配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }) }),
       }),
@@ -304,8 +292,7 @@ describe("generated rows and dependencies", () => {
 });
 
 describe("a value dependency read in a guard condition", () => {
-  const 予約する = behavior({
-    name: "予約する",
+  const 予約する = behavior("予約する", {
     input: variants("状態", { 申込済み: object({ 希望日時: instant() }) }),
     result: variants("結果", { 受付: object({}), 過去: object({}) }),
     effects: variants("種類", {}),
@@ -355,8 +342,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("is evaluated against the value a row writes with with", async () => {
     const report = await check(
-      spec({
-        name: "予約",
+      spec("予約", {
         examples: examples(予約する, {
           ...行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
           ...行("昨日", Temporal.Instant.from("2026-09-30T09:00:00Z"), "過去"),
@@ -371,8 +357,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("draws its border on the difference between the position and the dependency", async () => {
     const report = await check(
-      spec({
-        name: "予約",
+      spec("予約", {
         examples: examples(予約する, {
           ...行("ちょうど1ns後", 今.add({ nanoseconds: 1 }), "受付"),
         }),
@@ -402,8 +387,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("is a comparison Chisel reads", async () => {
     const report = await check(
-      spec({
-        name: "予約",
+      spec("予約", {
         examples: examples(予約する, {}),
         implementation: 過去を断る,
       }),
@@ -431,8 +415,7 @@ describe("a value dependency read in a guard condition", () => {
 });
 
 describe("a value dependency read inside all", () => {
-  const 注文する = behavior({
-    name: "注文する",
+  const 注文する = behavior("注文する", {
     input: variants("状態", {
       入力済み: object({ 明細: array(object({ 数量: int() })) }),
     }),
@@ -469,8 +452,7 @@ describe("a value dependency read inside all", () => {
 
   it("is a comparison Chisel reads inside all", async () => {
     const report = await check(
-      spec({
-        name: "注文",
+      spec("注文", {
         examples: examples(注文する, {}),
         implementation: 上限で断る,
       }),
@@ -481,8 +463,7 @@ describe("a value dependency read inside all", () => {
 });
 
 describe("a dependency declared as another behavior", () => {
-  const 在庫を照会する = behavior({
-    name: "在庫を照会する",
+  const 在庫を照会する = behavior("在庫を照会する", {
     input: variants("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
     result: object({ 商品ID: string("商品ID"), 在庫数: int() }),
     effects: variants("種類", {}),
@@ -496,8 +477,7 @@ describe("a dependency declared as another behavior", () => {
       expect: { result: { 商品ID: "商品-A", 在庫数: 10 }, effects: [] },
     },
   });
-  const 注文する = behavior({
-    name: "注文する",
+  const 注文する = behavior("注文する", {
     input: variants("状態", { 入力済み: object({ 商品ID: string("商品ID") }) }),
     result: object({ 在庫あり: boolean() }),
     effects: variants("種類", {}),
@@ -518,8 +498,7 @@ describe("a dependency declared as another behavior", () => {
 
   async function reportWith(rows: Parameters<typeof fake<typeof 注文する, "在庫">>[2]) {
     return check(
-      spec({
-        name: "注文",
+      spec("注文", {
         examples: examples(注文する, {
           "商品-A": {
             given: { 状態: "入力済み", 商品ID: "商品-A" },

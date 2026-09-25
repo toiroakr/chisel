@@ -15,8 +15,7 @@ import {
 
 describe("progressive specification demo", () => {
   it("moves from explicit gaps to an accepted specification", async () => {
-    const 段階1のスケッチ = spec({
-      name: "段階1",
+    const 段階1のスケッチ = spec("段階1", {
       examples: examples(段階1の振る舞い, {}),
     });
     const 段階1 = await check(段階1のスケッチ);

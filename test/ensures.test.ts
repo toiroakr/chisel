@@ -24,8 +24,7 @@ import {
   test,
 } from "../src/index.js";
 
-const 注文を確定する = behavior({
-  name: "注文を確定する",
+const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", { 商品あり: object({ カートID: string("カートID") }) }),
   result: variants("結果", {
     確定: object({ カートID: string("カートID") }),
@@ -63,8 +62,7 @@ describe("ensures", () => {
 
   it("reports a row whose written answer breaks what the behavior ensures", async () => {
     const report = await check(
-      spec({
-        name: "確定",
+      spec("確定", {
         examples: examples(注文を確定する, {
           "別のカートが確定したと書いた": {
             given: { 状態: "商品あり", カートID: "c-1" },
@@ -100,8 +98,7 @@ describe("ensures", () => {
 
   it("refuses a clause that does not relate the input to the answer", () => {
     expect(() =>
-      behavior({
-        name: "壊れた宣言",
+      behavior("壊れた宣言", {
         input: variants("状態", { 商品あり: object({ カートID: string("カートID") }) }),
         result: variants("結果", { 確定: object({ カートID: string("カートID") }) }),
         effects: variants("種類", {}),
@@ -112,8 +109,7 @@ describe("ensures", () => {
 });
 
 describe("borders an ensures clause draws", () => {
-  const 会員を探す = behavior({
-    name: "会員を探す",
+  const 会員を探す = behavior("会員を探す", {
     input: variants("状態", { 照会: object({ 会員番号: int() }) }),
     result: variants("結果", {
       見つかった: object({ 会員番号: int() }),
@@ -129,8 +125,7 @@ describe("borders an ensures clause draws", () => {
 
   it("draws a line where a conjunct compares the input with a constant and meets it by the value a row writes", async () => {
     const report = await check(
-      spec({
-        name: "照会",
+      spec("照会", {
         examples: examples(会員を探す, {
           "番号1の会員": {
             given: { 状態: "照会", 会員番号: 1 },
@@ -155,8 +150,7 @@ describe("borders an ensures clause draws", () => {
   });
 
   it("draws nothing for a comparison under or(), which the rule does not require", async () => {
-    const 探す = behavior({
-      name: "探す",
+    const 探す = behavior("探す", {
       input: variants("状態", { 照会: object({ 会員番号: int(), 仮登録: int() }) }),
       result: variants("結果", { 見つかった: object({ 会員番号: int() }) }),
       effects: variants("種類", {}),
@@ -167,7 +161,7 @@ describe("borders an ensures clause draws", () => {
       ],
     });
     const report = await check(
-      spec({ name: "探す", examples: examples(探す, {}) }),
+      spec("探す", { examples: examples(探す, {}) }),
     );
 
     expect(report.borders).toStrictEqual([]);
@@ -176,8 +170,7 @@ describe("borders an ensures clause draws", () => {
 
 describe("an ensures clause over every element of the answer", () => {
   const 明細を返す = (rule: Parameters<typeof all>[1]) =>
-    behavior({
-      name: "明細を返す",
+    behavior("明細を返す", {
       input: variants("状態", { 入力済み: object({ 数量: int() }) }),
       result: object({ 明細: array(int()) }),
       effects: variants("種類", {}),
@@ -186,8 +179,7 @@ describe("an ensures clause over every element of the answer", () => {
 
   it("relates the input to the answer when it reads the input inside all", () => {
     expect(() =>
-      behavior({
-        name: "明細を返す",
+      behavior("明細を返す", {
         input: variants("状態", { 入力済み: object({ 数量: int() }) }),
         result: object({ 明細: array(int()) }),
         effects: variants("種類", {}),
@@ -199,8 +191,7 @@ describe("an ensures clause over every element of the answer", () => {
   });
 
   it("holds each element to the input it reads", async () => {
-    const 明細を返す = behavior({
-      name: "明細を返す",
+    const 明細を返す = behavior("明細を返す", {
       input: variants("状態", { 入力済み: object({ 数量: int() }) }),
       result: object({ 明細: array(int()) }),
       effects: variants("種類", {}),
@@ -229,8 +220,7 @@ describe("an ensures clause over every element of the answer", () => {
 describe("ensures clause names", () => {
   it("refuses two clauses with one name", () => {
     expect(() =>
-      behavior({
-        name: "二重",
+      behavior("二重", {
         input: variants("状態", { 入力済み: object({ 数量: int() }) }),
         result: object({ 数量: int() }),
         effects: variants("種類", {}),
@@ -244,8 +234,7 @@ describe("ensures clause names", () => {
 });
 
 describe("how much of an ensures rule the check reads", () => {
-  const 見積もる = behavior({
-    name: "見積もる",
+  const 見積もる = behavior("見積もる", {
     input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string("商品ID") }) }),
     result: variants("結果", {
       見積: object({ 数量: int(), 商品ID: string("商品ID"), 明細: array(int()) }),
@@ -266,7 +255,7 @@ describe("how much of an ensures rule the check reads", () => {
 
   async function readings() {
     const report = await check(
-      spec({ name: "見積", examples: examples(見積もる, {}) }),
+      spec("見積", { examples: examples(見積もる, {}) }),
     );
     return report.ensures;
   }

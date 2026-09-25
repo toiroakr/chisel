@@ -11,8 +11,7 @@ import {
   examples,
 } from "../../src/index.js";
 
-const 並べる = behavior({
-  name: "並べる",
+const 並べる = behavior("並べる", {
   input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
   result: object({}),
   effects: variants("種類", {}),
@@ -27,8 +26,7 @@ const 名前順 = implement(並べる, {
   },
 });
 
-export const 並び = spec({
-  name: "並び",
+export const 並び = spec("並び", {
   examples: examples(並べる, {}),
   implementation: 名前順,
 });

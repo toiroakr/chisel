@@ -33,8 +33,7 @@ const キャンセル作用 = c.variants("種類", {
   }),
 });
 
-export const 予約をキャンセルする = c.behavior({
-  name: "予約をキャンセルする",
+export const 予約をキャンセルする = c.behavior("予約をキャンセルする", {
   input: 予約,
   result: キャンセル結果,
   effects: キャンセル作用,
@@ -214,8 +213,7 @@ const 実装 = c.implement(予約をキャンセルする, {
   },
 });
 
-export const 完成した仕様 = c.spec({
-  name: "段階4: exampleを満たすmodelを実装する",
+export const 完成した仕様 = c.spec("段階4: exampleを満たすmodelを実装する", {
   examples: 具体例,
   implementation: 実装,
 });

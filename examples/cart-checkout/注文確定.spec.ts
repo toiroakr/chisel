@@ -32,8 +32,7 @@ const 確定作用 = c.variants("種類", {
   クーポン消費: c.object({ クーポンコード }),
 });
 
-export const 注文を確定する = c.behavior({
-  name: "注文を確定する",
+export const 注文を確定する = c.behavior("注文を確定する", {
   input: カート,
   result: 確定結果,
   effects: 確定作用,
@@ -127,8 +126,7 @@ const 実装 = c.implement(注文を確定する, {
   },
 });
 
-export const 注文確定の仕様 = c.spec({
-  name: "注文確定",
+export const 注文確定の仕様 = c.spec("注文確定", {
   examples: 具体例,
   implementation: 実装,
 });

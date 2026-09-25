@@ -304,15 +304,14 @@ export function examples<B extends AnyBehavior>(
   };
 }
 
-export function spec<B extends AnyBehavior>(options: {
-  readonly name: string;
+export function spec<B extends AnyBehavior>(name: string, options: {
   readonly examples: ExampleSet<B>;
   readonly implementation?: Implementation<B>;
   readonly fakes?: readonly FakeTable[];
 }): Specification<B> {
   return {
     kind: "specification",
-    name: options.name,
+    name,
     examples: options.examples,
     implementation: options.implementation,
     fakes: options.fakes ?? [],

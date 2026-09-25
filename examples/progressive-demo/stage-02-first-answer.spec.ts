@@ -26,8 +26,7 @@ const キャンセル作用 = c.variants("種類", {
   }),
 });
 
-export const 予約をキャンセルする = c.behavior({
-  name: "予約をキャンセルする",
+export const 予約をキャンセルする = c.behavior("予約をキャンセルする", {
   input: 予約,
   result: キャンセル結果,
   effects: キャンセル作用,
@@ -86,7 +85,6 @@ const 具体例 = c.examples(予約をキャンセルする, {
   },
 });
 
-export const 最初の回答 = c.spec({
-  name: "段階2: 人間が期待値を埋める",
+export const 最初の回答 = c.spec("段階2: 人間が期待値を埋める", {
   examples: 具体例,
 });

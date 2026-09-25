@@ -139,8 +139,7 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
     }
     targets.push({
       behaviorBinding: binding,
-      specification: spec({
-        name: definition.name,
+      specification: spec(definition.name, {
         examples: examples(definition, {}),
       }),
       synthesized: true,
@@ -422,8 +421,7 @@ function formatGeneratedExamples(
     "",
     formatImplementationScaffold(target),
     "",
-    `export const ${binding}Specification = c.spec({`,
-    `  name: ${JSON.stringify(target.specification.name)},`,
+    `export const ${binding}Specification = c.spec(${JSON.stringify(target.specification.name)}, {`,
     `  examples: ${binding}Examples,`,
     `  implementation: ${binding}Implementation,`,
     "});",

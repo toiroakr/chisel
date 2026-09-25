@@ -29,8 +29,7 @@ import {
 } from "../src/index.js";
 import type { Implementation } from "../src/index.js";
 
-const 注文を確定する = behavior({
-  name: "注文を確定する",
+const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", {
     商品あり: object({
       カートID: string("カートID"),
@@ -89,8 +88,7 @@ describe("arms of a rules decision", () => {
 
   it("measures the arms completely and marks the arm an answered row went through", async () => {
     const report = await check(
-      spec({
-        name: "注文確定",
+      spec("注文確定", {
         examples: examples(注文を確定する, { ...在庫あり }),
         implementation: 在庫を確かめて確定する,
       }),
@@ -117,8 +115,7 @@ describe("arms of a rules decision", () => {
 
   it("says an arm only a row whose answer is owed went through is owed an answer", async () => {
     const report = await check(
-      spec({
-        name: "注文確定",
+      spec("注文確定", {
         examples: examples(注文を確定する, {
           ...在庫あり,
           "在庫不足はまだ決めていない": {
@@ -150,8 +147,7 @@ describe("verdict over a rules decision", () => {
 
   it("is not_satisfied while an arm has no answered row through it", async () => {
     const report = await check(
-      spec({
-        name: "注文確定",
+      spec("注文確定", {
         examples: examples(注文を確定する, { ...在庫あり }),
         implementation: 在庫を確かめて確定する,
       }),
@@ -162,8 +158,7 @@ describe("verdict over a rules decision", () => {
 
   it("is satisfied when every measure was made and none found a gap", async () => {
     const report = await check(
-      spec({
-        name: "注文確定",
+      spec("注文確定", {
         examples: examples(注文を確定する, {
           ...在庫あり,
           ...在庫不足,
@@ -184,8 +179,7 @@ describe("verdict over a rules decision", () => {
   });
 
   it("measures the arms partially when another case is decided by a closure", async () => {
-    const 二つの状態 = behavior({
-      name: "二つの状態",
+    const 二つの状態 = behavior("二つの状態", {
       input: variants("状態", {
         商品あり: object({ 数量: int() }),
         確定済み: object({}),
@@ -203,7 +197,7 @@ describe("verdict over a rules decision", () => {
       },
     });
     const report = await check(
-      spec({ name: "混在", examples: examples(二つの状態, {}), implementation: 混在 }),
+      spec("混在", { examples: examples(二つの状態, {}), implementation: 混在 }),
     );
 
     expect(report.measures.arms).toMatchObject({ status: "partial", notRead: ["何もしない"] });
@@ -211,8 +205,7 @@ describe("verdict over a rules decision", () => {
 });
 
 describe("rules of a decision", () => {
-  const 割引を判定する = behavior({
-    name: "割引を判定する",
+  const 割引を判定する = behavior("割引を判定する", {
     input: variants("状態", { 入力済み: object({ 会員歴: int(), 購入額: int() }) }),
     result: variants("結果", { 割引: object({}), 定価: object({}) }),
     effects: variants("種類", {}),
@@ -237,8 +230,7 @@ describe("rules of a decision", () => {
 
   it("lists each way through the body, carrying only the distinctions that way consulted", async () => {
     const report = await check(
-      spec({
-        name: "割引",
+      spec("割引", {
         examples: examples(割引を判定する, { ...会員歴で }),
         implementation: 会員歴か購入額,
       }),
@@ -267,7 +259,7 @@ describe("rules of a decision", () => {
       cases: { 入力済み: action("常に定価", { run: () => ({ result: { 結果: "定価" }, effects: [] }) }) },
     });
     const report = await check(
-      spec({ name: "定価", examples: examples(割引を判定する, {}), implementation: 常に定価 }),
+      spec("定価", { examples: examples(割引を判定する, {}), implementation: 常に定価 }),
     );
 
     expect(report.measures.rules).toMatchObject({ rules: [{ way: "otherwise" }] });
@@ -275,8 +267,7 @@ describe("rules of a decision", () => {
 });
 
 describe("match over a sum field", () => {
-  const 送料を決める = behavior({
-    name: "送料を決める",
+  const 送料を決める = behavior("送料を決める", {
     input: variants("状態", {
       確定済み: object({
         配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }),
@@ -308,7 +299,7 @@ describe("match over a sum field", () => {
 
   it("counts every case of a match as an arm", async () => {
     const report = await check(
-      spec({ name: "送料", examples: examples(送料を決める, { ...宅配 }), implementation: 方法で決める }),
+      spec("送料", { examples: examples(送料を決める, { ...宅配 }), implementation: 方法で決める }),
     );
 
     expect(report.measures.arms).toStrictEqual({
@@ -322,7 +313,7 @@ describe("match over a sum field", () => {
 
   it("ends a way at the case it went to", async () => {
     const report = await check(
-      spec({ name: "送料", examples: examples(送料を決める, { ...宅配 }), implementation: 方法で決める }),
+      spec("送料", { examples: examples(送料を決める, { ...宅配 }), implementation: 方法で決める }),
     );
 
     expect(report.measures.rules).toMatchObject({
@@ -340,8 +331,7 @@ describe("match over a sum field", () => {
   });
 
   it("composes a row for a match case from a row that reaches the match", () => {
-    const 重さで決める = behavior({
-      name: "重さで決める",
+    const 重さで決める = behavior("重さで決める", {
       input: variants("状態", {
         確定済み: object({
           重さ: int(),
@@ -383,8 +373,7 @@ describe("match over a sum field", () => {
 
 describe("ways generate could not compose", () => {
   it("says which ways no row was composed for rather than leaving them out", () => {
-    const 並べる = behavior({
-      name: "並べる",
+    const 並べる = behavior("並べる", {
       input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
       result: object({}),
       effects: variants("種類", {}),
@@ -405,8 +394,7 @@ describe("ways generate could not compose", () => {
 });
 
 describe("what match can branch on", () => {
-  const 送る = behavior({
-    name: "送る",
+  const 送る = behavior("送る", {
     input: variants("状態", {
       確定済み: object({
         メモ: string("メモ"),
@@ -462,8 +450,7 @@ describe("what match can branch on", () => {
 });
 
 describe("rules written inline in spec", () => {
-  const 受け付ける = behavior({
-    name: "受け付ける",
+  const 受け付ける = behavior("受け付ける", {
     input: variants("状態", { 入力済み: object({ 合計: int() }) }),
     result: variants("結果", { 受付: object({}), 審査: object({}) }),
     effects: variants("種類", {}),
@@ -471,8 +458,7 @@ describe("rules written inline in spec", () => {
 
   it("keeps the result literals of an implementation written inside the specification", async () => {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受け付ける, {
           "少額": {
             given: { 状態: "入力済み", 合計: 100 },
@@ -494,8 +480,7 @@ describe("rules written inline in spec", () => {
   });
 
   it("refuses a result case the behavior does not answer, inline as well", () => {
-    spec({
-      name: "受付",
+    spec("受付", {
       examples: examples(受け付ける, {}),
       implementation: implement(受け付ける, {
         cases: {
@@ -508,8 +493,7 @@ describe("rules written inline in spec", () => {
 });
 
 describe("ways no row can take", () => {
-  const 受け付ける = behavior({
-    name: "受け付ける",
+  const 受け付ける = behavior("受け付ける", {
     input: variants("状態", {
       入力済み: object({
         数量: int().invariant(v => gte(v, 0)),
@@ -526,8 +510,7 @@ describe("ways no row can take", () => {
 
   async function statuses(implementation: Implementation<typeof 受け付ける>) {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受け付ける, {}),
         implementation,
       }),
@@ -608,8 +591,7 @@ describe("ways no row can take", () => {
 });
 
 describe("a term from outside all read inside each", () => {
-  const 上限を守る = behavior({
-    name: "上限を守る",
+  const 上限を守る = behavior("上限を守る", {
     input: variants("状態", {
       入力済み: object({ 上限: int(), 明細: array(object({ 数量: int() })) }),
     }),
@@ -638,7 +620,7 @@ describe("a term from outside all read inside each", () => {
 
   it("is described from the scope it was written in", async () => {
     const report = await check(
-      spec({ name: "上限", examples: examples(上限を守る, {}), implementation: 上限で断る }),
+      spec("上限", { examples: examples(上限を守る, {}), implementation: 上限で断る }),
     );
 
     expect(
@@ -650,7 +632,7 @@ describe("a term from outside all read inside each", () => {
 
   it("draws the border between the element and the outer position", async () => {
     const report = await check(
-      spec({ name: "上限", examples: examples(上限を守る, {}), implementation: 上限で断る }),
+      spec("上限", { examples: examples(上限を守る, {}), implementation: 上限で断る }),
     );
 
     expect(
@@ -668,8 +650,7 @@ describe("a term from outside all read inside each", () => {
 });
 
 describe("action", () => {
-  const 受け付ける = behavior({
-    name: "受け付ける",
+  const 受け付ける = behavior("受け付ける", {
     input: variants("状態", { 入力済み: object({ 数量: int() }), 取消済み: object({}) }),
     result: variants("結果", { 受付: object({}), 却下: object({}) }),
     effects: variants("種類", {}),
@@ -696,8 +677,7 @@ describe("action", () => {
 
   it("measures an action with only run as one with no branches", async () => {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受け付ける, {
           "取消済み": {
             given: { 状態: "取消済み" },

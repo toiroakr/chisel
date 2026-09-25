@@ -231,8 +231,7 @@ export function behavior<
   const ResultSchema extends Schema<unknown>,
   const EffectSchema extends AnyVariantsSchema,
   const Requires extends Requirements = {},
->(options: {
-  readonly name: string;
+>(name: string, options: {
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
@@ -259,7 +258,7 @@ export function behavior<
   }
   return {
     kind: "behavior",
-    name: options.name,
+    name,
     input: options.input,
     result: options.result,
     effects: options.effects,

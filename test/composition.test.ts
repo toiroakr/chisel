@@ -21,8 +21,7 @@ import {
   variants,
 } from "../src/index.js";
 
-const 検証する = behavior({
-  name: "検証する",
+const 検証する = behavior("検証する", {
   input: variants("状態", { 申込: object({ 数量: int() }) }),
   result: variants("結果", {
     有効: object({ 数量: int() }),
@@ -31,8 +30,7 @@ const 検証する = behavior({
   effects: variants("種類", {}),
 });
 
-const 価格を付ける = behavior({
-  name: "価格を付ける",
+const 価格を付ける = behavior("価格を付ける", {
   input: variants("結果", { 有効: object({ 数量: int() }) }),
   result: variants("結果", { 見積: object({ 金額: int() }) }),
   effects: variants("種類", { 通知: object({ 金額: int() }) }),
@@ -82,8 +80,7 @@ describe("compose", () => {
   });
 
   it("refuses stages where the second receives none of the first's cases", () => {
-    const 別物 = behavior({
-      name: "別物",
+    const 別物 = behavior("別物", {
       input: variants("結果", { 保留: object({}) }),
       result: variants("結果", { 完了: object({}) }),
       effects: variants("種類", {}),
@@ -95,8 +92,7 @@ describe("compose", () => {
   });
 
   it("refuses a case that would be both departed and answered by the second stage", () => {
-    const 無効も返す = behavior({
-      name: "無効も返す",
+    const 無効も返す = behavior("無効も返す", {
       input: variants("結果", { 有効: object({ 数量: int() }) }),
       result: variants("結果", { 無効: object({ 理由: string("理由") }) }),
       effects: variants("種類", {}),
@@ -126,8 +122,7 @@ describe("running a composition", () => {
   });
 
   it("keeps a departed case off the main line of a later stage that could receive it", async () => {
-    const 無効を受ける = behavior({
-      name: "無効を受ける",
+    const 無効を受ける = behavior("無効を受ける", {
       input: variants("結果", {
         見積: object({ 金額: int() }),
         無効: object({ 理由: string("理由") }),
@@ -170,7 +165,7 @@ describe("the adequacy of a composition", () => {
 
   it("is measured over the composition's own cases, including one that departed early", async () => {
     const report = await check(
-      spec({ name: "見積", examples: 行, implementation: 見積もるの実装 }),
+      spec("見積", { examples: 行, implementation: 見積もるの実装 }),
     );
 
     expect({
@@ -198,8 +193,7 @@ describe("the adequacy of a composition", () => {
 describe("a composition row whose answer is owed", () => {
   it("still runs the composition, so the case it reached is executed", async () => {
     const report = await check(
-      spec({
-        name: "見積",
+      spec("見積", {
         examples: examples(見積もる, {
           "3個": { given: { 状態: "申込", 数量: 3 }, expect: todo("未定") },
         }),
@@ -215,8 +209,7 @@ describe("a composition row whose answer is owed", () => {
 
 describe("composing a composition", () => {
   it("takes a composition as a stage, implemented by its own implementation", async () => {
-    const 無効を受ける = behavior({
-      name: "無効を受ける",
+    const 無効を受ける = behavior("無効を受ける", {
       input: variants("結果", { 見積: object({ 金額: int() }), 無効: object({ 理由: string("理由") }) }),
       result: variants("結果", { 完了: object({}) }),
       effects: variants("種類", {}),
@@ -252,8 +245,7 @@ describe("a composition whose stages are still todo", () => {
 
   it("lists each stage's open decision and counts no row as a failure", async () => {
     const report = await check(
-      spec({
-        name: "雛形",
+      spec("雛形", {
         examples: examples(雛形の合成, {
           "2個": {
             given: { 状態: "申込", 数量: 2 },

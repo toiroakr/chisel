@@ -34,8 +34,7 @@ const Effect = variants("type", {
 });
 
 function publishingBehavior() {
-  return behavior({
-    name: "publish",
+  return behavior("publish", {
     input: Input,
     result: Result,
     effects: Effect,
@@ -100,7 +99,7 @@ describe("chisel", () => {
         expect: todo("A human must decide repeated publication"),
       },
     });
-    const specification = spec({ name: "publishing", examples: rows });
+    const specification = spec("publishing", { examples: rows });
 
     const report = await check(specification);
 
@@ -144,8 +143,7 @@ describe("chisel", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -163,8 +161,7 @@ describe("chisel", () => {
 
 describe("behavior.dependsOn defaults", () => {
   it("defaults dependsOn to an empty array when omitted", () => {
-    const definition = behavior({
-      name: "no-deps",
+    const definition = behavior("no-deps", {
       input: Input,
       result: Result,
       effects: Effect,
@@ -176,8 +173,7 @@ describe("behavior.dependsOn defaults", () => {
 
 describe("dependency issues", () => {
   it("reports an unknown effect named in the behavior's dependsOn", async () => {
-    const definition = behavior({
-      name: "publish",
+    const definition = behavior("publish", {
       input: Input,
       result: Result,
       effects: Effect,
@@ -200,8 +196,7 @@ describe("dependency issues", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -244,8 +239,7 @@ describe("dependency issues", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: examples(definition, {}),
       implementation,
     });
@@ -258,15 +252,13 @@ describe("dependency issues", () => {
   });
 
   it("reports an unknown behavior-level dependency even without an implementation", async () => {
-    const definition = behavior({
-      name: "publish",
+    const definition = behavior("publish", {
       input: Input,
       result: Result,
       effects: Effect,
       dependsOn: ["mail"],
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: examples(definition, {}),
     });
 
@@ -291,8 +283,7 @@ describe("check failure reporting", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -325,8 +316,7 @@ describe("check failure reporting", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: examples(definition, {}),
       implementation,
     });
@@ -362,8 +352,7 @@ describe("check failure reporting", () => {
       },
       controls: {},
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: examples(definition, {}),
       implementation,
     });
@@ -400,8 +389,7 @@ describe("check failure reporting", () => {
         notify: todo("制御方針が未確定です"),
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: examples(definition, {}),
       implementation,
     });
@@ -615,8 +603,7 @@ describe("isBehavior", () => {
 describe("isSpecification", () => {
   it("is true for a value built with spec()", () => {
     const definition = publishingBehavior();
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: examples(definition, {}),
     });
 
@@ -676,7 +663,7 @@ describe("check example validation", () => {
         expect: { result: { type: "accepted", id: "a" }, effects: [] },
       },
     });
-    const specification = spec({ name: "publishing", examples: rows });
+    const specification = spec("publishing", { examples: rows });
 
     const report = await check(specification);
 
@@ -693,7 +680,7 @@ describe("check example validation", () => {
         expect: { result: { type: "unknown-type" } as never, effects: [] },
       },
     });
-    const specification = spec({ name: "publishing", examples: rows });
+    const specification = spec("publishing", { examples: rows });
 
     const report = await check(specification);
 
@@ -739,8 +726,7 @@ describe("check example validation", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -753,8 +739,7 @@ describe("check example validation", () => {
 
 describe("coverage-driven adequacy vetoes", () => {
   it("treats a non-sum result schema as trivially fully covered", async () => {
-    const definition = behavior({
-      name: "publish",
+    const definition = behavior("publish", {
       input: Input,
       result: string("Message"),
       effects: Effect,
@@ -790,8 +775,7 @@ describe("coverage-driven adequacy vetoes", () => {
         expect: { result: "already-published", effects: [] },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -847,8 +831,7 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -870,8 +853,7 @@ describe("coverage-driven adequacy vetoes", () => {
       notify: object({ id: string("Id") }),
       audit: object({ id: string("Id") }),
     });
-    const definition = behavior({
-      name: "publish",
+    const definition = behavior("publish", {
       input: Input,
       result: Result,
       effects: EffectWithAudit,
@@ -924,8 +906,7 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       },
     });
-    const specification = spec({
-      name: "publishing",
+    const specification = spec("publishing", {
       examples: rows,
       implementation,
     });
@@ -944,8 +925,7 @@ describe("coverage-driven adequacy vetoes", () => {
 });
 
 describe("todo", () => {
-  const 受け付ける = behavior({
-    name: "受け付ける",
+  const 受け付ける = behavior("受け付ける", {
     input: variants("状態", { 入力済み: object({}), 取消済み: object({}) }),
     result: variants("結果", { 受付: object({}) }),
     effects: variants("種類", { 通知: object({}) }),
@@ -953,8 +933,7 @@ describe("todo", () => {
 
   it("marks an owed answer, an unwritten case and an undecided control alike", async () => {
     const report = await check(
-      spec({
-        name: "受付",
+      spec("受付", {
         examples: examples(受け付ける, {
           入力済み: { given: { 状態: "入力済み" }, expect: todo("答えは未定") },
         }),
@@ -984,8 +963,7 @@ describe("a row that reaches a decision still todo", () => {
   it("is not a failure but a row that could not run, beside the open decision", async () => {
     const definition = publishingBehavior();
     const report = await check(
-      spec({
-        name: "publishing",
+      spec("publishing", {
         examples: examples(definition, {
           "publish draft": {
             given: { state: "draft", id: "a" },

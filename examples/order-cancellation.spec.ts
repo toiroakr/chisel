@@ -33,8 +33,7 @@ const CancelEffect = c.variants("type", {
   }),
 });
 
-export const cancelOrder = c.behavior({
-  name: "cancel-order",
+export const cancelOrder = c.behavior("cancel-order", {
   input: Order,
   result: CancelResult,
   effects: CancelEffect,
@@ -165,8 +164,7 @@ const cancellationExamples = c.examples(cancelOrder, {
   },
 });
 
-export const orderCancellation = c.spec({
-  name: "order cancellation",
+export const orderCancellation = c.spec("order cancellation", {
   examples: cancellationExamples,
   implementation,
 });

@@ -40,8 +40,7 @@ const CancelEffect = c.variants("type", {
   restock: c.object({ orderId: c.string("OrderId") }),
 });
 
-export const cancelOrder = c.behavior({
-  name: "cancel-order",
+export const cancelOrder = c.behavior("cancel-order", {
   input: Order,
   result: CancelResult,
   effects: CancelEffect,
@@ -148,8 +147,7 @@ const implementation = c.implement(cancelOrder, {
   },
 });
 
-export const cancellation = c.spec({
-  name: "order cancellation",
+export const cancellation = c.spec("order cancellation", {
   examples: cancelOrderExamples,
   implementation,
 });
@@ -226,8 +224,7 @@ A free-form `run` closure may contain branches Chisel cannot read, so its arms a
 A behavior can state what it ensures of its answer, and declare the outside world it needs:
 
 ```ts
-const findMember = c.behavior({
-  name: "find-member",
+const findMember = c.behavior("find-member", {
   input, result, effects,
   requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string("MemberId"), c.boolean()) },
   ensures: clause => [
@@ -251,8 +248,7 @@ const [quote, quoteImplementation] = c.compose("quote", [validateImplementation,
 // validate: order -> valid | invalid, price: valid -> quoted
 // quote: order -> invalid | quoted
 
-export const quoteSpec = c.spec({
-  name: "quote",
+export const quoteSpec = c.spec("quote", {
   examples: c.examples(quote, { /* rows expecting quoted, and invalid */ }),
   implementation: quoteImplementation,
 });

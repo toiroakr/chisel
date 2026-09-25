@@ -11,8 +11,7 @@ import {
   variants,
 } from "../../src/index.js";
 
-const 数量を確定する = behavior({
-  name: "数量を確定する",
+const 数量を確定する = behavior("数量を確定する", {
   input: variants("状態", {
     入力済み: object({
       数量: int().invariant(v => gte(v, 1)),
@@ -23,8 +22,7 @@ const 数量を確定する = behavior({
   effects: variants("種類", {}),
 });
 
-export const 数量確定 = spec({
-  name: "数量確定",
+export const 数量確定 = spec("数量確定", {
   examples: examples(数量を確定する, {
     "数量1": {
       given: { 状態: "入力済み", 数量: 1, 同意: true },

@@ -7,8 +7,7 @@ import { 最初の回答 } from "./stage-02-first-answer.spec.js";
 import { 詳細化した仕様 } from "./stage-03-refined.spec.js";
 import { 完成した仕様 } from "./stage-04-complete.spec.js";
 
-const 段階1のスケッチ = c.spec({
-  name: "段階1: dataとbehaviorの宣言",
+const 段階1のスケッチ = c.spec("段階1: dataとbehaviorの宣言", {
   examples: c.examples(段階1の振る舞い, {}),
 });
 

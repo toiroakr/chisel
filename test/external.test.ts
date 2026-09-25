@@ -16,8 +16,7 @@ import {
   variants,
 } from "../src/index.js";
 
-const 在庫を照会する = behavior({
-  name: "在庫を照会する",
+const 在庫を照会する = behavior("在庫を照会する", {
   input: variants("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
   result: variants("結果", { 在庫: object({ 在庫数: int() }) }),
   effects: variants("種類", {}),
@@ -34,7 +33,7 @@ const 在庫の例 = examples(在庫を照会する, {
 
 describe("an external implementation", () => {
   it("is not run, and says so instead of failing", async () => {
-    const report = await check(spec({ name: "在庫", examples: 在庫の例, implementation: 在庫照会の実装 }));
+    const report = await check(spec("在庫", { examples: 在庫の例, implementation: 在庫照会の実装 }));
 
     expect({
       failures: report.failures,
@@ -62,8 +61,7 @@ describe("an external implementation", () => {
   });
 
   it("leaves a composition it takes part in unrun and undetermined", async () => {
-    const 在庫で判断する = behavior({
-      name: "在庫で判断する",
+    const 在庫で判断する = behavior("在庫で判断する", {
       input: variants("結果", { 在庫: object({ 在庫数: int() }) }),
       result: variants("結果", { 注文可: object({}), 品切れ: object({}) }),
       effects: variants("種類", {}),
@@ -81,8 +79,7 @@ describe("an external implementation", () => {
     const [注文できるか, 注文できるかの実装] = compose("注文できるか", [在庫照会の実装, 在庫で判断するの実装]);
 
     const report = await check(
-      spec({
-        name: "注文可否",
+      spec("注文可否", {
         examples: examples(注文できるか, {
           "在庫があれば注文可": {
             given: { 種別: "商品", 商品ID: "A" },

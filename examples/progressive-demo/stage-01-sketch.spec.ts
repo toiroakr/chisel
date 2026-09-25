@@ -26,8 +26,7 @@ const キャンセル作用 = c.variants("種類", {
   }),
 });
 
-export const 予約をキャンセルする = c.behavior({
-  name: "予約をキャンセルする",
+export const 予約をキャンセルする = c.behavior("予約をキャンセルする", {
   input: 予約,
   result: キャンセル結果,
   effects: キャンセル作用,

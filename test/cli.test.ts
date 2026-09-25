@@ -199,8 +199,7 @@ describe("chisel generate", () => {
     );
     expect(stdoutOf(result)).toContain(
       [
-        "export const unreferencedBehaviorSpecification = c.spec({",
-        '  name: "unreferenced",',
+        'export const unreferencedBehaviorSpecification = c.spec("unreferenced", {',
         "  examples: unreferencedBehaviorExamples,",
         "  implementation: unreferencedBehaviorImplementation,",
         "});",

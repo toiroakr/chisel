@@ -21,16 +21,14 @@ const Effect = variants("type", {
   none: object({}),
 });
 
-export const unreferencedBehavior = behavior({
-  name: "unreferenced",
+export const unreferencedBehavior = behavior("unreferenced", {
   input: Input,
   result: Result,
   effects: Effect,
 });
 
 function inlineBehavior() {
-  return behavior({
-    name: "inline check",
+  return behavior("inline check", {
     input: Input,
     result: Result,
     effects: Effect,
@@ -58,8 +56,7 @@ const implementation = implement(definition, {
   },
 });
 
-export const inlineSpec = spec({
-  name: "inline check",
+export const inlineSpec = spec("inline check", {
   examples: examples(definition, {
     "ready": {
       given: { state: "ready", id: "a" },

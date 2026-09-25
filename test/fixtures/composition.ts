@@ -14,15 +14,13 @@ import {
   variants,
 } from "../../src/index.js";
 
-const 検証する = behavior({
-  name: "検証する",
+const 検証する = behavior("検証する", {
   input: variants("状態", { 申込: object({ 数量: int() }) }),
   result: variants("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string("理由") }) }),
   effects: variants("種類", {}),
 });
 
-const 価格を付ける = behavior({
-  name: "価格を付ける",
+const 価格を付ける = behavior("価格を付ける", {
   input: variants("結果", { 有効: object({ 数量: int() }) }),
   result: variants("結果", { 見積: object({ 金額: int() }) }),
   effects: variants("種類", {}),
@@ -49,8 +47,7 @@ const 価格を付けるの実装 = implement(価格を付ける, {
 
 export const [見積もる, 見積もるの実装] = compose("見積もる", [検証するの実装, 価格を付けるの実装]);
 
-export const 見積 = spec({
-  name: "見積",
+export const 見積 = spec("見積", {
   examples: examples(見積もる, {
     "2個": {
       given: { 状態: "申込", 数量: 2 },
