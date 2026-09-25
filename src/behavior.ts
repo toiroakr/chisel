@@ -162,6 +162,17 @@ export class SpecificationError extends Error {
   }
 }
 
+export class TodoDecision extends SpecificationError {
+  constructor(
+    readonly behavior: string,
+    readonly variant: string,
+    readonly reason: string,
+  ) {
+    super(`The decision for ${variant} of ${behavior} is still todo: ${reason}`);
+    this.name = "TodoDecision";
+  }
+}
+
 export function guard<Input, Result, Effect, Deps = unknown>(
   condition: Rule,
   orElse: (input: Input, deps: Deps) => Execution<Result, Effect>,
@@ -425,7 +436,7 @@ export async function runTraced<B extends AnyBehavior>(
     throw new SpecificationError(`No decision for input variant ${tag}`);
   }
   if (selected.kind === "todo") {
-    throw new SpecificationError(`Todo decision for ${tag}: ${selected.reason}`);
+    throw new TodoDecision(definition.name, tag, selected.reason);
   }
 
   const arms: ArmTaken[] = [];

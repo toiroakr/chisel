@@ -244,3 +244,39 @@ describe("the stages a composition is given", () => {
     expect(() => compose("一段", [検証するの実装])).toThrow(SpecificationError);
   });
 });
+
+describe("a composition whose stages are still todo", () => {
+  const 検証するの雛形 = implement(検証する, { cases: { 申込: todo("申込の判断が未定") } });
+  const 価格を付けるの雛形 = implement(価格を付ける, { cases: { 有効: todo("有効の判断が未定") } });
+  const [雛形の合成, 雛形の合成の実装] = compose("雛形の合成", [検証するの雛形, 価格を付けるの雛形]);
+
+  it("lists each stage's open decision and counts no row as a failure", async () => {
+    const report = await check(
+      spec({
+        name: "雛形",
+        examples: examples(雛形の合成, {
+          "2個": {
+            given: { 状態: "申込", 数量: 2 },
+            expect: { result: { 結果: "見積", 金額: 200 }, effects: [{ 種類: "通知", 金額: 200 }] },
+          },
+        }),
+        implementation: 雛形の合成の実装,
+      }),
+    );
+
+    expect({
+      failures: report.failures,
+      pending: report.pendingDecisions,
+      incompleteness: report.incompleteness,
+    }).toStrictEqual({
+      failures: [],
+      pending: [
+        { variant: "検証する: 申込", reason: "申込の判断が未定" },
+        { variant: "価格を付ける: 有効", reason: "有効の判断が未定" },
+      ],
+      incompleteness: [
+        { kind: "row not run", subject: "2個", reason: "判断が未定（検証する: 申込）" },
+      ],
+    });
+  });
+});

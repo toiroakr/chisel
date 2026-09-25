@@ -73,6 +73,7 @@ export {
   todo,
   perform,
   SpecificationError,
+  TodoDecision,
 } from "./behavior.js";
 export type {
   AnyBehavior,

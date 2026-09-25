@@ -979,3 +979,31 @@ describe("todo", () => {
     });
   });
 });
+
+describe("a row that reaches a decision still todo", () => {
+  it("is not a failure but a row that could not run, beside the open decision", async () => {
+    const definition = publishingBehavior();
+    const report = await check(
+      spec({
+        name: "publishing",
+        examples: examples(definition, {
+          "publish draft": {
+            given: { state: "draft", id: "a" },
+            expect: {
+              result: { type: "accepted", id: "a" },
+              effects: [{ type: "notify", id: "a" }],
+            },
+          },
+        }),
+        implementation: implement(definition, {
+          cases: { draft: todo("not decided"), published: todo("not decided either") },
+        }),
+      }),
+    );
+
+    expect({ failures: report.failures, incompleteness: report.incompleteness }).toStrictEqual({
+      failures: [],
+      incompleteness: [{ kind: "row not run", subject: "publish draft", reason: "判断が未定（draft）" }],
+    });
+  });
+});

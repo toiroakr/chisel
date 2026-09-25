@@ -22,6 +22,7 @@ import {
   guardScope,
 } from "./guard-borders.js";
 import {
+  TodoDecision,
   brokenEnsures,
   comparisonsReached,
   isTodo,
@@ -46,6 +47,7 @@ import type { AnySchema } from "./schema.js";
 interface RunOutcome {
   readonly actual: unknown;
   readonly failure: ExampleFailure | undefined;
+  readonly error?: unknown;
 }
 
 async function runAndCompare<B extends AnyBehavior>(
@@ -69,6 +71,7 @@ async function runAndCompare<B extends AnyBehavior>(
     return {
       actual: undefined,
       failure: { name, message: error instanceof Error ? error.message : String(error) },
+      error,
     };
   }
 }
@@ -449,9 +452,14 @@ export async function check(
             waysOwed.push(traced.way);
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          failures.push({ name: row.name, message });
-          incompleteness.push({ kind: "row did not come back", subject: row.name, reason: message });
+          const open = openDecisionIn(implementation, error);
+          if (open !== undefined) {
+            incompleteness.push({ kind: "row not run", subject: row.name, reason: `判断が未定（${open}）` });
+          } else {
+            const message = error instanceof Error ? error.message : String(error);
+            failures.push({ name: row.name, message });
+            incompleteness.push({ kind: "row did not come back", subject: row.name, reason: message });
+          }
         }
       }
       continue;
@@ -506,7 +514,7 @@ export async function check(
       failures.push({ name: row.name, message: unstood });
       incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
     } else if (implementation !== undefined) {
-      const { actual, failure } = await runAndCompare(
+      const { actual, failure, error } = await runAndCompare(
         row.name,
         row.given,
         row.expect,
@@ -535,7 +543,10 @@ export async function check(
           verifiedInputs.add(inputTag);
         }
       }
-      if (failure !== undefined) {
+      const open = openDecisionIn(implementation, error);
+      if (open !== undefined) {
+        incompleteness.push({ kind: "row not run", subject: row.name, reason: `判断が未定（${open}）` });
+      } else if (failure !== undefined) {
         failures.push(failure);
         if (actual === undefined) {
           incompleteness.push({
@@ -548,15 +559,7 @@ export async function check(
     }
   }
 
-  const pendingDecisions =
-    specification.implementation === undefined
-      ? []
-      : Object.entries(specification.implementation.cases).flatMap(
-          ([variant, decision]) =>
-            decision.kind === "todo"
-              ? [{ variant, reason: decision.reason }]
-              : [],
-        );
+  const pendingDecisions = todoDecisionsIn(specification.implementation);
 
   const controlGaps =
     specification.implementation === undefined
@@ -1239,6 +1242,38 @@ function measureArms(
   return arms.length === 0
     ? { status: "unavailable", reason: "not measured", notRead }
     : { status: "partial", arms, notRead };
+}
+
+function stagesOf(implementation: AnyImplementation): AnyImplementation[] {
+  return implementation.pipeline === undefined
+    ? [implementation]
+    : implementation.pipeline.flatMap(stagesOf);
+}
+
+function todoDecisionsIn(implementation: AnyImplementation | undefined): PendingDecision[] {
+  if (implementation === undefined) {
+    return [];
+  }
+  const composed = implementation.pipeline !== undefined;
+  return stagesOf(implementation).flatMap(stage =>
+    Object.entries(stage.cases).flatMap(([variant, decision]) =>
+      decision.kind === "todo"
+        ? [{ variant: composed ? `${stage.behavior.name}: ${variant}` : variant, reason: decision.reason }]
+        : [],
+    ),
+  );
+}
+
+function openDecisionIn(
+  implementation: AnyImplementation,
+  error: unknown,
+): string | undefined {
+  if (!(error instanceof TodoDecision)) {
+    return undefined;
+  }
+  return implementation.pipeline === undefined
+    ? error.variant
+    : `${error.behavior}: ${error.variant}`;
 }
 
 function externalsIn(implementation: AnyImplementation | undefined): string[] {
