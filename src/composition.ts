@@ -230,6 +230,9 @@ function undeclaredPath(
       : `${path}.${answered.discriminant}`;
   }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
+    if (answered.discriminant !== taken.discriminant) {
+      return `${path}.${answered.discriminant}`;
+    }
     return firstFound(answered.variantTags, tag =>
       taken.variantTags.includes(tag)
         ? undeclaredPath(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, answered.discriminant)

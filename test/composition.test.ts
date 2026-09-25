@@ -210,6 +210,23 @@ describe("compose", () => {
     ).toThrow(new SpecificationError("支払方法を返す answers @有効.支払@カード, which 現金だけ受け取る does not declare"));
   });
 
+  it("refuses a nested sum whose discriminant the second stage names differently", () => {
+    const 方法で返す = behavior("方法で返す", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", { 有効: object({ 支払: variants("方法", { カード: object({}) }) }) }),
+      effects: variants("種類", {}),
+    });
+    const 種別で受け取る = behavior("種別で受け取る", {
+      input: variants("結果", { 有効: object({ 支払: variants("種別", { カード: object({}) }) }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      compose("判別キー違いの合成", [external(方法で返す, "別のチーム"), external(種別で受け取る, "別のチーム")]),
+    ).toThrow(new SpecificationError("方法で返す answers @有効.支払.方法, which 種別で受け取る does not declare"));
+  });
+
   it("still refuses a nested field that only shares its name with the discriminant", () => {
     const 詳細を返す = behavior("詳細を返す", {
       input: variants("状態", { 申込: object({}) }),
