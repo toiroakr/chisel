@@ -24,15 +24,15 @@ import {
   object,
   rules,
   string,
-  sum,
+  variants,
 } from "../src/index.js";
 import type { Rule, TermOf } from "../src/index.js";
 
 const 注文を受け付ける = behavior({
   name: "注文を受け付ける",
-  input: sum("状態", { 入力済み: object({ 合計: int().invariant(v => gte(v, 0)) }) }),
-  result: sum("結果", { 受付: object({}), 要承認: object({ 理由: string("理由") }) }),
-  effects: sum("種類", {}),
+  input: variants("状態", { 入力済み: object({ 合計: int().invariant(v => gte(v, 0)) }) }),
+  result: variants("結果", { 受付: object({}), 要承認: object({ 理由: string("理由") }) }),
+  effects: variants("種類", {}),
 });
 
 const 上限で分ける = implement(注文を受け付ける, {
@@ -91,11 +91,11 @@ describe("borders a guard draws", () => {
 describe("a guard's border is met by reaching the comparison", () => {
   const 審査する = behavior({
     name: "審査する",
-    input: sum("状態", {
+    input: variants("状態", {
       申請済み: object({ 会員: int(), 合計: int() }),
     }),
-    result: sum("結果", { 受付: object({}), 却下: object({ 理由: string("理由") }) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 受付: object({}), 却下: object({ 理由: string("理由") }) }),
+    effects: variants("種類", {}),
   });
   const 二段で審査する = implement(審査する, {
     cases: {
@@ -164,11 +164,11 @@ describe("a guard's border is met by reaching the comparison", () => {
 describe("a border between two positions", () => {
   const 注文を確定する = behavior({
     name: "注文を確定する",
-    input: sum("状態", {
+    input: variants("状態", {
       商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
     }),
-    result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    effects: variants("種類", {}),
   });
   const 在庫を確かめる = implement(注文を確定する, {
     cases: {
@@ -216,9 +216,9 @@ describe("a border between two positions", () => {
   it("names no OFF point on the difference of two numbers, which has no step", async () => {
     const 比べる = behavior({
       name: "比べる",
-      input: sum("状態", { 入力済み: object({ 予算: number(), 見積: number() }) }),
+      input: variants("状態", { 入力済み: object({ 予算: number(), 見積: number() }) }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 予算内か = implement(比べる, {
       cases: {
@@ -245,11 +245,11 @@ describe("classes cut from a range an object invariant bounds", () => {
   it("reads the admitted range from an invariant written on the object holding the field", async () => {
     const 受け付ける = behavior({
       name: "受け付ける",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 合計: int() }).invariant(v => gte(v.合計, 0)),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 上限 = implement(受け付ける, {
       cases: {
@@ -269,11 +269,11 @@ describe("classes cut from a range an object invariant bounds", () => {
   it("excludes a guard point an invariant on the object holding the field refuses", async () => {
     const 受け付ける = behavior({
       name: "受け付ける",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 合計: int() }).invariant(v => gte(v.合計, 0)),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 下限 = implement(受け付ける, {
       cases: {
@@ -300,11 +300,11 @@ describe("classes cut from a range an object invariant bounds", () => {
 describe("elements a quantifier never reached", () => {
   const 注文を確定する = behavior({
     name: "注文を確定する",
-    input: sum("状態", {
+    input: variants("状態", {
       商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
     }),
-    result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    effects: variants("種類", {}),
   });
   const 在庫を確かめる = implement(注文を確定する, {
     cases: {
@@ -346,11 +346,11 @@ describe("elements a quantifier never reached", () => {
 describe("generateExamples for guard borders", () => {
   const 注文を確定する = behavior({
     name: "注文を確定する",
-    input: sum("状態", {
+    input: variants("状態", {
       商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
     }),
-    result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    effects: variants("種類", {}),
   });
   const 在庫を確かめる = implement(注文を確定する, {
     cases: {
@@ -417,9 +417,9 @@ describe("classes a guard's threshold divides a position into", () => {
 
   const 点数を判定する = behavior({
     name: "点数を判定する",
-    input: sum("状態", { 採点済み: object({ 点数: int() }) }),
+    input: variants("状態", { 採点済み: object({ 点数: int() }) }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
   const 判定 = (guards: (入力: TermOf<{ readonly 点数: number }>) => readonly Rule[]) =>
     implement(点数を判定する, {
@@ -453,9 +453,9 @@ describe("classes a guard's threshold divides a position into", () => {
   it("divides neither position a guard compares with each other", async () => {
     const 比べる = behavior({
       name: "比べる",
-      input: sum("状態", { 入力済み: object({ 数量: int(), 在庫数: int() }) }),
+      input: variants("状態", { 入力済み: object({ 数量: int(), 在庫数: int() }) }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 在庫内か = implement(比べる, {
       cases: {
@@ -490,9 +490,9 @@ describe("classes a guard's threshold divides a position into", () => {
 describe("borders of a rule that names one value", () => {
   const 判定する = behavior({
     name: "判定する",
-    input: sum("状態", { 入力済み: object({ 数量: int() }) }),
+    input: variants("状態", { 入力済み: object({ 数量: int() }) }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
   const pointsOf = async (condition: (入力: TermOf<{ readonly 数量: number }>) => Rule) => {
     const 判定 = implement(判定する, {
@@ -554,9 +554,9 @@ describe("comparisons Chisel could not read", () => {
   it("reads two instants on their difference in nanoseconds", async () => {
     const 比べる = behavior({
       name: "比べる",
-      input: sum("状態", { 入力済み: object({ 開始: instant(), 終了: instant() }) }),
+      input: variants("状態", { 入力済み: object({ 開始: instant(), 終了: instant() }) }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 順序 = implement(比べる, {
       cases: {
@@ -582,9 +582,9 @@ describe("comparisons Chisel could not read", () => {
   it("names a comparison it drew no border for and leaves the verdict undetermined", async () => {
     const 比べる = behavior({
       name: "比べる",
-      input: sum("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 並び = implement(比べる, {
       cases: {
@@ -609,9 +609,9 @@ describe("comparisons Chisel could not read", () => {
 describe("a guard on a length", () => {
   const 明細を確かめる = behavior({
     name: "明細を確かめる",
-    input: sum("状態", { 入力済み: object({ 明細: array(int()), 上限: int() }) }),
-    result: sum("結果", { 受付: object({}), 断る: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 明細: array(int()), 上限: int() }) }),
+    result: variants("結果", { 受付: object({}), 断る: object({}) }),
+    effects: variants("種類", {}),
   });
 
   async function pointsReached(
@@ -661,9 +661,9 @@ describe("a guard on a length", () => {
 describe("a guard point no row can reach", () => {
   const 数量を見る = behavior({
     name: "数量を見る",
-    input: sum("状態", { 入力済み: object({ 数量: int() }) }),
-    result: sum("結果", { 受付: object({}), 却下: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 数量: int() }) }),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
   });
   const 二段 = implement(数量を見る, {
     cases: {
@@ -704,9 +704,9 @@ describe("a guard point no row can reach", () => {
 describe("an equality between two positions", () => {
   const 照合する = behavior({
     name: "照合する",
-    input: sum("状態", { 入力済み: object({ 請求額: int(), 入金額: int() }) }),
-    result: sum("結果", { 一致: object({}), 不一致: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 請求額: int(), 入金額: int() }) }),
+    result: variants("結果", { 一致: object({}), 不一致: object({}) }),
+    effects: variants("種類", {}),
   });
 
   async function reportFor(condition: (入力: TermOf<{ 状態: "入力済み"; 請求額: number; 入金額: number }>) => Rule) {

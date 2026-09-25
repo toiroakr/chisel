@@ -1,11 +1,11 @@
 import type { AnyBehavior, AnyImplementation, Behavior, Implementation } from "./behavior.js";
 import { SpecificationError } from "./behavior.js";
 import type { Requirements } from "./dependency.js";
-import type { AnySumSchema, SumSchema, SumVariants } from "./schema.js";
-import { isSumSchema, sum } from "./schema.js";
+import type { AnyVariantsSchema, VariantsSchema, VariantTable } from "./schema.js";
+import { isVariantsSchema, variants } from "./schema.js";
 
-type VariantsOf<S> = S extends SumSchema<any, infer Variants> ? Variants : never;
-type DiscriminantOf<S> = S extends SumSchema<infer Discriminant, any> ? Discriminant : never;
+type VariantsOf<S> = S extends VariantsSchema<any, infer Variants> ? Variants : never;
+type DiscriminantOf<S> = S extends VariantsSchema<infer Discriminant, any> ? Discriminant : never;
 type DepartedOf<B> = B extends { readonly departed: readonly (infer Tag extends string)[] }
   ? Tag
   : never;
@@ -22,13 +22,13 @@ type Departing<First extends AnyBehavior, Second extends AnyBehavior> =
   | DepartedOf<Second>
   | Exclude<keyof VariantsOf<First["result"]> & string, Flowing<First, Second>>;
 
-type ComposedResult<First extends AnyBehavior, Second extends AnyBehavior> = SumSchema<
+type ComposedResult<First extends AnyBehavior, Second extends AnyBehavior> = VariantsSchema<
   DiscriminantOf<First["result"]>,
   Pick<VariantsOf<First["result"]>, Departing<First, Second> & keyof VariantsOf<First["result"]>> &
     VariantsOf<Second["result"]>
 >;
 
-type ComposedEffects<First extends AnyBehavior, Second extends AnyBehavior> = SumSchema<
+type ComposedEffects<First extends AnyBehavior, Second extends AnyBehavior> = VariantsSchema<
   DiscriminantOf<First["effects"]>,
   VariantsOf<First["effects"]> & VariantsOf<Second["effects"]>
 >;
@@ -71,7 +71,7 @@ export function compose<const First extends AnyBehavior, const Second extends An
       `${colliding} departs ${first.name} and is answered by ${second.name}; a value cannot say which rail it is on`,
     );
   }
-  const result = sum(firstResult.discriminant, {
+  const result = variants(firstResult.discriminant, {
     ...pick(firstResult.variants, departing),
     ...secondResult.variants,
   });
@@ -117,18 +117,18 @@ function departedOf(definition: AnyBehavior): readonly string[] {
   return (definition as { readonly departed?: readonly string[] }).departed ?? [];
 }
 
-function sumResult(definition: AnyBehavior): AnySumSchema {
-  if (!isSumSchema(definition.result)) {
+function sumResult(definition: AnyBehavior): AnyVariantsSchema {
+  if (!isVariantsSchema(definition.result)) {
     throw new SpecificationError(`${definition.name} does not answer a sum, so nothing can flow from it`);
   }
   return definition.result;
 }
 
-function pick(variants: SumVariants, tags: readonly string[]): SumVariants {
+function pick(variants: VariantTable, tags: readonly string[]): VariantTable {
   return Object.fromEntries(tags.map(tag => [tag, variants[tag]!]));
 }
 
-function mergedEffects(first: AnyBehavior, second: AnyBehavior): AnySumSchema {
+function mergedEffects(first: AnyBehavior, second: AnyBehavior): AnyVariantsSchema {
   const [left, right] = [first.effects, second.effects];
   if (right.variantTags.length === 0) {
     return left;
@@ -147,7 +147,7 @@ function mergedEffects(first: AnyBehavior, second: AnyBehavior): AnySumSchema {
   if (clash !== undefined) {
     throw new SpecificationError(`${first.name} and ${second.name} declare the effect ${clash} apart`);
   }
-  return sum(left.discriminant, { ...left.variants, ...right.variants });
+  return variants(left.discriminant, { ...left.variants, ...right.variants });
 }
 
 function mergedRequires(first: AnyBehavior, second: AnyBehavior): Requirements {

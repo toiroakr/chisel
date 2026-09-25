@@ -567,7 +567,7 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
             rule.operator === "!=" ||
             differenceCarrier(kinds[0], kinds[1]) !== undefined
           : kinds[0] === "boolean" ||
-            kinds[0] === "sum" ||
+            kinds[0] === "variants" ||
             kinds[0] === "literal" ||
             (kinds[0] !== undefined &&
               carrierOf({ kind: kinds[0] } as AnySchema, "value") !== undefined);

@@ -1,10 +1,10 @@
-import { behavior, boolean, spec, example, examples, object, sum } from "../../src/index.js";
+import { behavior, boolean, spec, example, examples, object, variants } from "../../src/index.js";
 
 const 送る = behavior({
   name: "送る",
-  input: sum("状態", { 入力済み: object({ ギフト: boolean(), 速達: boolean() }) }),
+  input: variants("状態", { 入力済み: object({ ギフト: boolean(), 速達: boolean() }) }),
   result: object({}),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
 });
 
 export const 送付 = spec({

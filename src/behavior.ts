@@ -1,6 +1,6 @@
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
-  AnySumSchema,
+  AnyVariantsSchema,
   Infer,
   Schema,
   Tags,
@@ -25,7 +25,7 @@ import {
   termData,
   rootsRead,
 } from "./rule.js";
-import { isSumSchema, schemaAtPath, tagOf } from "./schema.js";
+import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
   readonly result: Result;
@@ -81,7 +81,7 @@ export interface ControlPolicy {
   readonly exposure?: "normal" | "shadow" | "canary";
 }
 
-export type ControlTable<Effects extends AnySumSchema> = Readonly<
+export type ControlTable<Effects extends AnyVariantsSchema> = Readonly<
   Partial<Record<Tags<Effects>, ControlPolicy | Pending>>
 >;
 
@@ -104,9 +104,9 @@ export interface EnsuresBuilder<Input, ResultSchema extends Schema<unknown>> {
 }
 
 export interface Behavior<
-  InputSchema extends AnySumSchema,
+  InputSchema extends AnyVariantsSchema,
   ResultSchema extends Schema<unknown>,
-  EffectSchema extends AnySumSchema,
+  EffectSchema extends AnyVariantsSchema,
   Requires extends Requirements = {},
 > {
   readonly kind: "behavior";
@@ -119,7 +119,7 @@ export interface Behavior<
   readonly ensures: readonly EnsuresClause[];
 }
 
-export type AnyBehavior = Behavior<AnySumSchema, Schema<unknown>, AnySumSchema, Requirements>;
+export type AnyBehavior = Behavior<AnyVariantsSchema, Schema<unknown>, AnyVariantsSchema, Requirements>;
 
 export type BehaviorInput<B> = B extends { readonly input: infer Input } ? Infer<Input> : never;
 export type BehaviorResult<B> = B extends { readonly result: infer Result }
@@ -202,9 +202,9 @@ export function pending(reason: string): Pending {
 }
 
 export function behavior<
-  const InputSchema extends AnySumSchema,
+  const InputSchema extends AnyVariantsSchema,
   const ResultSchema extends Schema<unknown>,
-  const EffectSchema extends AnySumSchema,
+  const EffectSchema extends AnyVariantsSchema,
   const Requires extends Requirements = {},
 >(options: {
   readonly name: string;
@@ -268,7 +268,7 @@ export function brokenEnsures(
   input: unknown,
   result: unknown,
 ): EnsuresClause | undefined {
-  const tag = isSumSchema(definition.result) ? tagOf(definition.result, result) : undefined;
+  const tag = isVariantsSchema(definition.result) ? tagOf(definition.result, result) : undefined;
   return definition.ensures.find(
     clause =>
       (clause.cases === undefined || (tag !== undefined && clause.cases.includes(tag))) &&
@@ -309,7 +309,7 @@ function checkMatch(
   );
   if (
     selected === undefined ||
-    !isSumSchema(selected) ||
+    !isVariantsSchema(selected) ||
     selected.discriminant !== keys[keys.length - 1]
   ) {
     throw new SpecificationError(
@@ -458,7 +458,7 @@ async function runStages(
   const answered = (await runTraced(first, input as never, deps as never)).execution;
   const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
   const firstResult = first.behavior.result;
-  const tag = isSumSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
+  const tag = isVariantsSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
   if (
     tag === undefined ||
     departed.includes(tag) ||

@@ -6,16 +6,16 @@ import {
   object,
   rules,
   string,
-  sum,
+  variants,
   spec,
   examples,
 } from "../../src/index.js";
 
 const 並べる = behavior({
   name: "並べる",
-  input: sum("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+  input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
   result: object({}),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
 });
 
 const 名前順 = implement(並べる, {

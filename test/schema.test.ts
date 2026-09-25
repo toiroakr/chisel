@@ -4,14 +4,14 @@ import {
   boolean,
   instant,
   int,
-  isSumSchema,
+  isVariantsSchema,
   literal,
   number,
   object,
   optional,
   record,
   string,
-  sum,
+  variants,
   tagOf,
 } from "../src/index.js";
 import type { Infer, Tags, VariantOf } from "../src/index.js";
@@ -267,8 +267,8 @@ describe("object", () => {
   });
 });
 
-describe("sum", () => {
-  const Shape = sum("state", {
+describe("variants", () => {
+  const Shape = variants("state", {
     draft: object({ id: string("Id") }),
     published: object({ id: string("Id"), publishedAt: instant() }),
   });
@@ -314,21 +314,21 @@ describe("sum", () => {
   });
 });
 
-describe("isSumSchema", () => {
-  it("is true for a schema built with sum()", () => {
-    const Shape = sum("state", { draft: object({ id: string("Id") }) });
+describe("isVariantsSchema", () => {
+  it("is true for a schema built with variants()", () => {
+    const Shape = variants("state", { draft: object({ id: string("Id") }) });
 
-    expect(isSumSchema(Shape)).toBe(true);
+    expect(isVariantsSchema(Shape)).toBe(true);
   });
 
   it("is false for a non-sum schema", () => {
-    expect(isSumSchema(string("Id"))).toBe(false);
-    expect(isSumSchema(object({ id: string("Id") }))).toBe(false);
+    expect(isVariantsSchema(string("Id"))).toBe(false);
+    expect(isVariantsSchema(object({ id: string("Id") }))).toBe(false);
   });
 });
 
 describe("tagOf", () => {
-  const Shape = sum("state", {
+  const Shape = variants("state", {
     draft: object({ id: string("Id") }),
     published: object({ id: string("Id") }),
   });
@@ -349,7 +349,7 @@ describe("tagOf", () => {
 });
 
 describe("Tags and VariantOf", () => {
-  const Shape = sum("state", {
+  const Shape = variants("state", {
     draft: object({ id: string("Id") }),
     published: object({ id: string("Id"), url: string("Url") }),
   });

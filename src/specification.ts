@@ -38,7 +38,7 @@ import type { Feasibility } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
-import { isSumSchema, tagOf } from "./schema.js";
+import { isVariantsSchema, tagOf } from "./schema.js";
 import type { AnySchema } from "./schema.js";
 
 interface RunOutcome {
@@ -393,7 +393,7 @@ export async function evaluateSpecification(
   ): { readonly result: string | undefined; readonly effects: ReadonlySet<string> } => {
     executedInputs.add(inputTag);
     const execution = actual as Execution<unknown, unknown>;
-    const result = isSumSchema(definition.result)
+    const result = isVariantsSchema(definition.result)
       ? tagOf(definition.result, execution.result)
       : undefined;
     if (result !== undefined) {
@@ -480,7 +480,7 @@ export async function evaluateSpecification(
       });
     }
 
-    const resultTag = isSumSchema(definition.result)
+    const resultTag = isVariantsSchema(definition.result)
       ? tagOf(definition.result, row.expect.result)
       : undefined;
     if (resultTag !== undefined) {
@@ -589,7 +589,7 @@ export async function evaluateSpecification(
 
   const refusedInputs = excludedCases(definition.input);
   const input = coverage(definition.input.variantTags, coveredInputs, refusedInputs);
-  const result = isSumSchema(definition.result)
+  const result = isVariantsSchema(definition.result)
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
@@ -777,7 +777,7 @@ export async function evaluateSpecification(
         executed: executedInputs.has(tag),
         verified: verifiedInputs.has(tag),
       })),
-      result: isSumSchema(definition.result)
+      result: isVariantsSchema(definition.result)
         ? definition.result.variantTags.map(tag => ({
             case: tag,
             specified: coveredResults.has(tag),

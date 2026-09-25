@@ -7,19 +7,19 @@ import {
   object,
   optional,
   string,
-  sum,
+  variants,
 } from "../../src/index.js";
 
 const 注文を確定する = behavior({
   name: "注文を確定する",
-  input: sum("状態", {
+  input: variants("状態", {
     商品あり: object({
       カートID: string("カートID"),
       クーポン: optional(string("クーポンコード")),
     }),
   }),
-  result: sum("結果", { 確定: object({ カートID: string("カートID") }) }),
-  effects: sum("種類", { 決済要求: object({ カートID: string("カートID") }) }),
+  result: variants("結果", { 確定: object({ カートID: string("カートID") }) }),
+  effects: variants("種類", { 決済要求: object({ カートID: string("カートID") }) }),
 });
 
 export const 注文確定 = spec({

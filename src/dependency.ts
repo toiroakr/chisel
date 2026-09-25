@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Rule } from "./rule.js";
 import { holds } from "./rule.js";
 import type { Schema } from "./schema.js";
-import { isSumSchema, tagOf } from "./schema.js";
+import { isVariantsSchema, tagOf } from "./schema.js";
 
 export interface ValueDependency<Output> {
   readonly kind: "dependency";
@@ -236,7 +236,7 @@ export function fakeIssuesOf(
 }
 
 function brokenBy(behavior: InjectedBehavior, input: unknown, value: unknown): string | undefined {
-  const tag = isSumSchema(behavior.result) ? tagOf(behavior.result, value) : undefined;
+  const tag = isVariantsSchema(behavior.result) ? tagOf(behavior.result, value) : undefined;
   return behavior.ensures.find(
     clause =>
       (clause.cases === undefined || (tag !== undefined && clause.cases.includes(tag))) &&

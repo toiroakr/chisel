@@ -14,22 +14,22 @@ import {
   runImplementation,
   SpecificationError,
   string,
-  sum,
+  variants,
   unanswered,
   verifyConformance,
 } from "../src/index.js";
 
-const Input = sum("state", {
+const Input = variants("state", {
   draft: object({ id: string("Id") }),
   published: object({ id: string("Id") }),
 });
 
-const Result = sum("type", {
+const Result = variants("type", {
   accepted: object({ id: string("Id") }),
   rejected: object({ reason: string("Reason") }),
 });
 
-const Effect = sum("type", {
+const Effect = variants("type", {
   notify: object({ id: string("Id") }),
 });
 
@@ -859,7 +859,7 @@ describe("coverage-driven adequacy vetoes", () => {
   });
 
   it("vetoes adequacy when an example never covers one of the effect variants", async () => {
-    const EffectWithAudit = sum("type", {
+    const EffectWithAudit = variants("type", {
       notify: object({ id: string("Id") }),
       audit: object({ id: string("Id") }),
     });

@@ -15,12 +15,12 @@ declare data and behavior
 
 ## 1. Declare data and behavior
 
-The first version describes the domain vocabulary and the behavior boundary, not its implementation.
+The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type).
 
 ```ts
-import { behavior, object, string, sum } from "chisel";
+import { behavior, object, string, variants } from "chisel";
 
-const Order = sum("state", {
+const Order = variants("state", {
   unpaid: object({ orderId: string("OrderId") }),
   paid: object({
     orderId: string("OrderId"),
@@ -28,12 +28,12 @@ const Order = sum("state", {
   }),
 });
 
-const CancelResult = sum("type", {
+const CancelResult = variants("type", {
   accepted: object({ orderId: string("OrderId") }),
   rejected: object({ reason: string("Reason") }),
 });
 
-const CancelEffect = sum("type", {
+const CancelEffect = variants("type", {
   refund: object({ paymentId: string("PaymentId") }),
   restock: object({ orderId: string("OrderId") }),
 });
@@ -185,8 +185,8 @@ npm run demo
 
 The analyzer follows the example-adequacy model of [Souther](https://github.com/souther-lang/souther). It measures what the model itself states and nothing else:
 
-- **Cases** of the input, result and effect sums. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
-- **Classes** of each input position, derived from the types: an `optional` field is absent or present, a `boolean` true or false, a sum field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`sum(...).invariant(v => ne(v.state, "archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
+- **Cases** of the input, result and effect variants. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
+- **Classes** of each input position, derived from the types: an `optional` field is absent or present, a `boolean` true or false, a `variants` field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`variants(...).invariant(v => ne(v.state, "archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
 - **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `int`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named. A point one bound owes is excluded when another bound refuses it, and bounds that leave nothing admitted (`$ >= 10` with `$ <= 5`) are reported as a model error rather than as gaps. A length is never negative, so a point that would lie below zero has no point there (`none: a length is never negative`) and no row is asked for at it, whether the border comes from an invariant or a guard.
 
 ```ts
@@ -216,7 +216,7 @@ const implementation = implement(checkout, {
 });
 ```
 
-  Every guard has a `holds` and an `else` arm, and every case of a `match` is an arm (a `match` that leaves out a case of the sum, or names one it does not have, fails to compile); each way through the guards is a rule. A way or an arm no row took is a gap only when some row could take it: where the conditions it passes contradict each other or the invariants of the values they read (`$.x >= 10` holds and `$.x >= 5` fails), no row is owed; where a condition Chisel cannot read (`all`/`any`) shares a value with another, it is undecided, which leaves the verdict `undetermined` rather than `not_satisfied`. Both are counted under their reason instead of listed. A guard border point is settled the same way, from the conditions a row has passed before it reaches the comparison. A guard comparing a position with a constant divides it into classes and owes all four border points; one comparing two positions with an order draws its border on their difference, while an equality between two positions draws none, since its `holds` and `else` arms already ask for a row on each side of the line. A guard point is met only by a row that reached the comparison.
+  Every guard has a `holds` and an `else` arm, and every case of a `match` is an arm (a `match` that leaves out a case of the `variants` it matches on, or names one it does not have, fails to compile); each way through the guards is a rule. A way or an arm no row took is a gap only when some row could take it: where the conditions it passes contradict each other or the invariants of the values they read (`$.x >= 10` holds and `$.x >= 5` fails), no row is owed; where a condition Chisel cannot read (`all`/`any`) shares a value with another, it is undecided, which leaves the verdict `undetermined` rather than `not_satisfied`. Both are counted under their reason instead of listed. A guard border point is settled the same way, from the conditions a row has passed before it reaches the comparison. A guard comparing a position with a constant divides it into classes and owes all four border points; one comparing two positions with an order draws its border on their difference, while an equality between two positions draws none, since its `holds` and `else` arms already ask for a row on each side of the line. A guard point is met only by a row that reached the comparison.
 
 A free-form `run` closure may contain branches Chisel cannot read, so its arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. The same holds for a comparison inside `rules` that Chisel cannot draw a line from.
 

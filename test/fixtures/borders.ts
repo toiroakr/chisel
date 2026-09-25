@@ -8,19 +8,19 @@ import {
   gte,
   int,
   object,
-  sum,
+  variants,
 } from "../../src/index.js";
 
 const 数量を確定する = behavior({
   name: "数量を確定する",
-  input: sum("状態", {
+  input: variants("状態", {
     入力済み: object({
       数量: int().invariant(v => gte(v, 1)),
       同意: boolean().invariant(v => eq(v, true)),
     }),
   }),
   result: object({}),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
 });
 
 export const 数量確定 = spec({

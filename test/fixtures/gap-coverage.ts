@@ -6,18 +6,18 @@ import {
   implement,
   object,
   string,
-  sum,
+  variants,
   unanswered,
 } from "../../src/index.js";
 
-const Input = sum("state", {
+const Input = variants("state", {
   ready: object({ id: string("Id") }),
   archived: object({ id: string("Id") }),
 });
-const Result = sum("type", {
+const Result = variants("type", {
   ok: object({ id: string("Id") }),
 });
-const Effect = sum("type", {
+const Effect = variants("type", {
   none: object({}),
 });
 

@@ -18,7 +18,7 @@ import {
   positionsOf,
   record,
   string,
-  sum,
+  variants,
 } from "../src/index.js";
 import type { DividedPosition, Position } from "../src/index.js";
 
@@ -30,7 +30,7 @@ function summary(position: Position) {
 
 describe("positionsOf", () => {
   it("divides an optional field into the classes なし and あり", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ クーポン: optional(string("クーポンコード")) }),
     });
 
@@ -41,7 +41,7 @@ describe("positionsOf", () => {
   });
 
   it("divides a boolean field into the classes true and false", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ ギフト包装: boolean() }),
     });
 
@@ -51,9 +51,9 @@ describe("positionsOf", () => {
   });
 
   it("divides a sum field into its cases", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({
-        配送: sum("方法", {
+        配送: variants("方法", {
           宅配: object({}),
           店頭受取: object({}),
         }),
@@ -66,9 +66,9 @@ describe("positionsOf", () => {
   });
 
   it("takes the fields of a sum field's case apart under that case", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({
-        配送: sum("方法", {
+        配送: variants("方法", {
           宅配: object({ 置き配: boolean() }),
         }),
       }),
@@ -81,7 +81,7 @@ describe("positionsOf", () => {
   });
 
   it("takes the values of a record apart as one position", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ ギフト指定: record(boolean()) }),
     });
 
@@ -91,7 +91,7 @@ describe("positionsOf", () => {
   });
 
   it("reports a field no rule draws a line through as not derivable", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({
         カートID: string("カートID"),
         単価: number(),
@@ -109,7 +109,7 @@ describe("positionsOf", () => {
   });
 
   it("takes a nested object apart field by field", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ 配送先: object({ 置き配: boolean() }) }),
     });
 
@@ -119,7 +119,7 @@ describe("positionsOf", () => {
   });
 
   it("takes the elements of an array apart as one position per element field", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({
         明細: array(object({ 数量: number(), 軽減税率: boolean() })),
       }),
@@ -132,7 +132,7 @@ describe("positionsOf", () => {
   });
 
   it("takes what an optional holds apart under あり", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ クーポン: optional(object({ 自動適用: boolean() })) }),
     });
 
@@ -144,7 +144,7 @@ describe("positionsOf", () => {
 });
 
 describe("DividedPosition.classify", () => {
-  const Cart = sum("状態", {
+  const Cart = variants("状態", {
     空: object({}),
     商品あり: object({
       クーポン: optional(string("クーポンコード")),
@@ -183,7 +183,7 @@ describe("DividedPosition.classify", () => {
 
 describe("borders an invariant draws", () => {
   function bordersAt(schema: Parameters<typeof object>[0][string]) {
-    const [position] = positionsOf(sum("状態", { 商品あり: object({ 数量: schema }) }));
+    const [position] = positionsOf(variants("状態", { 商品あり: object({ 数量: schema }) }));
     return position!.borders.map(border => ({
       rule: border.rule,
       points: border.points.map(({ role, relation, status }) => ({ role, relation, status })),
@@ -274,7 +274,7 @@ describe("borders an invariant draws", () => {
 describe("a border with nothing past it", () => {
   it("excludes the IN point of an upper bound at the empty string, below which no string exists", () => {
     const [position] = positionsOf(
-      sum("状態", { 入力済み: object({ 見出し: string("見出し").invariant(v => lte(v, "")) }) }),
+      variants("状態", { 入力済み: object({ 見出し: string("見出し").invariant(v => lte(v, "")) }) }),
     );
 
     expect(position!.borders[0]!.points[2]).toMatchObject({ role: "IN", status: "excluded" });
@@ -283,7 +283,7 @@ describe("a border with nothing past it", () => {
 
 describe("invariants written on the input sum", () => {
   it("draw their border on the field they name, under every case that has it", () => {
-    const 注文 = sum("状態", {
+    const 注文 = variants("状態", {
       入力済み: object({ 数量: int() }),
       確定済み: object({ 数量: int() }),
     }).invariant(v => gte(v.数量, 1));
@@ -300,9 +300,9 @@ describe("invariants written on the input sum", () => {
   });
 
   it("are read on a sum field as well", () => {
-    const 注文 = sum("状態", {
+    const 注文 = variants("状態", {
       入力済み: object({
-        配送: sum("方法", {
+        配送: variants("方法", {
           宅配: object({ 個数: int() }),
           店頭: object({ 個数: int() }),
         }).invariant(v => gte(v.個数, 1)),
@@ -320,7 +320,7 @@ describe("invariants written on the input sum", () => {
 describe("bounds that leave nothing admitted", () => {
   it("excludes every point of two bounds that admit no value between them", () => {
     const [position] = positionsOf(
-      sum("状態", {
+      variants("状態", {
         入力済み: object({
           数量: int()
             .invariant(v => gte(v, 10))
@@ -336,7 +336,7 @@ describe("bounds that leave nothing admitted", () => {
 
   it("excludes a point of one bound that another bound refuses", () => {
     const [position] = positionsOf(
-      sum("状態", {
+      variants("状態", {
         入力済み: object({
           数量: int()
             .invariant(v => gte(v, 1))
@@ -355,7 +355,7 @@ describe("bounds that leave nothing admitted", () => {
 
 describe("a length border stops at zero", () => {
   function pointsAt(schema: Parameters<typeof object>[0][string]) {
-    const [position] = positionsOf(sum("状態", { 入力済み: object({ 見出し: schema }) }));
+    const [position] = positionsOf(variants("状態", { 入力済み: object({ 見出し: schema }) }));
     return position!.borders[0]!.points.map(({ role, relation, status }) => ({
       role,
       relation,
@@ -396,7 +396,7 @@ describe("a length border stops at zero", () => {
 describe("an invariant written as a conjunction", () => {
   it("draws a border for each part it requires", () => {
     const [position] = positionsOf(
-      sum("状態", { 入力済み: object({ 点数: int().invariant(v => and(gte(v, 0), lte(v, 100))) }) }),
+      variants("状態", { 入力済み: object({ 点数: int().invariant(v => and(gte(v, 0), lte(v, 100))) }) }),
     );
 
     expect(position!.borders.map(border => border.rule)).toStrictEqual([
@@ -408,7 +408,7 @@ describe("an invariant written as a conjunction", () => {
 
 describe("where an object invariant draws its border", () => {
   it("places the border on the one field it compares with a constant", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ 在庫数: int() }).invariant(v => gte(v.在庫数, 0)),
     });
 
@@ -418,7 +418,7 @@ describe("where an object invariant draws its border", () => {
   });
 
   it("draws no border for a rule relating two fields", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ 数量: int(), 在庫数: int() }).invariant(v =>
         lte(v.数量, v.在庫数),
       ),
@@ -431,7 +431,7 @@ describe("where an object invariant draws its border", () => {
 describe("classes an invariant refuses", () => {
   it("excludes the boolean class an equality rules out", () => {
     const [position] = positionsOf(
-      sum("状態", { 商品あり: object({ 同意: boolean().invariant(v => eq(v, true)) }) }),
+      variants("状態", { 商品あり: object({ 同意: boolean().invariant(v => eq(v, true)) }) }),
     ) as [DividedPosition];
 
     expect(position.excluded).toStrictEqual(["false"]);
@@ -439,9 +439,9 @@ describe("classes an invariant refuses", () => {
 
   it("excludes the case of a sum field its discriminant is ruled out of", () => {
     const [position] = positionsOf(
-      sum("状態", {
+      variants("状態", {
         確定済み: object({
-          配送: sum("方法", { 店頭受取: object({}), 宅配: object({}) }).invariant(v =>
+          配送: variants("方法", { 店頭受取: object({}), 宅配: object({}) }).invariant(v =>
             ne(v.方法, "店頭受取"),
           ),
         }),
@@ -452,7 +452,7 @@ describe("classes an invariant refuses", () => {
   });
 
   it("draws a border on the size of a record", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ 数量表: record(int()).invariant(v => gte(length(v), 1)) }),
     });
 
@@ -465,7 +465,7 @@ describe("classes an invariant refuses", () => {
   });
 
   it("draws a border on the length of an array beside its element positions", () => {
-    const Cart = sum("状態", {
+    const Cart = variants("状態", {
       商品あり: object({ 明細: array(boolean()).invariant(v => gte(length(v), 1)) }),
     });
 
@@ -481,7 +481,7 @@ describe("classes an invariant refuses", () => {
 describe("Position.write", () => {
   it("keeps the order of the fields it does not move", () => {
     const [, 単価] = positionsOf(
-      sum("状態", { 商品あり: object({ 数量: int(), 単価: int(), 在庫数: int() }) }),
+      variants("状態", { 商品あり: object({ 数量: int(), 単価: int(), 在庫数: int() }) }),
     );
 
     expect(
@@ -491,7 +491,7 @@ describe("Position.write", () => {
 
   it("moves only the first element of an array", () => {
     const [単価] = positionsOf(
-      sum("状態", { 商品あり: object({ 明細: array(object({ 単価: int() })) }) }),
+      variants("状態", { 商品あり: object({ 明細: array(object({ 単価: int() })) }) }),
     );
 
     expect(

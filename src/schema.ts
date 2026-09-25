@@ -89,45 +89,45 @@ export interface ObjectSchema<Shape extends ObjectShape>
   readonly shape: Shape;
 }
 
-export type SumVariants = Readonly<Record<string, ObjectSchema<ObjectShape>>>;
+export type VariantTable = Readonly<Record<string, ObjectSchema<ObjectShape>>>;
 
-export type SumValue<
+export type VariantsValue<
   Discriminant extends string,
-  Variants extends SumVariants,
+  Variants extends VariantTable,
 > = {
   [K in keyof Variants & string]: Readonly<Record<Discriminant, K>> &
     Infer<Variants[K]>;
 }[keyof Variants & string];
 
-export type SumVariant<
+export type VariantValue<
   Discriminant extends string,
-  Variants extends SumVariants,
+  Variants extends VariantTable,
   Tag extends keyof Variants & string,
 > = Readonly<Record<Discriminant, Tag>> & Infer<Variants[Tag]>;
 
-export interface SumSchema<
+export interface VariantsSchema<
   Discriminant extends string,
-  Variants extends SumVariants,
-> extends Schema<SumValue<Discriminant, Variants>> {
-  readonly kind: "sum";
+  Variants extends VariantTable,
+> extends Schema<VariantsValue<Discriminant, Variants>> {
+  readonly kind: "variants";
   readonly discriminant: Discriminant;
   readonly variants: Variants;
   readonly variantTags: readonly (keyof Variants & string)[];
   placeholderFor<Tag extends keyof Variants & string>(
     tag: Tag,
-  ): SumVariant<Discriminant, Variants, Tag>;
+  ): VariantValue<Discriminant, Variants, Tag>;
 }
 
-export type AnySumSchema = SumSchema<any, any>;
-export type Tags<S> = S extends SumSchema<any, infer Variants>
+export type AnyVariantsSchema = VariantsSchema<any, any>;
+export type Tags<S> = S extends VariantsSchema<any, infer Variants>
   ? keyof Variants & string
   : never;
-export type VariantOf<S, Tag extends Tags<S>> = S extends SumSchema<
+export type VariantOf<S, Tag extends Tags<S>> = S extends VariantsSchema<
   infer Discriminant,
   infer Variants
 >
   ? Tag extends keyof Variants & string
-    ? SumVariant<Discriminant, Variants, Tag>
+    ? VariantValue<Discriminant, Variants, Tag>
     : never
   : never;
 
@@ -381,17 +381,17 @@ export function record<T>(value: Schema<T>): RecordSchema<T> {
   }
 }
 
-export function sum<
+export function variants<
   const Discriminant extends string,
-  const Variants extends SumVariants,
+  const Variants extends VariantTable,
 >(
   discriminant: Discriminant,
   variants: Variants,
-): SumSchema<Discriminant, Variants> {
+): VariantsSchema<Discriminant, Variants> {
   const variantTags = Object.keys(variants) as (keyof Variants & string)[];
 
-  return refinable<SumSchema<Discriminant, Variants>>({
-    kind: "sum",
+  return refinable<VariantsSchema<Discriminant, Variants>>({
+    kind: "variants",
     discriminant,
     variants,
     variantTags,
@@ -403,7 +403,7 @@ export function sum<
   function parse(
     value: unknown,
     path = "$",
-  ): ValidationResult<SumValue<Discriminant, Variants>> {
+  ): ValidationResult<VariantsValue<Discriminant, Variants>> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       return invalid(path, "Expected an object");
     }
@@ -424,7 +424,7 @@ export function sum<
 
     const result = variant.parse(value, path);
     return result.success
-      ? valid({ [discriminant]: tag, ...result.value } as SumValue<
+      ? valid({ [discriminant]: tag, ...result.value } as VariantsValue<
           Discriminant,
           Variants
         >)
@@ -433,9 +433,9 @@ export function sum<
 
   function placeholderFor<Tag extends keyof Variants & string>(
     tag: Tag,
-  ): SumVariant<Discriminant, Variants, Tag> {
+  ): VariantValue<Discriminant, Variants, Tag> {
     const fields = variants[tag]!.placeholder() as Record<string, unknown>;
-    return { [discriminant]: tag, ...fields } as SumVariant<
+    return { [discriminant]: tag, ...fields } as VariantValue<
       Discriminant,
       Variants,
       Tag
@@ -443,11 +443,11 @@ export function sum<
   }
 }
 
-export function isSumSchema(schema: AnySchema): schema is AnySumSchema {
-  return schema.kind === "sum";
+export function isVariantsSchema(schema: AnySchema): schema is AnyVariantsSchema {
+  return schema.kind === "variants";
 }
 
-export function tagOf(schema: AnySumSchema, value: unknown): string | undefined {
+export function tagOf(schema: AnyVariantsSchema, value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }

@@ -8,14 +8,14 @@ import {
   object,
   pending,
   string,
-  sum,
+  variants,
 } from "../src/index.js";
 
 const OrderId = string("OrderId");
 const PaymentId = string("PaymentId");
 const ShipmentId = string("ShipmentId");
 
-const Order = sum("state", {
+const Order = variants("state", {
   unpaid: object({ orderId: OrderId }),
   paid: object({ orderId: OrderId, paymentId: PaymentId }),
   preparing: object({ orderId: OrderId, paymentId: PaymentId }),
@@ -23,7 +23,7 @@ const Order = sum("state", {
   cancelled: object({ orderId: OrderId }),
 });
 
-const CancelResult = sum("type", {
+const CancelResult = variants("type", {
   accepted: object({
     order: object({
       state: literal("cancelled"),
@@ -33,7 +33,7 @@ const CancelResult = sum("type", {
   rejected: object({ reason: string("CancelRejection") }),
 });
 
-const CancelEffect = sum("type", {
+const CancelEffect = variants("type", {
   refund: object({
     paymentId: PaymentId,
     idempotencyKey: string("IdempotencyKey"),

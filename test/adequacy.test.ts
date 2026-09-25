@@ -19,22 +19,22 @@ import {
   optional,
   rules,
   string,
-  sum,
+  variants,
   unanswered,
 } from "../src/index.js";
 
-const Cart = sum("状態", {
+const Cart = variants("状態", {
   商品あり: object({
     カートID: string("カートID"),
     クーポン: optional(string("クーポンコード")),
   }),
 });
 
-const Outcome = sum("結果", {
+const Outcome = variants("結果", {
   確定: object({ カートID: string("カートID") }),
 });
 
-const Effect = sum("種類", {
+const Effect = variants("種類", {
   決済要求: object({ カートID: string("カートID") }),
 });
 
@@ -125,7 +125,7 @@ describe("equivalence partitions in the adequacy report", () => {
 });
 
 describe("graded evidence in the adequacy report", () => {
-  const Verdict = sum("結果", {
+  const Verdict = variants("結果", {
     確定: object({ カートID: string("カートID") }),
     不可: object({ 理由: string("理由") }),
   });
@@ -358,11 +358,11 @@ describe("measures and verdict", () => {
 describe("border points in the adequacy report", () => {
   const 数量を確定する = behavior({
     name: "数量を確定する",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
     }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
   const 数量で = (数量: number) =>
     example(数量を確定する, `数量${数量}`, {
@@ -413,11 +413,11 @@ describe("border points in the adequacy report", () => {
   it("reads the length of a value where the border is drawn on its length", async () => {
     const 登録する = behavior({
       name: "登録する",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 商品ID: string("商品ID").invariant(v => gte(length(v), 3)) }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const report = await evaluateSpecification(
       spec({
@@ -444,11 +444,11 @@ describe("excluded classes in the adequacy report", () => {
   it("neither covers nor misses a class the rules refuse", async () => {
     const 同意する = behavior({
       name: "同意する",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const report = await evaluateSpecification(
       spec({
@@ -477,14 +477,14 @@ describe("excluded classes in the adequacy report", () => {
 describe("pairs of classes", () => {
   const 配送を選ぶ = behavior({
     name: "配送を選ぶ",
-    input: sum("状態", {
+    input: variants("状態", {
       確定済み: object({
         ギフト: boolean(),
-        配送: sum("方法", { 宅配: object({ 置き配: boolean() }), 店頭受取: object({}) }),
+        配送: variants("方法", { 宅配: object({ 置き配: boolean() }), 店頭受取: object({}) }),
       }),
     }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
 
   it("counts the combinations of two positions' classes the answered rows reach without asking for more", async () => {
@@ -509,11 +509,11 @@ describe("pairs of classes", () => {
   it("pairs the classes a guard threshold draws with the classes of another position", async () => {
     const 注文を受け付ける = behavior({
       name: "注文を受け付ける",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ ギフト: boolean(), 合計: int().invariant(v => gte(v, 0)) }),
       }),
-      result: sum("結果", { 受付: object({}), 要承認: object({}) }),
-      effects: sum("種類", {}),
+      result: variants("結果", { 受付: object({}), 要承認: object({}) }),
+      effects: variants("種類", {}),
     });
     const 上限で分ける = implement(注文を受け付ける, {
       cases: {
@@ -545,12 +545,12 @@ describe("pairs of classes", () => {
   it("makes no pair of positions under two different cases", async () => {
     const 二つの状態 = behavior({
       name: "二つの状態",
-      input: sum("状態", {
+      input: variants("状態", {
         下書き: object({ 公開予約: boolean() }),
         公開済み: object({ 固定表示: boolean() }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const report = await evaluateSpecification(
       spec({ name: "状態", examples: examples(二つの状態, []) }),
@@ -563,7 +563,7 @@ describe("pairs of classes", () => {
 describe("a position the invariants leave empty", () => {
   const 数量を決める = behavior({
     name: "数量を決める",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({
         数量: int()
           .invariant(v => gte(v, 10))
@@ -571,7 +571,7 @@ describe("a position the invariants leave empty", () => {
       }),
     }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
 
   async function report() {
@@ -597,15 +597,15 @@ describe("a guard threshold interval the invariants leave empty", () => {
   it("lists the interval as excluded instead of dropping it", async () => {
     const 受け付ける = behavior({
       name: "受け付ける",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({
           合計: int()
             .invariant(v => gte(v, 0))
             .invariant(v => lte(v, 50)),
         }),
       }),
-      result: sum("結果", { 受付: object({}), 要承認: object({}) }),
-      effects: sum("種類", {}),
+      result: variants("結果", { 受付: object({}), 要承認: object({}) }),
+      effects: variants("種類", {}),
     });
     const 上限で分ける = implement(受け付ける, {
       cases: {
@@ -639,12 +639,12 @@ describe("a guard threshold interval the invariants leave empty", () => {
 describe("an input case the invariants of the input sum refuse", () => {
   const 注文を処理する = behavior({
     name: "注文を処理する",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({}),
       廃止: object({}),
     }).invariant(v => ne(v.状態, "廃止")),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
 
   it("is excluded from the input cases, neither covered nor missing", async () => {

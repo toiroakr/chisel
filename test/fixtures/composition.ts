@@ -12,21 +12,21 @@ import {
   object,
   rules,
   string,
-  sum,
+  variants,
 } from "../../src/index.js";
 
 const 検証する = behavior({
   name: "検証する",
-  input: sum("状態", { 申込: object({ 数量: int() }) }),
-  result: sum("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string("理由") }) }),
-  effects: sum("種類", {}),
+  input: variants("状態", { 申込: object({ 数量: int() }) }),
+  result: variants("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string("理由") }) }),
+  effects: variants("種類", {}),
 });
 
 const 価格を付ける = behavior({
   name: "価格を付ける",
-  input: sum("結果", { 有効: object({ 数量: int() }) }),
-  result: sum("結果", { 見積: object({ 金額: int() }) }),
-  effects: sum("種類", {}),
+  input: variants("結果", { 有効: object({ 数量: int() }) }),
+  result: variants("結果", { 見積: object({ 金額: int() }) }),
+  effects: variants("種類", {}),
 });
 
 export const 見積もる = compose(検証する, 価格を付ける);

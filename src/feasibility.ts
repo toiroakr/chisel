@@ -4,8 +4,8 @@ import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
 import { boundTermPath, conjuncts, describeRule, isTerm, termData, termPaths } from "./rule.js";
-import type { AnySchema, AnySumSchema } from "./schema.js";
-import { isSumSchema, schemaAtPath } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema } from "./schema.js";
+import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { Step, Way } from "./ways.js";
 
 export type Feasibility =
@@ -231,9 +231,9 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
   return ordered([...group.constraints, ...invariants], carrier);
 }
 
-function sumOwning(scope: AnySchema, path: readonly string[]): AnySumSchema | undefined {
+function sumOwning(scope: AnySchema, path: readonly string[]): AnyVariantsSchema | undefined {
   const owner = schemaAtPath(scope, path.slice(0, -1));
-  return owner !== undefined && isSumSchema(owner) && owner.discriminant === path[path.length - 1]
+  return owner !== undefined && isVariantsSchema(owner) && owner.discriminant === path[path.length - 1]
     ? owner
     : undefined;
 }

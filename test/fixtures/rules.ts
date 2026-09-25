@@ -12,16 +12,16 @@ import {
   object,
   rules,
   string,
-  sum,
+  variants,
 } from "../../src/index.js";
 
 const 注文を確定する = behavior({
   name: "注文を確定する",
-  input: sum("状態", {
+  input: variants("状態", {
     商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
   }),
-  result: sum("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
-  effects: sum("種類", {}),
+  result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+  effects: variants("種類", {}),
 });
 
 const 在庫を確かめる = implement(注文を確定する, {

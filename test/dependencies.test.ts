@@ -25,14 +25,14 @@ import {
   object,
   optional,
   string,
-  sum,
+  variants,
 } from "../src/index.js";
 
 const 受付する = behavior({
   name: "受付する",
-  input: sum("状態", { 申込済み: object({ 申込ID: string("申込ID") }) }),
+  input: variants("状態", { 申込済み: object({ 申込ID: string("申込ID") }) }),
   result: object({ 受付日時: instant() }),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
   requires: { 現在時刻: dependency(instant()) },
 });
 
@@ -146,9 +146,9 @@ describe("a value a row writes for a dependency", () => {
 describe("a function dependency", () => {
   const 在庫を確かめる = behavior({
     name: "在庫を確かめる",
-    input: sum("状態", { 注文済み: object({ 商品ID: string("商品ID") }) }),
+    input: variants("状態", { 注文済み: object({ 商品ID: string("商品ID") }) }),
     result: object({ 在庫あり: boolean() }),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
     requires: { 在庫を照会する: dependency(string("商品ID"), int()) },
   });
   const 照会して答える = implement(在庫を確かめる, {
@@ -250,9 +250,9 @@ describe("generated rows and dependencies", () => {
   it("carries the values the answered row it was composed from stands in with", () => {
     const 受付する2 = behavior({
       name: "受付する2",
-      input: sum("状態", { 申込済み: object({ 紹介コード: optional(string("紹介コード")) }) }),
+      input: variants("状態", { 申込済み: object({ 紹介コード: optional(string("紹介コード")) }) }),
       result: object({ 受付日時: instant() }),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
       requires: { 現在時刻: dependency(instant()) },
     });
     const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
@@ -273,11 +273,11 @@ describe("generated rows and dependencies", () => {
   it("follows the way of a row whose handler needs a stand-in generate does not have", () => {
     const 送料を決める = behavior({
       name: "送料を決める",
-      input: sum("状態", {
-        確定済み: object({ 配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }) }),
+      input: variants("状態", {
+        確定済み: object({ 配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }) }),
       }),
       result: object({ 送料: int() }),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
       requires: { 料金表: dependency(string("方法"), int()) },
     });
     const 料金表で決める = implement(送料を決める, {
@@ -309,9 +309,9 @@ describe("generated rows and dependencies", () => {
 describe("a value dependency read in a guard condition", () => {
   const 予約する = behavior({
     name: "予約する",
-    input: sum("状態", { 申込済み: object({ 希望日時: instant() }) }),
-    result: sum("結果", { 受付: object({}), 過去: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 申込済み: object({ 希望日時: instant() }) }),
+    result: variants("結果", { 受付: object({}), 過去: object({}) }),
+    effects: variants("種類", {}),
     requires: {
       現在時刻: dependency(instant()),
       採番: dependency(string("入力"), string("番号")),
@@ -437,11 +437,11 @@ describe("a value dependency read in a guard condition", () => {
 describe("a value dependency read inside all", () => {
   const 注文する = behavior({
     name: "注文する",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({ 明細: array(object({ 数量: int() })) }),
     }),
-    result: sum("結果", { 受付: object({}), 上限超過: object({}) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 受付: object({}), 上限超過: object({}) }),
+    effects: variants("種類", {}),
     requires: { 上限: dependency(int()) },
   });
   const 上限で断る = implement(注文する, {
@@ -488,9 +488,9 @@ describe("a value dependency read inside all", () => {
 describe("a dependency declared as another behavior", () => {
   const 在庫を照会する = behavior({
     name: "在庫を照会する",
-    input: sum("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
+    input: variants("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
     result: object({ 商品ID: string("商品ID"), 在庫数: int() }),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
     ensures: clause => [
       clause.always("照会した商品を答える", (問い, 答え) => eq(答え.商品ID, 問い.商品ID)),
     ],
@@ -503,9 +503,9 @@ describe("a dependency declared as another behavior", () => {
   ]);
   const 注文する = behavior({
     name: "注文する",
-    input: sum("状態", { 入力済み: object({ 商品ID: string("商品ID") }) }),
+    input: variants("状態", { 入力済み: object({ 商品ID: string("商品ID") }) }),
     result: object({ 在庫あり: boolean() }),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
     requires: { 在庫: dependency(在庫照会の例) },
   });
   const 在庫で決める = implement(注文する, {

@@ -25,24 +25,24 @@ import {
   runImplementation,
   SpecificationError,
   string,
-  sum,
+  variants,
   unanswered,
 } from "../src/index.js";
 import type { Implementation } from "../src/index.js";
 
 const 注文を確定する = behavior({
   name: "注文を確定する",
-  input: sum("状態", {
+  input: variants("状態", {
     商品あり: object({
       カートID: string("カートID"),
       明細: array(object({ 数量: int(), 在庫数: int() })),
     }),
   }),
-  result: sum("結果", {
+  result: variants("結果", {
     確定: object({ カートID: string("カートID") }),
     不可: object({ 理由: string("理由") }),
   }),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
 });
 
 const 在庫を確かめて確定する = implement(注文を確定する, {
@@ -188,12 +188,12 @@ describe("verdict over a rules decision", () => {
   it("measures the arms partially when another case is decided by a closure", async () => {
     const 二つの状態 = behavior({
       name: "二つの状態",
-      input: sum("状態", {
+      input: variants("状態", {
         商品あり: object({ 数量: int() }),
         確定済み: object({}),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 混在 = implement(二つの状態, {
       cases: {
@@ -216,9 +216,9 @@ describe("verdict over a rules decision", () => {
 describe("rules of a decision", () => {
   const 割引を判定する = behavior({
     name: "割引を判定する",
-    input: sum("状態", { 入力済み: object({ 会員歴: int(), 購入額: int() }) }),
-    result: sum("結果", { 割引: object({}), 定価: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 会員歴: int(), 購入額: int() }) }),
+    result: variants("結果", { 割引: object({}), 定価: object({}) }),
+    effects: variants("種類", {}),
   });
   const 会員歴か購入額 = implement(割引を判定する, {
     cases: {
@@ -281,13 +281,13 @@ describe("rules of a decision", () => {
 describe("match over a sum field", () => {
   const 送料を決める = behavior({
     name: "送料を決める",
-    input: sum("状態", {
+    input: variants("状態", {
       確定済み: object({
-        配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
+        配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }),
       }),
     }),
     result: object({ 送料: int() }),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
   const 方法で決める = implement(送料を決める, {
     cases: {
@@ -348,14 +348,14 @@ describe("match over a sum field", () => {
   it("composes a row for a match case from a row that reaches the match", () => {
     const 重さで決める = behavior({
       name: "重さで決める",
-      input: sum("状態", {
+      input: variants("状態", {
         確定済み: object({
           重さ: int(),
-          配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
+          配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }),
         }),
       }),
       result: object({ 送料: int() }),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 重さと方法 = implement(重さで決める, {
       cases: {
@@ -392,9 +392,9 @@ describe("ways generate could not compose", () => {
   it("says which ways no row was composed for rather than leaving them out", () => {
     const 並べる = behavior({
       name: "並べる",
-      input: sum("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
     const 並び = implement(並べる, {
       cases: {
@@ -415,14 +415,14 @@ describe("ways generate could not compose", () => {
 describe("what match can branch on", () => {
   const 送る = behavior({
     name: "送る",
-    input: sum("状態", {
+    input: variants("状態", {
       確定済み: object({
         メモ: string("メモ"),
-        配送: sum("方法", { 宅配: object({}), 店頭受取: object({}) }),
+        配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }),
       }),
     }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
   const 何もしない = () => ({ result: {}, effects: [] });
 
@@ -476,9 +476,9 @@ describe("what match can branch on", () => {
 describe("rules written inline in spec", () => {
   const 受け付ける = behavior({
     name: "受け付ける",
-    input: sum("状態", { 入力済み: object({ 合計: int() }) }),
-    result: sum("結果", { 受付: object({}), 審査: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 合計: int() }) }),
+    result: variants("結果", { 受付: object({}), 審査: object({}) }),
+    effects: variants("種類", {}),
   });
 
   it("keeps the result literals of an implementation written inside the specification", async () => {
@@ -523,7 +523,7 @@ describe("rules written inline in spec", () => {
 describe("ways no row can take", () => {
   const 受け付ける = behavior({
     name: "受け付ける",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({
         数量: int().invariant(v => gte(v, 0)),
         上限: int(),
@@ -531,8 +531,8 @@ describe("ways no row can take", () => {
         明細: array(int()),
       }),
     }),
-    result: sum("結果", { 受付: object({}), 却下: object({}) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
   });
   const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
   const 受付 = () => ({ result: { 結果: "受付" as const }, effects: [] });
@@ -622,11 +622,11 @@ describe("ways no row can take", () => {
 describe("a term from outside all read inside each", () => {
   const 上限を守る = behavior({
     name: "上限を守る",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({ 上限: int(), 明細: array(object({ 数量: int() })) }),
     }),
-    result: sum("結果", { 受付: object({}), 超過: object({}) }),
-    effects: sum("種類", {}),
+    result: variants("結果", { 受付: object({}), 超過: object({}) }),
+    effects: variants("種類", {}),
   });
   const 上限で断る = implement(上限を守る, {
     cases: {

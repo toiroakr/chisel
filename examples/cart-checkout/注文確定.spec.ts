@@ -16,7 +16,7 @@ import {
   optional,
   rules,
   string,
-  sum,
+  variants,
 } from "../../src/index.js";
 
 const カートID = string("カートID");
@@ -30,7 +30,7 @@ const 明細 = object({
   在庫数: int().invariant(v => gte(v, 0)),
 });
 
-const カート = sum("状態", {
+const カート = variants("状態", {
   空: object({ カートID }),
   商品あり: object({
     カートID,
@@ -40,12 +40,12 @@ const カート = sum("状態", {
   確定済み: object({ カートID }),
 });
 
-const 確定結果 = sum("結果", {
+const 確定結果 = variants("結果", {
   確定: object({ カートID, 合計金額: number() }),
   不可: object({ 理由: string("確定不可理由") }),
 });
 
-const 確定作用 = sum("種類", {
+const 確定作用 = variants("種類", {
   在庫引当: object({ 商品ID, 数量: number() }),
   決済要求: object({ カートID, 金額: number() }),
   クーポン消費: object({ クーポンコード }),

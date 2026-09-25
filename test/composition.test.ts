@@ -17,25 +17,25 @@ import {
   runImplementation,
   SpecificationError,
   string,
-  sum,
+  variants,
   unanswered,
 } from "../src/index.js";
 
 const 検証する = behavior({
   name: "検証する",
-  input: sum("状態", { 申込: object({ 数量: int() }) }),
-  result: sum("結果", {
+  input: variants("状態", { 申込: object({ 数量: int() }) }),
+  result: variants("結果", {
     有効: object({ 数量: int() }),
     無効: object({ 理由: string("理由") }),
   }),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
 });
 
 const 価格を付ける = behavior({
   name: "価格を付ける",
-  input: sum("結果", { 有効: object({ 数量: int() }) }),
-  result: sum("結果", { 見積: object({ 金額: int() }) }),
-  effects: sum("種類", { 通知: object({ 金額: int() }) }),
+  input: variants("結果", { 有効: object({ 数量: int() }) }),
+  result: variants("結果", { 見積: object({ 金額: int() }) }),
+  effects: variants("種類", { 通知: object({ 金額: int() }) }),
 });
 
 const 見積もる = compose(検証する, 価格を付ける);
@@ -86,9 +86,9 @@ describe("compose", () => {
   it("refuses stages where the second receives none of the first's cases", () => {
     const 別物 = behavior({
       name: "別物",
-      input: sum("結果", { 保留: object({}) }),
-      result: sum("結果", { 完了: object({}) }),
-      effects: sum("種類", {}),
+      input: variants("結果", { 保留: object({}) }),
+      result: variants("結果", { 完了: object({}) }),
+      effects: variants("種類", {}),
     });
 
     expect(() => compose(検証する, 別物)).toThrow(
@@ -99,9 +99,9 @@ describe("compose", () => {
   it("refuses a case that would be both departed and answered by the second stage", () => {
     const 無効も返す = behavior({
       name: "無効も返す",
-      input: sum("結果", { 有効: object({ 数量: int() }) }),
-      result: sum("結果", { 無効: object({ 理由: string("理由") }) }),
-      effects: sum("種類", {}),
+      input: variants("結果", { 有効: object({ 数量: int() }) }),
+      result: variants("結果", { 無効: object({ 理由: string("理由") }) }),
+      effects: variants("種類", {}),
     });
 
     expect(() => compose(検証する, 無効も返す)).toThrow(
@@ -130,12 +130,12 @@ describe("running a composition", () => {
   it("keeps a departed case off the main line of a later stage that could receive it", async () => {
     const 無効を受ける = behavior({
       name: "無効を受ける",
-      input: sum("結果", {
+      input: variants("結果", {
         見積: object({ 金額: int() }),
         無効: object({ 理由: string("理由") }),
       }),
-      result: sum("結果", { 完了: object({}) }),
-      effects: sum("種類", {}),
+      result: variants("結果", { 完了: object({}) }),
+      effects: variants("種類", {}),
     });
     const 完了する = implement(無効を受ける, {
       cases: {

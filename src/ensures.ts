@@ -2,7 +2,7 @@ import type { AnyBehavior, EnsuresClause } from "./behavior.js";
 import type { Rule, Term } from "./rule.js";
 import { conjuncts, describeRule, holds, isTerm, termData } from "./rule.js";
 import type { AnySchema } from "./schema.js";
-import { isSumSchema, schemaAtPath } from "./schema.js";
+import { isVariantsSchema, schemaAtPath } from "./schema.js";
 
 export type EnsuresClassification =
   | "derivable"
@@ -37,7 +37,7 @@ export function readEnsures(definition: AnyBehavior): EnsuresReport {
   const stated = new Set(definition.ensures.flatMap(clause => clause.cases ?? []));
   const everyCase = definition.ensures.some(clause => clause.cases === undefined);
   const unstated =
-    definition.ensures.length === 0 || everyCase || !isSumSchema(definition.result)
+    definition.ensures.length === 0 || everyCase || !isVariantsSchema(definition.result)
       ? []
       : definition.result.variantTags.filter(tag => !stated.has(tag));
   return { rules, unstated };
@@ -96,7 +96,7 @@ function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehav
         : [];
   for (const scope of scopes) {
     const owner = schemaAtPath(scope, keys.slice(0, -1));
-    if (owner !== undefined && isSumSchema(owner) && owner.discriminant === keys[keys.length - 1]) {
+    if (owner !== undefined && isVariantsSchema(owner) && owner.discriminant === keys[keys.length - 1]) {
       return "discriminant";
     }
     const schema = schemaAtPath(scope, keys);
@@ -109,7 +109,7 @@ function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehav
 
 function valueScopes(clause: EnsuresClause, definition: AnyBehavior): readonly AnySchema[] {
   const { result } = definition;
-  if (!isSumSchema(result)) {
+  if (!isVariantsSchema(result)) {
     return [result as AnySchema];
   }
   const cases = clause.cases ?? result.variantTags;

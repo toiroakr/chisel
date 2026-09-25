@@ -9,14 +9,14 @@ import {
   int,
   object,
   rules,
-  sum,
+  variants,
 } from "../../src/index.js";
 
 const 受け付ける = behavior({
   name: "受け付ける",
-  input: sum("状態", { 入力済み: object({ 数量: int() }) }),
-  result: sum("結果", { 受付: object({}), 却下: object({}) }),
-  effects: sum("種類", {}),
+  input: variants("状態", { 入力済み: object({ 数量: int() }) }),
+  result: variants("結果", { 受付: object({}), 却下: object({}) }),
+  effects: variants("種類", {}),
 });
 
 const 二段 = implement(受け付ける, {

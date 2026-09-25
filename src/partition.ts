@@ -1,6 +1,6 @@
 import type {
   AnySchema,
-  AnySumSchema,
+  AnyVariantsSchema,
   ArraySchema,
   ObjectSchema,
   ObjectShape,
@@ -18,7 +18,7 @@ import {
 } from "./border.js";
 import type { Rule } from "./rule.js";
 import { boundTermPath, conjuncts, holds, resize, sizeOf, stepInto } from "./rule.js";
-import { isSumSchema, tagOf } from "./schema.js";
+import { isVariantsSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
 
@@ -63,7 +63,7 @@ interface Reading {
 }
 
 export function positionsOf(
-  input: AnySumSchema,
+  input: AnyVariantsSchema,
   reading: Reading = { containers: false },
 ): readonly Position[] {
   return underCases(
@@ -78,7 +78,7 @@ export function positionsOf(
 }
 
 function underCases(
-  schema: AnySumSchema,
+  schema: AnyVariantsSchema,
   path: string,
   focus: Focus,
   reading: Reading,
@@ -96,7 +96,7 @@ function underCases(
   );
 }
 
-export function excludedCases(schema: AnySumSchema, inherited: readonly Rule[] = []): string[] {
+export function excludedCases(schema: AnyVariantsSchema, inherited: readonly Rule[] = []): string[] {
   const rules = [...schema.invariants.flatMap(conjuncts), ...inherited].filter(rule => {
     const termPath = boundTermPath(rule);
     return termPath?.length === 1 && termPath[0] === schema.discriminant;
@@ -218,7 +218,7 @@ function positionAt(
   if (schema.kind === "object") {
     return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, reading, inherited);
   }
-  if (isSumSchema(schema)) {
+  if (isVariantsSchema(schema)) {
     return [
       divided(
         path,

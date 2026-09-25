@@ -21,11 +21,11 @@ import {
   object,
   optional,
   string,
-  sum,
+  variants,
   unanswered,
 } from "../src/index.js";
 
-const Cart = sum("状態", {
+const Cart = variants("状態", {
   商品あり: object({
     カートID: string("カートID"),
     クーポン: optional(string("クーポンコード")),
@@ -36,7 +36,7 @@ const 注文を確定する = behavior({
   name: "注文を確定する",
   input: Cart,
   result: object({}),
-  effects: sum("種類", {}),
+  effects: variants("種類", {}),
 });
 
 describe("generateExamples starts from what the rows already say", () => {
@@ -82,16 +82,16 @@ describe("generateExamples for classes", () => {
   it("moves a sum field into the case a position stands under", () => {
     const 配送する = behavior({
       name: "配送する",
-      input: sum("状態", {
+      input: variants("状態", {
         確定済み: object({
-          配送: sum("方法", {
+          配送: variants("方法", {
             店頭受取: object({}),
             宅配: object({ 置き配: boolean() }),
           }),
         }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generateExamples(配送する).map(row => row.given)).toStrictEqual([
@@ -104,11 +104,11 @@ describe("generateExamples for classes", () => {
   it("writes an element into an array so a class of its elements can be stood in", () => {
     const 計算する = behavior({
       name: "計算する",
-      input: sum("状態", {
+      input: variants("状態", {
         商品あり: object({ 明細: array(object({ 軽減税率: boolean() })) }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generateExamples(計算する).map(row => row.given)).toStrictEqual([
@@ -121,11 +121,11 @@ describe("generateExamples for classes", () => {
 describe("generateExamples for border points", () => {
   const 数量を確定する = behavior({
     name: "数量を確定する",
-    input: sum("状態", {
+    input: variants("状態", {
       入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
     }),
     result: object({}),
-    effects: sum("種類", {}),
+    effects: variants("種類", {}),
   });
 
   it("offers a row at each owed point no row stands at", () => {
@@ -146,11 +146,11 @@ describe("generateExamples for border points", () => {
   it("writes a value of the length a point on a length border asks for", () => {
     const 登録する = behavior({
       name: "登録する",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 商品ID: string("ID").invariant(v => gte(length(v), 4)) }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generateExamples(登録する).map(row => row.given)).toStrictEqual([
@@ -162,7 +162,7 @@ describe("generateExamples for border points", () => {
   it("finds a value inside both bounds of a number", () => {
     const 割合を決める = behavior({
       name: "割合を決める",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({
           割合: number()
             .invariant(v => gte(v, 0))
@@ -170,7 +170,7 @@ describe("generateExamples for border points", () => {
         }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generateExamples(割合を決める).map(row => row.given)).toStrictEqual([
@@ -185,11 +185,11 @@ describe("generateExamples and excluded classes", () => {
   it("offers no row for a class the rules refuse", () => {
     const 同意する = behavior({
       name: "同意する",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generateExamples(同意する).map(row => row.given)).toStrictEqual([
@@ -200,11 +200,11 @@ describe("generateExamples and excluded classes", () => {
   it("offers rows on both sides of a border on a string value, which has no step", () => {
     const 並べる = behavior({
       name: "並べる",
-      input: sum("状態", {
+      input: variants("状態", {
         入力済み: object({ 見出し: string("見出し").invariant(v => gte(v, "m")) }),
       }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generateExamples(並べる).map(row => row.given)).toStrictEqual([
@@ -218,9 +218,9 @@ describe("rows generate cannot make valid", () => {
   it("names a row whose composed value the input schema refuses instead of offering it", () => {
     const 数える = behavior({
       name: "数える",
-      input: sum("状態", { 入力済み: object({ 個数: int().invariant(v => not(eq(v, 0))) }) }),
+      input: variants("状態", { 入力済み: object({ 個数: int().invariant(v => not(eq(v, 0))) }) }),
       result: object({}),
-      effects: sum("種類", {}),
+      effects: variants("種類", {}),
     });
 
     expect(generationReport(数える)).toStrictEqual({
@@ -233,9 +233,9 @@ describe("rows generate cannot make valid", () => {
 describe("generateExamples below a length of zero", () => {
   const 見出しを確かめる = behavior({
     name: "見出しを確かめる",
-    input: sum("状態", { 入力済み: object({ 見出し: string("見出し") }) }),
-    result: sum("結果", { 受付: object({}), 空: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 見出し: string("見出し") }) }),
+    result: variants("結果", { 受付: object({}), 空: object({}) }),
+    effects: variants("種類", {}),
   });
   const 空を断る = implement(見出しを確かめる, {
     cases: {
@@ -265,9 +265,9 @@ describe("generateExamples below a length of zero", () => {
 describe("generateExamples for a guard on an array with no invariant", () => {
   const 明細を確かめる = behavior({
     name: "明細を確かめる",
-    input: sum("状態", { 入力済み: object({ 明細: array(int()) }) }),
-    result: sum("結果", { 受付: object({}), 空: object({}) }),
-    effects: sum("種類", {}),
+    input: variants("状態", { 入力済み: object({ 明細: array(int()) }) }),
+    result: variants("結果", { 受付: object({}), 空: object({}) }),
+    effects: variants("種類", {}),
   });
   const 空を断る = implement(明細を確かめる, {
     cases: {
@@ -298,9 +298,9 @@ describe("guard points generate cannot compose", () => {
   it("names each point it could not compose instead of leaving it out", () => {
     const 比べる = behavior({
       name: "比べる",
-      input: sum("状態", { 入力済み: object({ 数量: int(), 上限: optional(int()) }) }),
-      result: sum("結果", { 受付: object({}), 却下: object({}) }),
-      effects: sum("種類", {}),
+      input: variants("状態", { 入力済み: object({ 数量: int(), 上限: optional(int()) }) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
     });
     const 上限と比べる = implement(比べる, {
       cases: {
