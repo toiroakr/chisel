@@ -1,7 +1,7 @@
-import { examples } from "../../../src/index.js";
+import * as c from "../../../src/index.js";
 import { 予約をキャンセルする } from "../stage-03-refined.spec.js";
 
-export const 古い具体例 = examples(予約をキャンセルする, {
+export const 古い具体例 = c.examples(予約をキャンセルする, {
   日時追加前の予約確定の具体例: {
     given: {
       状態: "予約確定",

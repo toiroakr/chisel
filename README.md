@@ -15,30 +15,32 @@ declare data and behavior
 
 ## 1. Declare data and behavior
 
+The examples import Chisel as a namespace, `import * as c from "chisel"`, the way zod and valibot are used as `z` and `v`; the names below are written without the prefix.
+
 The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type).
 
 ```ts
-import { behavior, object, string, variants } from "chisel";
+import * as c from "chisel";
 
-const Order = variants("state", {
-  unpaid: object({ orderId: string("OrderId") }),
-  paid: object({
-    orderId: string("OrderId"),
-    paymentId: string("PaymentId"),
+const Order = c.variants("state", {
+  unpaid: c.object({ orderId: c.string("OrderId") }),
+  paid: c.object({
+    orderId: c.string("OrderId"),
+    paymentId: c.string("PaymentId"),
   }),
 });
 
-const CancelResult = variants("type", {
-  accepted: object({ orderId: string("OrderId") }),
-  rejected: object({ reason: string("Reason") }),
+const CancelResult = c.variants("type", {
+  accepted: c.object({ orderId: c.string("OrderId") }),
+  rejected: c.object({ reason: c.string("Reason") }),
 });
 
-const CancelEffect = variants("type", {
-  refund: object({ paymentId: string("PaymentId") }),
-  restock: object({ orderId: string("OrderId") }),
+const CancelEffect = c.variants("type", {
+  refund: c.object({ paymentId: c.string("PaymentId") }),
+  restock: c.object({ orderId: c.string("OrderId") }),
 });
 
-export const cancelOrder = behavior({
+export const cancelOrder = c.behavior({
   name: "cancel-order",
   input: Order,
   result: CancelResult,
@@ -56,13 +58,13 @@ chisel generate ./cancel-order.spec.ts
 Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `spec` wraps yet, the output also carries the `import` line and a `spec` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` table.
 
 ```ts
-export const cancelOrderExamples = examples(cancelOrder, {
+export const cancelOrderExamples = c.examples(cancelOrder, {
   "cancel-order: unpaid": {
     given: {
       state: "unpaid",
       orderId: "<OrderId>",
     },
-    expect: todo(
+    expect: c.todo(
       "Expected result for unpaid must be decided by a human",
     ),
   },
@@ -72,7 +74,7 @@ export const cancelOrderExamples = examples(cancelOrder, {
       orderId: "<OrderId>",
       paymentId: "<PaymentId>",
     },
-    expect: todo(
+    expect: c.todo(
       "Expected result for paid must be decided by a human",
     ),
   },
@@ -84,7 +86,7 @@ export const cancelOrderExamples = examples(cancelOrder, {
 A human replaces `todo()` with the expected result and effect trace. `todo(reason)` is the one marker for anything not decided yet: an answer here, and also a case of `implement` or an effect's control policy that is still open. `examples(behavior, { name: row })` is a table keyed by the row's name, which the report uses to point at a row; two rows with one name do not compile. Each row's `given` and `expect` are typed by the behavior, so a row that no longer fits the model fails to compile.
 
 ```ts
-export const cancelOrderExamples = examples(cancelOrder, {
+export const cancelOrderExamples = c.examples(cancelOrder, {
   "cancel a paid order": {
     given: {
       state: "paid",
@@ -114,15 +116,15 @@ Changing the data or behavior model makes stale examples fail to compile. Runnin
 Once expectations are known, `implement()` supplies the executable model: one `action(name, { guards?, run })` per input case. `run` computes the answer; `guards` (below) lists the conditions checked before it, each with the answer to give when it fails. The name is how reports refer to the action.
 
 ```ts
-const implementation = implement(cancelOrder, {
+const implementation = c.implement(cancelOrder, {
   cases: {
-    unpaid: action("cancel-unpaid", {
+    unpaid: c.action("cancel-unpaid", {
       run: order => ({
         result: { type: "accepted", orderId: order.orderId },
         effects: [{ type: "restock", orderId: order.orderId }],
       }),
     }),
-    paid: action("cancel-paid", {
+    paid: c.action("cancel-paid", {
       run: order => ({
         result: { type: "accepted", orderId: order.orderId },
         effects: [
@@ -146,7 +148,7 @@ const implementation = implement(cancelOrder, {
   },
 });
 
-export const cancellation = spec({
+export const cancellation = c.spec({
   name: "order cancellation",
   examples: cancelOrderExamples,
   implementation,
@@ -190,21 +192,21 @@ The analyzer follows the example-adequacy model of [Souther](https://github.com/
 - **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `int`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named. A point one bound owes is excluded when another bound refuses it, and bounds that leave nothing admitted (`$ >= 10` with `$ <= 5`) are reported as a model error rather than as gaps. A length is never negative, so a point that would lie below zero has no point there (`none: a length is never negative`) and no row is asked for at it, whether the border comes from an invariant or a guard.
 
 ```ts
-const Line = object({
-  quantity: int().invariant(v => gte(v, 1)),
-  unitPrice: int().invariant(v => gte(v, 0)),
+const Line = c.object({
+  quantity: c.int().invariant(v => c.gte(v, 1)),
+  unitPrice: c.int().invariant(v => c.gte(v, 0)),
 });
-const Lines = array(Line).invariant(v => gte(length(v), 1));
+const Lines = c.array(Line).invariant(v => c.gte(c.length(v), 1));
 ```
 
 - **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
 
 ```ts
-const implementation = implement(checkout, {
+const implementation = c.implement(checkout, {
   cases: {
-    withItems: action("check stock, then confirm", {
+    withItems: c.action("check stock, then confirm", {
       guards: cart => [
-        guard(all(cart.lines, line => lte(line.quantity, line.stock)), () => ({
+        c.guard(c.all(cart.lines, line => c.lte(line.quantity, line.stock)), () => ({
           result: { type: "rejected", reason: "out of stock" },
           effects: [],
         })),
@@ -224,13 +226,13 @@ A free-form `run` closure may contain branches Chisel cannot read, so its arms a
 A behavior can state what it ensures of its answer, and declare the outside world it needs:
 
 ```ts
-const findMember = behavior({
+const findMember = c.behavior({
   name: "find-member",
   input, result, effects,
-  requires: { now: dependency(instant()), lookup: dependency(string("MemberId"), boolean()) },
+  requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string("MemberId"), c.boolean()) },
   ensures: clause => [
     clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
-      and(gt(asked.id, 0), eq(answer.id, asked.id)),
+      c.and(c.gt(asked.id, 0), c.eq(answer.id, asked.id)),
     ),
   ],
 });
@@ -245,13 +247,13 @@ Every answer an example writes, the model produces or a conformance subject retu
 `compose(first, second)` connects two behaviors the way Souther's `>->` does: of the cases `first` answers, those `second` takes as input flow on to it, and the rest depart the main line and are answered as they are. The result is an ordinary behavior, so it is given examples and a specification like any other, and a row may expect a case that departed at the first stage, which no stage's own examples can state.
 
 ```ts
-const quote = compose(validate, price); // validate: order -> valid | invalid, price: valid -> quoted
+const quote = c.compose(validate, price); // validate: order -> valid | invalid, price: valid -> quoted
 // quote: order -> invalid | quoted
 
-export const quoteSpec = spec({
+export const quoteSpec = c.spec({
   name: "quote",
-  examples: examples(quote, { /* rows expecting quoted, and invalid */ }),
-  implementation: implementComposition(quote, validateImpl, priceImpl),
+  examples: c.examples(quote, { /* rows expecting quoted, and invalid */ }),
+  implementation: c.implementComposition(quote, validateImpl, priceImpl),
 });
 ```
 
@@ -259,4 +261,4 @@ The stages must name their cases by one discriminant; a case that would both dep
 
 ## Conformance
 
-`verifyConformance` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model.
+`test` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model.

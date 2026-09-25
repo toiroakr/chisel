@@ -1,57 +1,38 @@
-import {
-  action,
-  all,
-  array,
-  behavior,
-  spec,
-  example,
-  examples,
-  gte,
-  guard,
-  implement,
-  int,
-  lte,
-  length,
-  number,
-  object,
-  optional,
-  string,
-  variants,
-} from "../../src/index.js";
+import * as c from "../../src/index.js";
 
-const カートID = string("カートID");
-const 商品ID = string("商品ID");
-const クーポンコード = string("クーポンコード");
+const カートID = c.string("カートID");
+const 商品ID = c.string("商品ID");
+const クーポンコード = c.string("クーポンコード");
 
-const 明細 = object({
+const 明細 = c.object({
   商品ID,
-  数量: int().invariant(v => gte(v, 1)),
-  単価: int().invariant(v => gte(v, 0)),
-  在庫数: int().invariant(v => gte(v, 0)),
+  数量: c.int().invariant(v => c.gte(v, 1)),
+  単価: c.int().invariant(v => c.gte(v, 0)),
+  在庫数: c.int().invariant(v => c.gte(v, 0)),
 });
 
-const カート = variants("状態", {
-  空: object({ カートID }),
-  商品あり: object({
+const カート = c.variants("状態", {
+  空: c.object({ カートID }),
+  商品あり: c.object({
     カートID,
-    明細: array(明細).invariant(v => gte(length(v), 1)),
-    クーポン: optional(クーポンコード),
+    明細: c.array(明細).invariant(v => c.gte(c.length(v), 1)),
+    クーポン: c.optional(クーポンコード),
   }),
-  確定済み: object({ カートID }),
+  確定済み: c.object({ カートID }),
 });
 
-const 確定結果 = variants("結果", {
-  確定: object({ カートID, 合計金額: number() }),
-  不可: object({ 理由: string("確定不可理由") }),
+const 確定結果 = c.variants("結果", {
+  確定: c.object({ カートID, 合計金額: c.number() }),
+  不可: c.object({ 理由: c.string("確定不可理由") }),
 });
 
-const 確定作用 = variants("種類", {
-  在庫引当: object({ 商品ID, 数量: number() }),
-  決済要求: object({ カートID, 金額: number() }),
-  クーポン消費: object({ クーポンコード }),
+const 確定作用 = c.variants("種類", {
+  在庫引当: c.object({ 商品ID, 数量: c.number() }),
+  決済要求: c.object({ カートID, 金額: c.number() }),
+  クーポン消費: c.object({ クーポンコード }),
 });
 
-export const 注文を確定する = behavior({
+export const 注文を確定する = c.behavior({
   name: "注文を確定する",
   input: カート,
   result: 確定結果,
@@ -59,7 +40,7 @@ export const 注文を確定する = behavior({
   dependsOn: ["在庫引当", "決済要求", "クーポン消費"],
 });
 
-const 具体例 = examples(注文を確定する, {
+const 具体例 = c.examples(注文を確定する, {
   "空のカートは確定できない": {
     given: { 状態: "空", カートID: "カート-1" },
     expect: {
@@ -108,14 +89,14 @@ const 具体例 = examples(注文を確定する, {
   },
 });
 
-const 実装 = implement(注文を確定する, {
+const 実装 = c.implement(注文を確定する, {
   cases: {
-    空: action("空のカートは確定しない", {
+    空: c.action("空のカートは確定しない", {
       run: () => ({ result: { 結果: "不可", 理由: "カートが空" }, effects: [] }),
     }),
-    商品あり: action("在庫を確かめて確定する", {
+    商品あり: c.action("在庫を確かめて確定する", {
       guards: カート => [
-        guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
+        c.guard(c.all(カート.明細, 明細 => c.lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
@@ -135,7 +116,7 @@ const 実装 = implement(注文を確定する, {
         };
       },
     }),
-    確定済み: action("確定済みは二重に確定しない", {
+    確定済み: c.action("確定済みは二重に確定しない", {
       run: () => ({ result: { 結果: "不可", 理由: "確定済み" }, effects: [] }),
     }),
   },
@@ -146,7 +127,7 @@ const 実装 = implement(注文を確定する, {
   },
 });
 
-export const 注文確定の仕様 = spec({
+export const 注文確定の仕様 = c.spec({
   name: "注文確定",
   examples: 具体例,
   implementation: 実装,

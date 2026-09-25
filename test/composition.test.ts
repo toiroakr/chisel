@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
+  generate,
   todo,
   action,
   behavior,
   compose,
   spec,
-  evaluateSpecification,
+  check,
   example,
   examples,
-  generateExamples,
   implement,
   implementComposition,
   int,
   object,
   guard,
   gte,
-  runImplementation,
+  perform,
   SpecificationError,
   string,
   variants,
@@ -113,14 +113,14 @@ describe("compose", () => {
 
 describe("running a composition", () => {
   it("passes a case the second stage receives on to it", async () => {
-    expect(await runImplementation(見積もり, { 状態: "申込", 数量: 2 })).toStrictEqual({
+    expect(await perform(見積もり, { 状態: "申込", 数量: 2 })).toStrictEqual({
       result: { 結果: "見積", 金額: 200 },
       effects: [{ 種類: "通知", 金額: 200 }],
     });
   });
 
   it("answers a case the second stage does not receive as it departed", async () => {
-    expect(await runImplementation(見積もり, { 状態: "申込", 数量: 0 })).toStrictEqual({
+    expect(await perform(見積もり, { 状態: "申込", 数量: 0 })).toStrictEqual({
       result: { 結果: "無効", 理由: "数量なし" },
       effects: [],
     });
@@ -146,7 +146,7 @@ describe("running a composition", () => {
 
     expect({
       result: 三段.result.variantTags,
-      answer: await runImplementation(implementComposition(三段, 見積もり, 完了する), {
+      answer: await perform(implementComposition(三段, 見積もり, 完了する), {
         状態: "申込",
         数量: 0,
       }),
@@ -170,7 +170,7 @@ describe("the adequacy of a composition", () => {
   });
 
   it("is measured over the composition's own cases, including one that departed early", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "見積", examples: 行, implementation: 見積もり }),
     );
 
@@ -190,7 +190,7 @@ describe("the adequacy of a composition", () => {
   });
 
   it("offers rows for a composition with none", () => {
-    expect(generateExamples(見積もる).map(row => row.given)).toStrictEqual([
+    expect(generate(見積もる).rows.map(row => row.given)).toStrictEqual([
       { 状態: "申込", 数量: 0 },
     ]);
   });
@@ -198,7 +198,7 @@ describe("the adequacy of a composition", () => {
 
 describe("a composition row whose answer is owed", () => {
   it("still runs the composition, so the case it reached is executed", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "見積",
         examples: examples(見積もる, {

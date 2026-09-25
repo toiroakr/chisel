@@ -1,49 +1,39 @@
-import {
-  behavior,
-  spec,
-  example,
-  examples,
-  implement,
-  instant,
-  object,
-  string,
-  variants,
-} from "../../src/index.js";
+import * as c from "../../src/index.js";
 
-const 予約ID = string("予約ID");
-const 決済ID = string("決済ID");
-const 宿泊開始日時 = instant();
-const キャンセル要求日時 = instant();
+const 予約ID = c.string("予約ID");
+const 決済ID = c.string("決済ID");
+const 宿泊開始日時 = c.instant();
+const キャンセル要求日時 = c.instant();
 
-const 予約 = variants("状態", {
-  受付済み: object({ 予約ID }),
-  予約確定: object({
+const 予約 = c.variants("状態", {
+  受付済み: c.object({ 予約ID }),
+  予約確定: c.object({
     予約ID,
     決済ID,
     宿泊開始日時,
     キャンセル要求日時,
   }),
-  チェックイン済み: object({ 予約ID }),
-  キャンセル済み: object({ 予約ID }),
+  チェックイン済み: c.object({ 予約ID }),
+  キャンセル済み: c.object({ 予約ID }),
 });
 
-const キャンセル結果 = variants("結果", {
-  受理: object({ 予約ID }),
-  拒否: object({ 理由: string("キャンセル拒否理由") }),
+const キャンセル結果 = c.variants("結果", {
+  受理: c.object({ 予約ID }),
+  拒否: c.object({ 理由: c.string("キャンセル拒否理由") }),
 });
 
-const キャンセル作用 = variants("種類", {
-  返金: object({
+const キャンセル作用 = c.variants("種類", {
+  返金: c.object({
     決済ID,
-    冪等性キー: string("冪等性キー"),
+    冪等性キー: c.string("冪等性キー"),
   }),
-  部屋を解放: object({
+  部屋を解放: c.object({
     予約ID,
-    冪等性キー: string("冪等性キー"),
+    冪等性キー: c.string("冪等性キー"),
   }),
 });
 
-export const 予約をキャンセルする = behavior({
+export const 予約をキャンセルする = c.behavior({
   name: "予約をキャンセルする",
   input: 予約,
   result: キャンセル結果,
@@ -51,7 +41,7 @@ export const 予約をキャンセルする = behavior({
   dependsOn: ["返金", "部屋を解放"],
 });
 
-const 具体例 = examples(予約をキャンセルする, {
+const 具体例 = c.examples(予約をキャンセルする, {
   "受付済みの予約をキャンセルする": {
     given: { 状態: "受付済み", 予約ID: "予約-1" },
     expect: {
@@ -148,7 +138,7 @@ const 具体例 = examples(予約をキャンセルする, {
   },
 });
 
-const 実装 = implement(予約をキャンセルする, {
+const 実装 = c.implement(予約をキャンセルする, {
   cases: {
     受付済み: {
       kind: "decision",
@@ -224,7 +214,7 @@ const 実装 = implement(予約をキャンセルする, {
   },
 });
 
-export const 完成した仕様 = spec({
+export const 完成した仕様 = c.spec({
   name: "段階4: exampleを満たすmodelを実装する",
   examples: 具体例,
   implementation: 実装,

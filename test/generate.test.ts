@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   todo,
   action,
-  generationReport,
+  generate,
   not,
   array,
   behavior,
@@ -15,7 +15,6 @@ import {
   implement,
   lte,
   examples,
-  generateExamples,
   int,
   length,
   number,
@@ -48,7 +47,7 @@ describe("generateExamples starts from what the rows already say", () => {
       },
     });
 
-    expect(generateExamples(existing).map(row => row.given)).toStrictEqual([
+    expect(generate(existing).rows.map(row => row.given)).toStrictEqual([
       { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
     ]);
   });
@@ -63,7 +62,7 @@ describe("generateExamples for classes", () => {
       },
     });
 
-    expect(generateExamples(existing)).toStrictEqual([
+    expect(generate(existing).rows).toStrictEqual([
       {
         name: "注文を確定する: @商品あり.クーポン = あり",
         given: { 状態: "商品あり", カートID: "<カートID>", クーポン: "<クーポンコード>" },
@@ -73,7 +72,7 @@ describe("generateExamples for classes", () => {
   });
 
   it("lets the row composed for a case stand in the classes its placeholder falls in", () => {
-    expect(generateExamples(注文を確定する).map(row => row.name)).toStrictEqual([
+    expect(generate(注文を確定する).rows.map(row => row.name)).toStrictEqual([
       "注文を確定する: 商品あり",
       "注文を確定する: @商品あり.クーポン = あり",
     ]);
@@ -94,7 +93,7 @@ describe("generateExamples for classes", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generateExamples(配送する).map(row => row.given)).toStrictEqual([
+    expect(generate(配送する).rows.map(row => row.given)).toStrictEqual([
       { 状態: "確定済み", 配送: { 方法: "店頭受取" } },
       { 状態: "確定済み", 配送: { 方法: "宅配", 置き配: false } },
       { 状態: "確定済み", 配送: { 方法: "宅配", 置き配: true } },
@@ -111,7 +110,7 @@ describe("generateExamples for classes", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generateExamples(計算する).map(row => row.given)).toStrictEqual([
+    expect(generate(計算する).rows.map(row => row.given)).toStrictEqual([
       { 状態: "商品あり", 明細: [{ 軽減税率: false }] },
       { 状態: "商品あり", 明細: [{ 軽減税率: true }] },
     ]);
@@ -129,7 +128,7 @@ describe("generateExamples for border points", () => {
   });
 
   it("offers a row at each owed point no row stands at", () => {
-    expect(generateExamples(数量を確定する)).toStrictEqual([
+    expect(generate(数量を確定する).rows).toStrictEqual([
       {
         name: "数量を確定する: 入力済み",
         given: { 状態: "入力済み", 数量: 1 },
@@ -153,7 +152,7 @@ describe("generateExamples for border points", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generateExamples(登録する).map(row => row.given)).toStrictEqual([
+    expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", 商品ID: "<ID>" },
       { 状態: "入力済み", 商品ID: "<ID>_" },
     ]);
@@ -173,7 +172,7 @@ describe("generateExamples for border points", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generateExamples(割合を決める).map(row => row.given)).toStrictEqual([
+    expect(generate(割合を決める).rows.map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", 割合: 0 },
       { 状態: "入力済み", 割合: 0.25 },
       { 状態: "入力済み", 割合: 0.5 },
@@ -192,7 +191,7 @@ describe("generateExamples and excluded classes", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generateExamples(同意する).map(row => row.given)).toStrictEqual([
+    expect(generate(同意する).rows.map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", 同意: true },
     ]);
   });
@@ -207,7 +206,7 @@ describe("generateExamples and excluded classes", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generateExamples(並べる).map(row => row.given)).toStrictEqual([
+    expect(generate(並べる).rows.map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", 見出し: "m" },
       { 状態: "入力済み", 見出し: "ma" },
     ]);
@@ -223,7 +222,7 @@ describe("rows generate cannot make valid", () => {
       effects: variants("種類", {}),
     });
 
-    expect(generationReport(数える)).toStrictEqual({
+    expect(generate(数える)).toStrictEqual({
       rows: [],
       notComposed: ["数える: 入力済み: Invariant violated: not($.個数 == 0)"],
     });
@@ -254,7 +253,7 @@ describe("generateExamples below a length of zero", () => {
       },
     });
 
-    expect(generateExamples(existing, 空を断る).map(row => row.name)).toStrictEqual([
+    expect(generate(existing, 空を断る).rows.map(row => row.name)).toStrictEqual([
       "見出しを確かめる: @入力済み.見出し OFF (= 0)",
       "見出しを確かめる: @入力済み.見出し IN (> 1)",
     ]);
@@ -285,7 +284,7 @@ describe("generateExamples for a guard on an array with no invariant", () => {
       },
     });
 
-    expect(generateExamples(existing, 空を断る).map(row => row.given)).toStrictEqual([
+    expect(generate(existing, 空を断る).rows.map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", 明細: [] },
       { 状態: "入力済み", 明細: [1, 1] },
     ]);
@@ -316,7 +315,7 @@ describe("guard points generate cannot compose", () => {
     });
 
     expect(
-      generationReport(existing, 上限と比べる).notComposed.filter(line =>
+      generate(existing, 上限と比べる).notComposed.filter(line =>
         line.startsWith("@入力済み.数量 − @入力済み.上限"),
       ),
     ).toStrictEqual([

@@ -1,27 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  todo,
-  spec,
-  evaluateSpecification,
-  examples,
-  formatTypeScriptValue,
-  generateExamples,
-} from "../../src/index.js";
-import type {
-  AdequacyReport,
-  GeneratedExample,
-  Specification,
-} from "../../src/index.js";
+import * as c from "../../src/index.js";
 import { 予約をキャンセルする as 段階1の振る舞い } from "./stage-01-sketch.spec.js";
 import { 最初の回答 } from "./stage-02-first-answer.spec.js";
 import { 詳細化した仕様 } from "./stage-03-refined.spec.js";
 import { 完成した仕様 } from "./stage-04-complete.spec.js";
 
-const 段階1のスケッチ = spec({
+const 段階1のスケッチ = c.spec({
   name: "段階1: dataとbehaviorの宣言",
-  examples: examples(段階1の振る舞い, {}),
+  examples: c.examples(段階1の振る舞い, {}),
 });
 
 await show(
@@ -56,16 +44,16 @@ await show(
 async function show(
   title: string,
   description: string,
-  specification: Specification,
+  specification: c.Specification,
   options: { readonly showGenerated?: boolean } = {},
 ): Promise<void> {
   console.log(`\n${title}`);
   console.log(description);
-  const report = await evaluateSpecification(specification);
+  const report = await c.check(specification);
   console.log(formatReport(report));
 
   if (options.showGenerated === true) {
-    const generated = generateExamples(specification.examples);
+    const generated = c.generate(specification.examples).rows;
     if (generated.length > 0) {
       console.log("生成されたexample:");
       console.log(formatGeneratedRows(generated));
@@ -92,8 +80,8 @@ function showTypeBreak(): void {
   console.log(diagnostic || "想定したTypeScriptの型エラーが出力されませんでした");
 }
 
-function formatReport(report: AdequacyReport): string {
-  const verdictLabels: Readonly<Record<AdequacyReport["verdict"], string>> = {
+function formatReport(report: c.AdequacyReport): string {
+  const verdictLabels: Readonly<Record<c.AdequacyReport["verdict"], string>> = {
     satisfied: "完全",
     not_satisfied: "不完全",
     undetermined: "未確定",
@@ -125,13 +113,13 @@ function formatReport(report: AdequacyReport): string {
   return lines.join("\n");
 }
 
-function formatGeneratedRows(generated: readonly GeneratedExample[]): string {
+function formatGeneratedRows(generated: readonly c.GeneratedExample[]): string {
   return generated
     .map(
       row =>
         `${JSON.stringify(row.name)}: {\n` +
-        `  given: ${formatTypeScriptValue(row.given).replaceAll("\n", "\n  ")},\n` +
-        `  expect: todo(${JSON.stringify(row.reason)}),\n` +
+        `  given: ${c.formatTypeScriptValue(row.given).replaceAll("\n", "\n  ")},\n` +
+        `  expect: c.todo(${JSON.stringify(row.reason)}),\n` +
         "}",
     )
     .join(",\n");

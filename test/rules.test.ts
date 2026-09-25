@@ -8,11 +8,10 @@ import {
   behavior,
   spec,
   eq,
-  evaluateSpecification,
+  check,
   example,
   examples,
-  generateExamples,
-  generationReport,
+  generate,
   guard,
   implement,
   int,
@@ -23,7 +22,7 @@ import {
   match,
   object,
   or,
-  runImplementation,
+  perform,
   SpecificationError,
   string,
   variants,
@@ -62,7 +61,7 @@ const 在庫を確かめて確定する = implement(注文を確定する, {
 
 describe("rules", () => {
   it("answers with a guard's else when its condition does not hold", async () => {
-    const outcome = await runImplementation(在庫を確かめて確定する, {
+    const outcome = await perform(在庫を確かめて確定する, {
       状態: "商品あり",
       カートID: "c-1",
       明細: [{ 数量: 4, 在庫数: 3 }],
@@ -72,7 +71,7 @@ describe("rules", () => {
   });
 
   it("answers with what follows the guards when every condition holds", async () => {
-    const outcome = await runImplementation(在庫を確かめて確定する, {
+    const outcome = await perform(在庫を確かめて確定する, {
       状態: "商品あり",
       カートID: "c-1",
       明細: [{ 数量: 3, 在庫数: 3 }],
@@ -89,7 +88,7 @@ describe("arms of a rules decision", () => {
   }) };
 
   it("measures the arms completely and marks the arm an answered row went through", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, { ...在庫あり }),
@@ -117,7 +116,7 @@ describe("arms of a rules decision", () => {
   });
 
   it("says an arm only a row whose answer is owed went through is owed an answer", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, {
@@ -150,7 +149,7 @@ describe("verdict over a rules decision", () => {
   }) };
 
   it("is not_satisfied while an arm has no answered row through it", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, { ...在庫あり }),
@@ -162,7 +161,7 @@ describe("verdict over a rules decision", () => {
   });
 
   it("is satisfied when every measure was made and none found a gap", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, {
@@ -203,7 +202,7 @@ describe("verdict over a rules decision", () => {
         確定済み: { kind: "decision", id: "何もしない", run: () => ({ result: {}, effects: [] }) },
       },
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "混在", examples: examples(二つの状態, {}), implementation: 混在 }),
     );
 
@@ -237,7 +236,7 @@ describe("rules of a decision", () => {
   }) };
 
   it("lists each way through the body, carrying only the distinctions that way consulted", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "割引",
         examples: examples(割引を判定する, { ...会員歴で }),
@@ -267,7 +266,7 @@ describe("rules of a decision", () => {
     const 常に定価 = implement(割引を判定する, {
       cases: { 入力済み: action("常に定価", { run: () => ({ result: { 結果: "定価" }, effects: [] }) }) },
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "定価", examples: examples(割引を判定する, {}), implementation: 常に定価 }),
     );
 
@@ -303,12 +302,12 @@ describe("match over a sum field", () => {
 
   it("answers with the case the matched value is", async () => {
     expect(
-      await runImplementation(方法で決める, { 状態: "確定済み", 配送: { 方法: "店頭受取" } }),
+      await perform(方法で決める, { 状態: "確定済み", 配送: { 方法: "店頭受取" } }),
     ).toStrictEqual({ result: { 送料: 0 }, effects: [] });
   });
 
   it("counts every case of a match as an arm", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "送料", examples: examples(送料を決める, { ...宅配 }), implementation: 方法で決める }),
     );
 
@@ -322,7 +321,7 @@ describe("match over a sum field", () => {
   });
 
   it("ends a way at the case it went to", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "送料", examples: examples(送料を決める, { ...宅配 }), implementation: 方法で決める }),
     );
 
@@ -336,7 +335,7 @@ describe("match over a sum field", () => {
 
   it("lets the row a sum field class asks for stand on the way to that match case", () => {
     expect(
-      generateExamples(examples(送料を決める, { ...宅配 }), 方法で決める).map(row => row.given),
+      generate(examples(送料を決める, { ...宅配 }), 方法で決める).rows.map(row => row.given),
     ).toStrictEqual([{ 状態: "確定済み", 配送: { 方法: "店頭受取" } }]);
   });
 
@@ -375,7 +374,7 @@ describe("match over a sum field", () => {
     });
 
     expect(
-      generateExamples(existing, 重さと方法)
+      generate(existing, 重さと方法).rows
         .filter(row => row.name.includes(" is "))
         .map(row => row.given),
     ).toStrictEqual([{ 状態: "確定済み", 重さ: 1, 配送: { 方法: "店頭受取" } }]);
@@ -399,7 +398,7 @@ describe("ways generate could not compose", () => {
       },
     });
 
-    expect(generationReport(並べる, 並び).notComposed).toStrictEqual([
+    expect(generate(並べる, 並び).notComposed).toStrictEqual([
       "並び: $.姓 < $.名 holds → otherwise",
     ]);
   });
@@ -471,7 +470,7 @@ describe("rules written inline in spec", () => {
   });
 
   it("keeps the result literals of an implementation written inside the specification", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受け付ける, {
@@ -526,7 +525,7 @@ describe("ways no row can take", () => {
   const 受付 = () => ({ result: { 結果: "受付" as const }, effects: [] });
 
   async function statuses(implementation: Implementation<typeof 受け付ける>) {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受け付ける, {}),
@@ -633,12 +632,12 @@ describe("a term from outside all read inside each", () => {
 
   it("is read against the scope it was written in, not against the element", async () => {
     expect(
-      await runImplementation(上限で断る, { 状態: "入力済み", 上限: 1, 明細: [{ 数量: 5 }] }),
+      await perform(上限で断る, { 状態: "入力済み", 上限: 1, 明細: [{ 数量: 5 }] }),
     ).toStrictEqual({ result: { 結果: "超過" }, effects: [] });
   });
 
   it("is described from the scope it was written in", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "上限", examples: examples(上限を守る, {}), implementation: 上限で断る }),
     );
 
@@ -650,7 +649,7 @@ describe("a term from outside all read inside each", () => {
   });
 
   it("draws the border between the element and the outer position", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "上限", examples: examples(上限を守る, {}), implementation: 上限で断る }),
     );
 
@@ -688,15 +687,15 @@ describe("action", () => {
   });
 
   it("answers from a guard that fails before run", async () => {
-    expect(await runImplementation(実装, { 状態: "入力済み", 数量: 0 })).toStrictEqual(却下());
+    expect(await perform(実装, { 状態: "入力済み", 数量: 0 })).toStrictEqual(却下());
   });
 
   it("answers from run once every guard holds", async () => {
-    expect(await runImplementation(実装, { 状態: "入力済み", 数量: 1 })).toStrictEqual(受付());
+    expect(await perform(実装, { 状態: "入力済み", 数量: 1 })).toStrictEqual(受付());
   });
 
   it("measures an action with only run as one with no branches", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受け付ける, {

@@ -11,9 +11,9 @@ import type { AnyBehavior } from "./behavior.js";
 import { formatTypeScriptValue } from "./codegen.js";
 import {
   spec,
-  evaluateSpecification,
+  check,
   examples,
-  generationReport,
+  generate,
   isSpecification,
 } from "./specification.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
@@ -56,7 +56,7 @@ const checkCommand = defineCommand({
   run: async args => {
     const targets = await loadTargets(args.file);
     const reports = await Promise.all(
-      targets.map(target => evaluateSpecification(target.specification)),
+      targets.map(target => check(target.specification)),
     );
     if (args.json) {
       const document = reportDocument(reports, { id: resolve(args.file), name: args.file });
@@ -79,10 +79,10 @@ const generateCommand = defineCommand({
   run: async args => {
     const targets = await loadTargets(args.file);
     if (targets.some(target => target.synthesized)) {
-      console.log('import { examples, spec, todo } from "chisel";\n');
+      console.log('import * as c from "chisel";\n');
     }
     for (const target of targets) {
-      const { rows: generated, notComposed } = generationReport(
+      const { rows: generated, notComposed } = generate(
         target.specification.examples,
         target.specification.implementation,
       );
@@ -411,9 +411,9 @@ function formatGeneratedExamples(
   }
 
   return [
-    `export const ${binding}Examples = examples(${binding}, {\n${rows}});`,
+    `export const ${binding}Examples = c.examples(${binding}, {\n${rows}});`,
     "",
-    `export const ${binding}Specification = spec({`,
+    `export const ${binding}Specification = c.spec({`,
     `  name: ${JSON.stringify(target.specification.name)},`,
     `  examples: ${binding}Examples,`,
     "});",
@@ -426,7 +426,7 @@ function formatGeneratedExample(generated: GeneratedExample): string {
     generated.with === undefined
       ? ""
       : `\n    with: ${indent(formatTypeScriptValue(generated.with), 4).trimStart()},`;
-  return `  ${JSON.stringify(generated.name)}: {\n    given: ${given.trimStart()},${written}\n    expect: todo(${JSON.stringify(generated.reason)}),\n  }`;
+  return `  ${JSON.stringify(generated.name)}: {\n    given: ${given.trimStart()},${written}\n    expect: c.todo(${JSON.stringify(generated.reason)}),\n  }`;
 }
 
 function indent(value: string, spaces: number): string {

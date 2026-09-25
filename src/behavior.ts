@@ -364,7 +364,7 @@ export interface ArmTaken {
   readonly arm: string;
 }
 
-export async function runImplementation<B extends AnyBehavior>(
+export async function perform<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
   deps?: BehaviorDeps<B>,

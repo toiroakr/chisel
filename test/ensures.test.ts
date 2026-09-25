@@ -6,7 +6,7 @@ import {
   behavior,
   spec,
   eq,
-  evaluateSpecification,
+  check,
   example,
   examples,
   and,
@@ -17,11 +17,11 @@ import {
   implement,
   int,
   object,
-  runImplementation,
+  perform,
   SpecificationError,
   string,
   variants,
-  verifyConformance,
+  test,
 } from "../src/index.js";
 
 const 注文を確定する = behavior({
@@ -53,7 +53,7 @@ describe("ensures", () => {
     });
 
     await expect(
-      runImplementation(別のカートを確定する, { 状態: "商品あり", カートID: "c-1" }),
+      perform(別のカートを確定する, { 状態: "商品あり", カートID: "c-1" }),
     ).rejects.toThrow(
       new SpecificationError(
         "Ensures 確定したカートは入力のカート does not hold: value.カートID == input.カートID",
@@ -62,7 +62,7 @@ describe("ensures", () => {
   });
 
   it("reports a row whose written answer breaks what the behavior ensures", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "確定",
         examples: examples(注文を確定する, {
@@ -83,7 +83,7 @@ describe("ensures", () => {
   });
 
   it("holds an outside implementation to what the behavior ensures", async () => {
-    const failures = await verifyConformance(
+    const failures = await test(
       examples(注文を確定する, {
         "c-1を確定する": {
           given: { 状態: "商品あり", カートID: "c-1" },
@@ -128,7 +128,7 @@ describe("borders an ensures clause draws", () => {
   });
 
   it("draws a line where a conjunct compares the input with a constant and meets it by the value a row writes", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "照会",
         examples: examples(会員を探す, {
@@ -166,7 +166,7 @@ describe("borders an ensures clause draws", () => {
         ),
       ],
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "探す", examples: examples(探す, {}) }),
     );
 
@@ -214,7 +214,7 @@ describe("an ensures clause over every element of the answer", () => {
       },
     });
 
-    await expect(runImplementation(多すぎる, { 状態: "入力済み", 数量: 1 })).rejects.toThrow(
+    await expect(perform(多すぎる, { 状態: "入力済み", 数量: 1 })).rejects.toThrow(
       SpecificationError,
     );
   });
@@ -265,7 +265,7 @@ describe("how much of an ensures rule the check reads", () => {
   });
 
   async function readings() {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "見積", examples: examples(見積もる, {}) }),
     );
     return report.ensures;

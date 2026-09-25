@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  generate,
   action,
   todo,
   behavior,
   spec,
-  evaluateSpecification,
+  check,
   example,
   examples,
-  generateExamples,
   implement,
   isBehavior,
   isSpecification,
   object,
-  runImplementation,
+  perform,
   SpecificationError,
   string,
   variants,
-  verifyConformance,
+  test,
 } from "../src/index.js";
 
 const Input = variants("state", {
@@ -77,7 +77,7 @@ describe("chisel", () => {
   it("generates unanswered examples from a behavior declaration", () => {
     const definition = publishingBehavior();
 
-    const generated = generateExamples(definition);
+    const generated = generate(definition).rows;
 
     expect(generated.map(row => row.given)).toStrictEqual([
       { state: "draft", id: "<Id>" },
@@ -102,7 +102,7 @@ describe("chisel", () => {
     });
     const specification = spec({ name: "publishing", examples: rows });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.implementation).toBe("missing");
     expect(report.input.missing).toStrictEqual(["published"]);
@@ -114,7 +114,7 @@ describe("chisel", () => {
     const definition = publishingBehavior();
     const implementation = publishingImplementation(definition);
 
-    const actual = await runImplementation(implementation, {
+    const actual = await perform(implementation, {
       state: "draft",
       id: "a",
     });
@@ -150,9 +150,9 @@ describe("chisel", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
-    const failures = await verifyConformance(rows, input =>
-      runImplementation(implementation, input),
+    const report = await check(specification);
+    const failures = await test(rows, input =>
+      perform(implementation, input),
     );
 
     expect(report.adequate).toBe(true);
@@ -206,7 +206,7 @@ describe("dependency issues", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.dependencyIssues).toStrictEqual([
       { variant: undefined, reason: "未知の作用'mail'に依存すると宣言されています" },
@@ -250,7 +250,7 @@ describe("dependency issues", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.dependencyIssues).toStrictEqual([
       { variant: "draft", reason: "未知の作用'mail'に依存すると宣言されています" },
@@ -270,7 +270,7 @@ describe("dependency issues", () => {
       examples: examples(definition, {}),
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.dependencyIssues).toStrictEqual([
       { variant: undefined, reason: "未知の作用'mail'に依存すると宣言されています" },
@@ -278,7 +278,7 @@ describe("dependency issues", () => {
   });
 });
 
-describe("evaluateSpecification failure reporting", () => {
+describe("check failure reporting", () => {
   it("reports a failure when the implementation disagrees with an example", async () => {
     const definition = publishingBehavior();
     const implementation = publishingImplementation(definition);
@@ -297,7 +297,7 @@ describe("evaluateSpecification failure reporting", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.failures.map(failure => failure.name)).toStrictEqual(["publish draft"]);
     expect(report.adequate).toBe(false);
@@ -331,7 +331,7 @@ describe("evaluateSpecification failure reporting", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.pendingDecisions).toStrictEqual([
       { variant: "published", reason: "再公開時の挙動が未確定です" },
@@ -368,7 +368,7 @@ describe("evaluateSpecification failure reporting", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.controlGaps).toStrictEqual([
       { effect: "notify", reason: "control policy is missing" },
@@ -406,7 +406,7 @@ describe("evaluateSpecification failure reporting", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.controlGaps).toStrictEqual([
       { effect: "notify", reason: "制御方針が未確定です" },
@@ -414,7 +414,7 @@ describe("evaluateSpecification failure reporting", () => {
   });
 });
 
-describe("runImplementation error handling", () => {
+describe("perform error handling", () => {
   it("throws when the selected decision is pending", async () => {
     const definition = publishingBehavior();
     const implementation = implement(definition, {
@@ -433,7 +433,7 @@ describe("runImplementation error handling", () => {
     });
 
     await expect(
-      runImplementation(implementation, { state: "published", id: "b" }),
+      perform(implementation, { state: "published", id: "b" }),
     ).rejects.toThrow(SpecificationError);
   });
 
@@ -462,7 +462,7 @@ describe("runImplementation error handling", () => {
     });
 
     await expect(
-      runImplementation(implementation, { state: "draft", id: "a" }),
+      perform(implementation, { state: "draft", id: "a" }),
     ).rejects.toThrow(SpecificationError);
   });
 
@@ -491,7 +491,7 @@ describe("runImplementation error handling", () => {
     });
 
     await expect(
-      runImplementation(implementation, { state: "draft", id: "a" }),
+      perform(implementation, { state: "draft", id: "a" }),
     ).rejects.toThrow(SpecificationError);
   });
 });
@@ -509,7 +509,7 @@ describe("generateExamples", () => {
       },
     });
 
-    const generated = generateExamples(rows);
+    const generated = generate(rows).rows;
 
     expect(generated.map(row => row.given)).toStrictEqual([
       { state: "published", id: "<Id>" },
@@ -525,7 +525,7 @@ describe("generateExamples", () => {
       },
     });
 
-    const generated = generateExamples(rows);
+    const generated = generate(rows).rows;
 
     expect(generated.map(row => row.given)).toStrictEqual([
       { state: "draft", id: "<Id>" },
@@ -533,7 +533,7 @@ describe("generateExamples", () => {
   });
 });
 
-describe("verifyConformance", () => {
+describe("test", () => {
   it("reports a failure when the subject disagrees with an answered example", async () => {
     const definition = publishingBehavior();
     const rows = examples(definition, {
@@ -546,7 +546,7 @@ describe("verifyConformance", () => {
       },
     });
 
-    const failures = await verifyConformance(rows, () => ({
+    const failures = await test(rows, () => ({
       result: { type: "rejected" as const, reason: "already-published" },
       effects: [],
     }));
@@ -566,7 +566,7 @@ describe("verifyConformance", () => {
       },
     });
 
-    const failures = await verifyConformance(rows, () => {
+    const failures = await test(rows, () => {
       throw "boom";
     });
 
@@ -583,7 +583,7 @@ describe("verifyConformance", () => {
     });
     let calls = 0;
 
-    const failures = await verifyConformance(rows, input => {
+    const failures = await test(rows, input => {
       calls += 1;
       return { result: { type: "accepted" as const, id: input.id }, effects: [] };
     });
@@ -622,16 +622,16 @@ describe("isSpecification", () => {
   });
 });
 
-describe("runImplementation invalid input and cases", () => {
+describe("perform invalid input and cases", () => {
   it("throws SpecificationError when the input fails schema validation", async () => {
     const definition = publishingBehavior();
     const implementation = publishingImplementation(definition);
 
     await expect(
-      runImplementation(implementation, { state: "draft", id: 42 } as never),
+      perform(implementation, { state: "draft", id: 42 } as never),
     ).rejects.toThrow(SpecificationError);
     await expect(
-      runImplementation(implementation, { state: "draft", id: 42 } as never),
+      perform(implementation, { state: "draft", id: 42 } as never),
     ).rejects.toThrow("Invalid input");
   });
 
@@ -652,15 +652,15 @@ describe("runImplementation invalid input and cases", () => {
     });
 
     await expect(
-      runImplementation(implementation, { state: "published", id: "b" }),
+      perform(implementation, { state: "published", id: "b" }),
     ).rejects.toThrow(SpecificationError);
     await expect(
-      runImplementation(implementation, { state: "published", id: "b" }),
+      perform(implementation, { state: "published", id: "b" }),
     ).rejects.toThrow("No decision for input variant published");
   });
 });
 
-describe("evaluateSpecification example validation", () => {
+describe("check example validation", () => {
   it("reports a failure when an example's given value fails schema validation", async () => {
     const definition = publishingBehavior();
     const rows = examples(definition, {
@@ -671,7 +671,7 @@ describe("evaluateSpecification example validation", () => {
     });
     const specification = spec({ name: "publishing", examples: rows });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.failures).toStrictEqual([
       { name: "invalid given", message: "Example input is invalid" },
@@ -688,7 +688,7 @@ describe("evaluateSpecification example validation", () => {
     });
     const specification = spec({ name: "publishing", examples: rows });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.failures).toStrictEqual([
       { name: "invalid expected result", message: "Expected result is invalid" },
@@ -738,7 +738,7 @@ describe("evaluateSpecification example validation", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.failures).toStrictEqual([{ name: "publish draft", message: "boom" }]);
   });
@@ -789,7 +789,7 @@ describe("coverage-driven adequacy vetoes", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.result).toStrictEqual({ covered: [], missing: [], excluded: [], total: 0 });
     expect(report.adequate).toBe(true);
@@ -846,7 +846,7 @@ describe("coverage-driven adequacy vetoes", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.result).toStrictEqual({
       covered: ["accepted"],
@@ -923,7 +923,7 @@ describe("coverage-driven adequacy vetoes", () => {
       implementation,
     });
 
-    const report = await evaluateSpecification(specification);
+    const report = await check(specification);
 
     expect(report.effects).toStrictEqual({
       covered: ["notify"],
@@ -945,7 +945,7 @@ describe("todo", () => {
   });
 
   it("marks an owed answer, an unwritten case and an undecided control alike", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受け付ける, {

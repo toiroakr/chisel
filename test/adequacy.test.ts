@@ -5,12 +5,12 @@ import {
   behavior,
   boolean,
   spec,
-  evaluateSpecification,
+  check,
   example,
   eq,
   examples,
   gte,
-  generationReport,
+  generate,
   guard,
   implement,
   int,
@@ -55,7 +55,7 @@ const クーポンなしで確定する = { "クーポンなしで確定する":
 
 describe("equivalence partitions in the adequacy report", () => {
   it("counts a class as covered when an answered row's value falls in it", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, { ...クーポンなしで確定する }),
@@ -76,7 +76,7 @@ describe("equivalence partitions in the adequacy report", () => {
   });
 
   it("does not count a class as covered by a row whose answer is owed", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, {
@@ -98,7 +98,7 @@ describe("equivalence partitions in the adequacy report", () => {
   });
 
   it("is not adequate while a class no row is in remains", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, { ...クーポンなしで確定する }),
@@ -153,7 +153,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("reaches specified and no further for a row nothing implements yet", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "判定", examples: examples(判定する, { ...確定を期待する }) }),
     );
 
@@ -163,7 +163,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("counts what a failing row saw as observed and does not count what it expected as verified", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "判定",
         examples: examples(判定する, { ...確定を期待する }),
@@ -178,7 +178,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("marks an input case executed but not verified when its row fails", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "判定",
         examples: examples(判定する, { ...確定を期待する }),
@@ -192,7 +192,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("marks a case verified when a row expected it and the behavior produced it", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "判定",
         examples: examples(判定する, {
@@ -216,7 +216,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("verifies a result case by its case even when the row fails on its fields", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "判定",
         examples: examples(判定する, {
@@ -238,7 +238,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("grades an effect case the same way as a result case", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "判定",
         examples: examples(判定する, {
@@ -260,7 +260,7 @@ describe("graded evidence in the adequacy report", () => {
   });
 
   it("runs a row whose answer is owed and records what it saw without specifying anything", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "判定",
         examples: examples(判定する, {
@@ -312,7 +312,7 @@ describe("measures and verdict", () => {
   });
 
   it("says arms are not applicable when nothing implements the behavior", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "注文確定", examples: 両方のクラス }),
     );
 
@@ -323,7 +323,7 @@ describe("measures and verdict", () => {
   });
 
   it("says arms are not measured and names each free-form decision as not read", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "注文確定", examples: 両方のクラス, implementation: 確定する }),
     );
 
@@ -335,7 +335,7 @@ describe("measures and verdict", () => {
   });
 
   it("is not_satisfied when a measure found a gap", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文確定",
         examples: examples(注文を確定する, { ...クーポンなしで確定する }),
@@ -347,7 +347,7 @@ describe("measures and verdict", () => {
   });
 
   it("is undetermined rather than satisfied when no gap was found but the arms could not be read", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "注文確定", examples: 両方のクラス, implementation: 確定する }),
     );
 
@@ -371,7 +371,7 @@ describe("border points in the adequacy report", () => {
     }) });
 
   it("marks a point met when an answered row's value stands at it", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "数量", examples: examples(数量を確定する, { ...数量で(1) }) }),
     );
 
@@ -390,7 +390,7 @@ describe("border points in the adequacy report", () => {
   });
 
   it("is not adequate while a point is owed a row", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "数量", examples: examples(数量を確定する, { ...数量で(1) }) }),
     );
 
@@ -398,7 +398,7 @@ describe("border points in the adequacy report", () => {
   });
 
   it("does not let a row whose answer is owed meet a point", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "数量",
         examples: examples(数量を確定する, {
@@ -419,7 +419,7 @@ describe("border points in the adequacy report", () => {
       result: object({}),
       effects: variants("種類", {}),
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "登録",
         examples: examples(登録する, {
@@ -450,7 +450,7 @@ describe("excluded classes in the adequacy report", () => {
       result: object({}),
       effects: variants("種類", {}),
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "同意",
         examples: examples(同意する, {
@@ -488,7 +488,7 @@ describe("pairs of classes", () => {
   });
 
   it("counts the combinations of two positions' classes the answered rows reach without asking for more", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "配送",
         examples: examples(配送を選ぶ, {
@@ -523,7 +523,7 @@ describe("pairs of classes", () => {
         }),
       },
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(注文を受け付ける, {
@@ -551,7 +551,7 @@ describe("pairs of classes", () => {
       result: object({}),
       effects: variants("種類", {}),
     });
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "状態", examples: examples(二つの状態, {}) }),
     );
 
@@ -574,7 +574,7 @@ describe("a position the invariants leave empty", () => {
   });
 
   async function report() {
-    return evaluateSpecification(
+    return check(
       spec({ name: "数量", examples: examples(数量を決める, {}) }),
     );
   }
@@ -614,7 +614,7 @@ describe("a guard threshold interval the invariants leave empty", () => {
         }),
       },
     });
-    const result = await evaluateSpecification(
+    const result = await check(
       spec({
         name: "受付",
         examples: examples(受け付ける, {}),
@@ -646,7 +646,7 @@ describe("an input case the invariants of the input sum refuse", () => {
   });
 
   it("is excluded from the input cases, neither covered nor missing", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({ name: "処理", examples: examples(注文を処理する, {}) }),
     );
 
@@ -659,7 +659,7 @@ describe("an input case the invariants of the input sum refuse", () => {
   });
 
   it("is neither offered a row nor named as a row generate could not compose", () => {
-    const report = generationReport(注文を処理する);
+    const report = generate(注文を処理する);
 
     expect({
       rows: report.rows.map(row => row.name),

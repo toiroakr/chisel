@@ -1,50 +1,39 @@
-import {
-  todo,
-  behavior,
-  spec,
-  example,
-  examples,
-  implement,
-  literal,
-  object,
-  string,
-  variants,
-} from "../src/index.js";
+import * as c from "../src/index.js";
 
-const OrderId = string("OrderId");
-const PaymentId = string("PaymentId");
-const ShipmentId = string("ShipmentId");
+const OrderId = c.string("OrderId");
+const PaymentId = c.string("PaymentId");
+const ShipmentId = c.string("ShipmentId");
 
-const Order = variants("state", {
-  unpaid: object({ orderId: OrderId }),
-  paid: object({ orderId: OrderId, paymentId: PaymentId }),
-  preparing: object({ orderId: OrderId, paymentId: PaymentId }),
-  shipped: object({ orderId: OrderId, shipmentId: ShipmentId }),
-  cancelled: object({ orderId: OrderId }),
+const Order = c.variants("state", {
+  unpaid: c.object({ orderId: OrderId }),
+  paid: c.object({ orderId: OrderId, paymentId: PaymentId }),
+  preparing: c.object({ orderId: OrderId, paymentId: PaymentId }),
+  shipped: c.object({ orderId: OrderId, shipmentId: ShipmentId }),
+  cancelled: c.object({ orderId: OrderId }),
 });
 
-const CancelResult = variants("type", {
-  accepted: object({
-    order: object({
-      state: literal("cancelled"),
+const CancelResult = c.variants("type", {
+  accepted: c.object({
+    order: c.object({
+      state: c.literal("cancelled"),
       orderId: OrderId,
     }),
   }),
-  rejected: object({ reason: string("CancelRejection") }),
+  rejected: c.object({ reason: c.string("CancelRejection") }),
 });
 
-const CancelEffect = variants("type", {
-  refund: object({
+const CancelEffect = c.variants("type", {
+  refund: c.object({
     paymentId: PaymentId,
-    idempotencyKey: string("IdempotencyKey"),
+    idempotencyKey: c.string("IdempotencyKey"),
   }),
-  restock: object({
+  restock: c.object({
     orderId: OrderId,
-    idempotencyKey: string("IdempotencyKey"),
+    idempotencyKey: c.string("IdempotencyKey"),
   }),
 });
 
-export const cancelOrder = behavior({
+export const cancelOrder = c.behavior({
   name: "cancel-order",
   input: Order,
   result: CancelResult,
@@ -52,7 +41,7 @@ export const cancelOrder = behavior({
   dependsOn: ["refund", "restock"],
 });
 
-const implementation = implement(cancelOrder, {
+const implementation = c.implement(cancelOrder, {
   cases: {
     unpaid: {
       kind: "decision",
@@ -94,7 +83,7 @@ const implementation = implement(cancelOrder, {
         ],
       }),
     },
-    preparing: todo("Whether preparation can be cancelled is undecided"),
+    preparing: c.todo("Whether preparation can be cancelled is undecided"),
     shipped: {
       kind: "decision",
       id: "reject-shipped",
@@ -113,7 +102,7 @@ const implementation = implement(cancelOrder, {
     },
   },
   controls: {
-    refund: todo("Compensation after a successful refund is undecided"),
+    refund: c.todo("Compensation after a successful refund is undecided"),
     restock: {
       execution: "outbox",
       idempotency: "required",
@@ -122,7 +111,7 @@ const implementation = implement(cancelOrder, {
   },
 });
 
-const cancellationExamples = examples(cancelOrder, {
+const cancellationExamples = c.examples(cancelOrder, {
   "cancel an unpaid order": {
     given: { state: "unpaid", orderId: "o-1" },
     expect: {
@@ -176,7 +165,7 @@ const cancellationExamples = examples(cancelOrder, {
   },
 });
 
-export const orderCancellation = spec({
+export const orderCancellation = c.spec({
   name: "order cancellation",
   examples: cancellationExamples,
   implementation,

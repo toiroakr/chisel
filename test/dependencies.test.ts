@@ -8,18 +8,17 @@ import {
   spec,
   dependency,
   eq,
-  evaluateSpecification,
+  check,
   example,
   examples,
   fake,
-  generateExamples,
-  generationReport,
+  generate,
   guard,
   implement,
   lte,
   lt,
   match,
-  runImplementation,
+  perform,
   int,
   instant,
   object,
@@ -49,7 +48,7 @@ const 今で受け付ける = implement(受付する, {
 describe("a value dependency", () => {
   it("is stood in for by the value a row writes with with", async () => {
     const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受付する, {
@@ -67,7 +66,7 @@ describe("a value dependency", () => {
   });
 
   it("reports a row that runs the model without standing in for a dependency it needs", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受付する, {
@@ -89,7 +88,7 @@ describe("a value dependency", () => {
   });
 
   it("says the row was not observed, and why", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受付する, {
@@ -117,7 +116,7 @@ describe("a value dependency", () => {
 
 describe("a value a row writes for a dependency", () => {
   it("is held to what the dependency answers", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "受付",
         examples: examples(受付する, {
@@ -170,7 +169,7 @@ describe("a function dependency", () => {
     }) });
 
   it("is stood in for by a fake table matched on the input it is asked", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "在庫",
         examples: examples(在庫を確かめる, { ...商品で("商品-A", true), ...商品で("商品-B", false) }),
@@ -183,7 +182,7 @@ describe("a function dependency", () => {
   });
 
   it("reports an input a fake table has no row and no default for", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "在庫",
         examples: examples(在庫を確かめる, { ...商品で("商品-C", false) }),
@@ -198,7 +197,7 @@ describe("a function dependency", () => {
   });
 
   it("answers an input no row states with the table's default", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "在庫",
         examples: examples(在庫を確かめる, { ...商品で("商品-C", false) }),
@@ -212,7 +211,7 @@ describe("a function dependency", () => {
 
   const issuesOf = async (fakes: Parameters<typeof spec>[0]["fakes"]) =>
     (
-      await evaluateSpecification(
+      await check(
         spec({
           name: "在庫",
           examples: examples(在庫を確かめる, {}),
@@ -258,7 +257,7 @@ describe("generated rows and dependencies", () => {
     const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
 
     expect(
-      generateExamples(
+      generate(
         examples(受付する2, {
           "紹介なし": {
             given: { 状態: "申込済み" },
@@ -266,7 +265,7 @@ describe("generated rows and dependencies", () => {
             expect: { result: { 受付日時: 時刻 }, effects: [] },
           },
         }),
-      ).map(row => row.with),
+      ).rows.map(row => row.with),
     ).toStrictEqual([{ 現在時刻: 時刻 }]);
   });
 
@@ -290,7 +289,7 @@ describe("generated rows and dependencies", () => {
         }),
       },
     });
-    const report = generationReport(
+    const report = generate(
       examples(送料を決める, {
         "宅配": {
           given: { 状態: "確定済み", 配送: { 方法: "宅配" } },
@@ -343,7 +342,7 @@ describe("a value dependency read in a guard condition", () => {
 
   it("is evaluated against the dependency the run is given", async () => {
     expect(
-      await runImplementation(
+      await perform(
         過去を断る,
         {
           状態: "申込済み",
@@ -355,7 +354,7 @@ describe("a value dependency read in a guard condition", () => {
   });
 
   it("is evaluated against the value a row writes with with", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "予約",
         examples: examples(予約する, {
@@ -371,7 +370,7 @@ describe("a value dependency read in a guard condition", () => {
   });
 
   it("draws its border on the difference between the position and the dependency", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "予約",
         examples: examples(予約する, {
@@ -402,7 +401,7 @@ describe("a value dependency read in a guard condition", () => {
   });
 
   it("is a comparison Chisel reads", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "予約",
         examples: examples(予約する, {}),
@@ -414,12 +413,12 @@ describe("a value dependency read in a guard condition", () => {
   });
 
   it("generates a row at a point by moving the position against the value the row stands in with", () => {
-    const generated = generateExamples(
+    const generated = generate(
       examples(予約する, {
         ...行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
       }),
       過去を断る,
-    ).find((row) => row.name.endsWith("OFF (= 0)"));
+    ).rows.find((row) => row.name.endsWith("OFF (= 0)"));
 
     expect(generated).toStrictEqual({
       name: "予約する: deps.現在時刻 − @申込済み.希望日時 OFF (= 0)",
@@ -460,7 +459,7 @@ describe("a value dependency read inside all", () => {
 
   it("is evaluated against the dependency for every element", async () => {
     expect(
-      await runImplementation(
+      await perform(
         上限で断る,
         { 状態: "入力済み", 明細: [{ 数量: 3 }] },
         { 上限: 2 },
@@ -469,7 +468,7 @@ describe("a value dependency read inside all", () => {
   });
 
   it("is a comparison Chisel reads inside all", async () => {
-    const report = await evaluateSpecification(
+    const report = await check(
       spec({
         name: "注文",
         examples: examples(注文する, {}),
@@ -518,7 +517,7 @@ describe("a dependency declared as another behavior", () => {
   });
 
   async function reportWith(rows: Parameters<typeof fake<typeof 注文する, "在庫">>[2]) {
-    return evaluateSpecification(
+    return check(
       spec({
         name: "注文",
         examples: examples(注文する, {

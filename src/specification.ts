@@ -25,7 +25,7 @@ import {
   brokenEnsures,
   comparisonsReached,
   isTodo,
-  runImplementation,
+  perform,
   runTraced,
   traceSync,
 } from "./behavior.js";
@@ -324,7 +324,7 @@ export function isSpecification(value: unknown): value is Specification {
   );
 }
 
-export async function evaluateSpecification(
+export async function check(
   specification: Specification,
 ): Promise<AdequacyReport> {
   const definition = specification.examples.behavior;
@@ -786,19 +786,12 @@ export async function evaluateSpecification(
   };
 }
 
-export function generateExamples(
-  target: AnyBehavior | ExampleSet<AnyBehavior>,
-  implementation?: AnyImplementation,
-): readonly GeneratedExample[] {
-  return generationReport(target, implementation).rows;
-}
-
 export interface GenerationReport {
   readonly rows: readonly GeneratedExample[];
   readonly notComposed: readonly string[];
 }
 
-export function generationReport(
+export function generate(
   target: AnyBehavior | ExampleSet<AnyBehavior>,
   implementation?: AnyImplementation,
 ): GenerationReport {
@@ -999,7 +992,7 @@ export function generationReport(
   return { rows: generated, notComposed };
 }
 
-export async function verifyConformance<B extends AnyBehavior>(
+export async function test<B extends AnyBehavior>(
   exampleSet: ExampleSet<B>,
   subject: NoInfer<ConformanceSubject<B>>,
 ): Promise<readonly ExampleFailure[]> {

@@ -70,7 +70,7 @@ export {
   match,
   isTodo,
   todo,
-  runImplementation,
+  perform,
   SpecificationError,
 } from "./behavior.js";
 export type {
@@ -98,13 +98,12 @@ export type {
 
 export {
   spec,
-  evaluateSpecification,
+  check,
   example,
   examples,
-  generateExamples,
-  generationReport,
+  generate,
   isSpecification,
-  verifyConformance,
+  test,
 } from "./specification.js";
 export type {
   AdequacyReport,
