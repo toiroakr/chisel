@@ -794,7 +794,9 @@ export function generate(
   );
 
   const answeredRows = rows.filter(row => !isTodo(row.expect));
-  const origins = answeredRows.map(row => row.given);
+  const origins = answeredRows
+    .filter(row => definition.input.parse(row.given).success)
+    .map(row => row.given);
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
     const written = answeredRows.find(row => row.given === origin)?.with;
     return written === undefined ? {} : { with: written };

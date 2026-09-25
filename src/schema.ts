@@ -428,7 +428,7 @@ export function variants<
     }
 
     const { [discriminant]: _tag, ...fields } = source;
-    const result = variant.parse(fields, path);
+    const result = variant.parse(Object.hasOwn(variant.shape, discriminant) ? source : fields, path);
     return result.success
       ? valid({ [discriminant]: tag, ...result.value } as VariantsValue<
           Discriminant,

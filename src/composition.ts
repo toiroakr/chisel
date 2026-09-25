@@ -136,7 +136,12 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
     throw new SpecificationError(`${second.name} receives none of the cases ${first.name} answers`);
   }
   for (const tag of flowing) {
-    const undeclared = undeclaredPath(firstResult.variants[tag]!, second.input.variants[tag]!, `@${tag}`);
+    const undeclared = undeclaredPath(
+      firstResult.variants[tag]!,
+      second.input.variants[tag]!,
+      `@${tag}`,
+      firstResult.discriminant,
+    );
     if (undeclared !== undefined) {
       throw new SpecificationError(
         `${first.name} answers ${undeclared}, which ${second.name} does not declare`,
@@ -166,13 +171,37 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
   };
 }
 
-function undeclaredPath(answered: AnySchema, taken: AnySchema, path: string): string | undefined {
+function undeclaredPath(
+  answered: AnySchema,
+  taken: AnySchema,
+  path: string,
+  discriminant?: string,
+): string | undefined {
+  if (answered.kind === "optional") {
+    return undeclaredPath((answered as OptionalSchema<unknown>).schema as AnySchema, taken, `${path}?`);
+  }
+  if (taken.kind === "optional") {
+    return undeclaredPath(answered, (taken as OptionalSchema<unknown>).schema as AnySchema, path);
+  }
   if (answered.kind === "object" && taken.kind === "object") {
     const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
     for (const [key, field] of Object.entries((answered as ObjectSchema<ObjectShape>).shape)) {
+      if (key === discriminant && !Object.hasOwn(takenShape, key)) {
+        continue;
+      }
       const found = Object.hasOwn(takenShape, key)
         ? undeclaredPath(field, takenShape[key]!, `${path}.${key}`)
         : `${path}.${key}`;
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (answered.kind === "object" && taken.kind === "record") {
+    const value = (taken as RecordSchema<unknown>).value as AnySchema;
+    for (const [key, field] of Object.entries((answered as ObjectSchema<ObjectShape>).shape)) {
+      const found = undeclaredPath(field, value, `${path}.${key}`);
       if (found !== undefined) {
         return found;
       }
@@ -186,13 +215,6 @@ function undeclaredPath(answered: AnySchema, taken: AnySchema, path: string): st
       `${path}[]`,
     );
   }
-  if (answered.kind === "optional" && taken.kind === "optional") {
-    return undeclaredPath(
-      (answered as OptionalSchema<unknown>).schema as AnySchema,
-      (taken as OptionalSchema<unknown>).schema as AnySchema,
-      `${path}?`,
-    );
-  }
   if (answered.kind === "record" && taken.kind === "record") {
     return undeclaredPath(
       (answered as RecordSchema<unknown>).value as AnySchema,
@@ -202,7 +224,12 @@ function undeclaredPath(answered: AnySchema, taken: AnySchema, path: string): st
   }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
     for (const tag of answered.variantTags.filter(tag => taken.variantTags.includes(tag))) {
-      const found = undeclaredPath(answered.variants[tag], taken.variants[tag], `${path}@${tag}`);
+      const found = undeclaredPath(
+        answered.variants[tag],
+        taken.variants[tag],
+        `${path}@${tag}`,
+        answered.discriminant,
+      );
       if (found !== undefined) {
         return found;
       }

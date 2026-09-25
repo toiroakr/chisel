@@ -277,6 +277,17 @@ describe("object", () => {
     });
   });
 
+  it("rejects an undeclared key even when its value is undefined", () => {
+    const Order = object({ id: string("Id") });
+
+    const result = Order.parse({ id: "a", secret: undefined });
+
+    expect(result).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.secret", message: "Unexpected key" }],
+    });
+  });
+
   it("rejects an undeclared key inside a nested object, naming its full path", () => {
     const Order = object({ line: object({ sku: string("Sku") }) });
 
@@ -321,6 +332,14 @@ describe("variants", () => {
 
   it("merges the discriminant tag back into the parsed value", () => {
     const result = Shape.parse({ state: "draft", id: "a" });
+
+    expect(result).toStrictEqual({ success: true, value: { state: "draft", id: "a" } });
+  });
+
+  it("accepts a variant whose object declares the discriminant itself", () => {
+    const Declared = variants("state", { draft: object({ state: literal("draft"), id: string("Id") }) });
+
+    const result = Declared.parse({ state: "draft", id: "a" });
 
     expect(result).toStrictEqual({ success: true, value: { state: "draft", id: "a" } });
   });

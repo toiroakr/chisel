@@ -14,6 +14,7 @@ import {
   external,
   implement,
   int,
+  literal,
   object,
   optional,
   record,
@@ -190,6 +191,87 @@ describe("compose", () => {
     });
   });
 
+  it("does not count the discriminant a first stage's case declares for itself as undeclared", () => {
+    const 状態を宣言する = behavior("状態を宣言する", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", {
+        有効: object({ 結果: literal("有効"), 支払: variants("方法", { 現金: object({ 方法: literal("現金") }) }) }),
+      }),
+      effects: variants("種類", {}),
+    });
+    const 状態を宣言しない = behavior("状態を宣言しない", {
+      input: variants("結果", { 有効: object({ 支払: variants("方法", { 現金: object({}) }) }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      compose("判別キーを宣言する合成", [
+        external(状態を宣言する, "別のチーム"),
+        external(状態を宣言しない, "別のチーム"),
+      ]),
+    ).not.toThrow();
+  });
+
+  it("compares each field of an object the first stage answers with the record value the second stage takes", () => {
+    const 品目ごとに返す = behavior("品目ごとに返す", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", {
+        有効: object({ 価格: object({ りんご: object({ 金額: int(), 通貨: string("通貨") }) }) }),
+      }),
+      effects: variants("種類", {}),
+    });
+    const 金額だけの表で受け取る = behavior("金額だけの表で受け取る", {
+      input: variants("結果", { 有効: object({ 価格: record(object({ 金額: int() })) }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      compose("表で受け取る合成", [
+        external(品目ごとに返す, "別のチーム"),
+        external(金額だけの表で受け取る, "別のチーム"),
+      ]),
+    ).toThrow(
+      new SpecificationError("品目ごとに返す answers @有効.価格.りんご.通貨, which 金額だけの表で受け取る does not declare"),
+    );
+  });
+
+  describe("comparing through an optional on only one side of the join", () => {
+    const 明細 = object({ 商品: string("商品"), 単価: int() });
+    const 単価を知らない = object({ 商品: string("商品") });
+    const 段 = (name: string, answered: AnySchema, taken: AnySchema) =>
+      [
+        external(
+          behavior(`${name}を返す`, {
+            input: variants("状態", { 申込: object({}) }),
+            result: variants("結果", { 有効: object({ 主: answered }) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+        external(
+          behavior(`${name}を受け取る`, {
+            input: variants("結果", { 有効: object({ 主: taken }) }),
+            result: variants("結果", { 見積: object({}) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+      ] as const;
+
+    it("compares an answered field with what the optional the second stage takes holds", () => {
+      expect(() => compose("任意で受け取る", 段("必須", 明細, optional(単価を知らない)))).toThrow(
+        new SpecificationError("必須を返す answers @有効.主.単価, which 必須を受け取る does not declare"),
+      );
+    });
+
+    it("compares what an answered optional holds with the field the second stage takes", () => {
+      expect(() => compose("任意で返す", 段("任意", optional(明細), 単価を知らない))).toThrow(
+        new SpecificationError("任意を返す answers @有効.主?.単価, which 任意を受け取る does not declare"),
+      );
+    });
+  });
 });
 
 describe("running a composition", () => {
