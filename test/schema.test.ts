@@ -325,12 +325,6 @@ describe("variants", () => {
     expect(result).toStrictEqual({ success: true, value: { state: "draft", id: "a" } });
   });
 
-  it("does not count its own discriminant as a key the variant leaves undeclared", () => {
-    const result = Shape.parse({ state: "draft", id: "a" });
-
-    expect(result.success).toBe(true);
-  });
-
   it("rejects a key the matched variant does not declare", () => {
     const result = Shape.parse({ state: "draft", id: "a", publishedAt: "never" });
 

@@ -121,22 +121,25 @@ describe("compose", () => {
     );
   });
 
-  it("refuses a field the second stage does not declare inside a nested object, array element or optional", () => {
+  describe("refusing a field the second stage does not declare below the case", () => {
     const 明細 = object({ 商品: string("商品"), 単価: int() });
-    const 明細を返す = behavior("明細を返す", {
-      input: variants("状態", { 申込: object({}) }),
-      result: variants("結果", {
-        有効: object({
-          主: 明細,
-          一覧: array(明細),
-          補足: optional(明細),
-          索引: record(明細),
-          支払: variants("方法", { 現金: object({ 金額: int() }) }),
-        }),
-      }),
-      effects: variants("種類", {}),
-    });
     const 単価を知らない = object({ 商品: string("商品") });
+    const 明細を返す = external(
+      behavior("明細を返す", {
+        input: variants("状態", { 申込: object({}) }),
+        result: variants("結果", {
+          有効: object({
+            主: 明細,
+            一覧: array(明細),
+            補足: optional(明細),
+            索引: record(明細),
+            支払: variants("方法", { 現金: object({ 金額: int() }) }),
+          }),
+        }),
+        effects: variants("種類", {}),
+      }),
+      "別のチーム",
+    );
     const 受け取る = (shape: Record<string, AnySchema>) =>
       external(
         behavior("受け取る", {
@@ -155,24 +158,38 @@ describe("compose", () => {
         }),
         "別のチーム",
       );
-    const 明細を返すの実装 = external(明細を返す, "別のチーム");
 
-    expect(() => compose("主", [明細を返すの実装, 受け取る({ 主: 単価を知らない })])).toThrow(
-      new SpecificationError("明細を返す answers @有効.主.単価, which 受け取る does not declare"),
-    );
-    expect(() => compose("一覧", [明細を返すの実装, 受け取る({ 一覧: array(単価を知らない) })])).toThrow(
-      new SpecificationError("明細を返す answers @有効.一覧[].単価, which 受け取る does not declare"),
-    );
-    expect(() => compose("補足", [明細を返すの実装, 受け取る({ 補足: optional(単価を知らない) })])).toThrow(
-      new SpecificationError("明細を返す answers @有効.補足?.単価, which 受け取る does not declare"),
-    );
-    expect(() => compose("索引", [明細を返すの実装, 受け取る({ 索引: record(単価を知らない) })])).toThrow(
-      new SpecificationError("明細を返す answers @有効.索引{}.単価, which 受け取る does not declare"),
-    );
-    expect(() =>
-      compose("支払", [明細を返すの実装, 受け取る({ 支払: variants("方法", { 現金: object({}) }) })]),
-    ).toThrow(new SpecificationError("明細を返す answers @有効.支払@現金.金額, which 受け取る does not declare"));
+    it("refuses one inside a nested object", () => {
+      expect(() => compose("主", [明細を返す, 受け取る({ 主: 単価を知らない })])).toThrow(
+        new SpecificationError("明細を返す answers @有効.主.単価, which 受け取る does not declare"),
+      );
+    });
+
+    it("refuses one inside an array element", () => {
+      expect(() => compose("一覧", [明細を返す, 受け取る({ 一覧: array(単価を知らない) })])).toThrow(
+        new SpecificationError("明細を返す answers @有効.一覧[].単価, which 受け取る does not declare"),
+      );
+    });
+
+    it("refuses one inside what an optional holds", () => {
+      expect(() => compose("補足", [明細を返す, 受け取る({ 補足: optional(単価を知らない) })])).toThrow(
+        new SpecificationError("明細を返す answers @有効.補足?.単価, which 受け取る does not declare"),
+      );
+    });
+
+    it("refuses one inside a record value", () => {
+      expect(() => compose("索引", [明細を返す, 受け取る({ 索引: record(単価を知らない) })])).toThrow(
+        new SpecificationError("明細を返す answers @有効.索引{}.単価, which 受け取る does not declare"),
+      );
+    });
+
+    it("refuses one inside a case of a nested sum both stages declare", () => {
+      expect(() =>
+        compose("支払", [明細を返す, 受け取る({ 支払: variants("方法", { 現金: object({}) }) })]),
+      ).toThrow(new SpecificationError("明細を返す answers @有効.支払@現金.金額, which 受け取る does not declare"));
+    });
   });
+
 });
 
 describe("running a composition", () => {
