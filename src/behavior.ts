@@ -181,19 +181,24 @@ export type ValueDepsOf<Deps> = {
   readonly [K in keyof Deps as Deps[K] extends (...args: never[]) => unknown ? never : K]: Deps[K];
 };
 
-export function rules<Input, Result, Effect, Deps = unknown>(
+export function action<Input, Result, Effect, Deps = unknown>(
   id: string,
-  build: (
-    input: TermOf<NoInfer<Input>>,
-    deps: TermOf<ValueDepsOf<NoInfer<Deps>>>,
-  ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>[],
-  otherwise: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>,
+  body: {
+    readonly guards?: (
+      input: TermOf<NoInfer<Input>>,
+      deps: TermOf<ValueDepsOf<NoInfer<Deps>>>,
+    ) => readonly Guard<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>[];
+    readonly run: Otherwise<NoInfer<Input>, NoInfer<Result>, NoInfer<Effect>, NoInfer<Deps>>;
+    readonly dependsOn?: readonly string[];
+  },
 ): RulesDecision<Input, Result, Effect, Deps> {
   return {
     kind: "rules",
     id,
-    guards: build(selfTerm<NoInfer<Input>>(), depsTerm<ValueDepsOf<NoInfer<Deps>>>()),
-    otherwise,
+    guards:
+      body.guards?.(selfTerm<NoInfer<Input>>(), depsTerm<ValueDepsOf<NoInfer<Deps>>>()) ?? [],
+    otherwise: body.run,
+    ...(body.dependsOn === undefined ? {} : { dependsOn: body.dependsOn }),
   };
 }
 

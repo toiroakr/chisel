@@ -1,10 +1,10 @@
 import {
+  action,
   behavior,
   guard,
   implement,
   lt,
   object,
-  rules,
   string,
   variants,
   spec,
@@ -20,11 +20,10 @@ const 並べる = behavior({
 
 const 名前順 = implement(並べる, {
   cases: {
-    入力済み: rules(
-      "並び",
-      入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
-      () => ({ result: {}, effects: [] }),
-    ),
+    入力済み: action("並び", {
+      guards: 入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+      run: () => ({ result: {}, effects: [] }),
+    }),
   },
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   generationReport,
   not,
   array,
@@ -12,7 +13,6 @@ import {
   guard,
   implement,
   lte,
-  rules,
   examples,
   generateExamples,
   int,
@@ -239,11 +239,10 @@ describe("generateExamples below a length of zero", () => {
   });
   const 空を断る = implement(見出しを確かめる, {
     cases: {
-      入力済み: rules(
-        "空を断る",
-        入力 => [guard(gt(length(入力.見出し), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+      入力済み: action("空を断る", {
+        guards: 入力 => [guard(gt(length(入力.見出し), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
 
@@ -271,11 +270,10 @@ describe("generateExamples for a guard on an array with no invariant", () => {
   });
   const 空を断る = implement(明細を確かめる, {
     cases: {
-      入力済み: rules(
-        "空を断る",
-        入力 => [guard(gt(length(入力.明細), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+      入力済み: action("空を断る", {
+        guards: 入力 => [guard(gt(length(入力.明細), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
 
@@ -304,11 +302,10 @@ describe("guard points generate cannot compose", () => {
     });
     const 上限と比べる = implement(比べる, {
       cases: {
-        入力済み: rules(
-          "上限と比べる",
-          入力 => [guard(lte(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
-          () => ({ result: { 結果: "受付" }, effects: [] }),
-        ),
+        入力済み: action("上限と比べる", {
+          guards: 入力 => [guard(lte(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
       },
     });
     const existing = examples(比べる, [

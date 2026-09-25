@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   all,
   array,
   behavior,
@@ -16,7 +17,6 @@ import {
   implement,
   int,
   object,
-  rules,
   runImplementation,
   SpecificationError,
   string,
@@ -43,10 +43,12 @@ describe("ensures", () => {
   it("refuses an implementation answer that does not keep what the behavior ensures", async () => {
     const 別のカートを確定する = implement(注文を確定する, {
       cases: {
-        商品あり: rules("別のカート", () => [], () => ({
+        商品あり: action("別のカート", {
+          run: () => ({
           result: { 結果: "確定", カートID: "別のカート" },
           effects: [],
-        })),
+        }),
+        }),
       },
     });
 
@@ -208,7 +210,7 @@ describe("an ensures clause over every element of the answer", () => {
     });
     const 多すぎる = implement(明細を返す, {
       cases: {
-        入力済み: rules("多すぎる", () => [], () => ({ result: { 明細: [5] }, effects: [] })),
+        入力済み: action("多すぎる", { run: () => ({ result: { 明細: [5] }, effects: [] }) }),
       },
     });
 

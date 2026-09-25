@@ -1,4 +1,5 @@
 import {
+  action,
   all,
   array,
   behavior,
@@ -10,7 +11,6 @@ import {
   int,
   lte,
   object,
-  rules,
   string,
   variants,
 } from "../../src/index.js";
@@ -26,16 +26,15 @@ const 注文を確定する = behavior({
 
 const 在庫を確かめる = implement(注文を確定する, {
   cases: {
-    商品あり: rules(
-      "在庫を確かめる",
-      カート => [
+    商品あり: action("在庫を確かめる", {
+      guards: カート => [
         guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
       ],
-      () => ({ result: { 結果: "確定" }, effects: [] }),
-    ),
+      run: () => ({ result: { 結果: "確定" }, effects: [] }),
+    }),
   },
 });
 

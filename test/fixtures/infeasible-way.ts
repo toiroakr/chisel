@@ -1,4 +1,5 @@
 import {
+  action,
   and,
   behavior,
   spec,
@@ -8,7 +9,6 @@ import {
   implement,
   int,
   object,
-  rules,
   variants,
 } from "../../src/index.js";
 
@@ -21,16 +21,15 @@ const 受け付ける = behavior({
 
 const 二段 = implement(受け付ける, {
   cases: {
-    入力済み: rules(
-      "二段",
-      入力 => [
+    入力済み: action("二段", {
+      guards: 入力 => [
         guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), () => ({
           result: { 結果: "却下" },
           effects: [],
         })),
       ],
-      () => ({ result: { 結果: "受付" }, effects: [] }),
-    ),
+      run: () => ({ result: { 結果: "受付" }, effects: [] }),
+    }),
   },
 });
 

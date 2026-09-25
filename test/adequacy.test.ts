@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   behavior,
   boolean,
   spec,
@@ -17,7 +18,6 @@ import {
   ne,
   object,
   optional,
-  rules,
   string,
   variants,
   unanswered,
@@ -517,11 +517,10 @@ describe("pairs of classes", () => {
     });
     const 上限で分ける = implement(注文を受け付ける, {
       cases: {
-        入力済み: rules(
-          "上限で分ける",
-          注文 => [guard(lte(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
-          () => ({ result: { 結果: "受付" }, effects: [] }),
-        ),
+        入力済み: action("上限で分ける", {
+          guards: 注文 => [guard(lte(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -609,11 +608,10 @@ describe("a guard threshold interval the invariants leave empty", () => {
     });
     const 上限で分ける = implement(受け付ける, {
       cases: {
-        入力済み: rules(
-          "上限で分ける",
-          注文 => [guard(lte(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
-          () => ({ result: { 結果: "受付" }, effects: [] }),
-        ),
+        入力済み: action("上限で分ける", {
+          guards: 注文 => [guard(lte(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
       },
     });
     const result = await evaluateSpecification(

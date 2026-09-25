@@ -1,4 +1,5 @@
 import {
+  action,
   all,
   array,
   behavior,
@@ -14,7 +15,6 @@ import {
   number,
   object,
   optional,
-  rules,
   string,
   variants,
 } from "../../src/index.js";
@@ -110,20 +110,17 @@ const 具体例 = examples(注文を確定する, [
 
 const 実装 = implement(注文を確定する, {
   cases: {
-    空: rules(
-      "空のカートは確定しない",
-      () => [],
-      () => ({ result: { 結果: "不可", 理由: "カートが空" }, effects: [] }),
-    ),
-    商品あり: rules(
-      "在庫を確かめて確定する",
-      カート => [
+    空: action("空のカートは確定しない", {
+      run: () => ({ result: { 結果: "不可", 理由: "カートが空" }, effects: [] }),
+    }),
+    商品あり: action("在庫を確かめて確定する", {
+      guards: カート => [
         guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
       ],
-      カート => {
+      run: カート => {
         const 合計金額 = カート.明細.reduce((合計, 明細) => 合計 + 明細.数量 * 明細.単価, 0);
         return {
           result: { 結果: "確定", カートID: カート.カートID, 合計金額 },
@@ -137,12 +134,10 @@ const 実装 = implement(注文を確定する, {
           ],
         };
       },
-    ),
-    確定済み: rules(
-      "確定済みは二重に確定しない",
-      () => [],
-      () => ({ result: { 結果: "不可", 理由: "確定済み" }, effects: [] }),
-    ),
+    }),
+    確定済み: action("確定済みは二重に確定しない", {
+      run: () => ({ result: { 結果: "不可", 理由: "確定済み" }, effects: [] }),
+    }),
   },
   controls: {
     在庫引当: { execution: "outbox", idempotency: "required", compensation: "automatic" },

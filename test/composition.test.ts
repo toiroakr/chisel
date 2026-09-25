@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   behavior,
   compose,
   spec,
@@ -11,7 +12,6 @@ import {
   implementComposition,
   int,
   object,
-  rules,
   guard,
   gte,
   runImplementation,
@@ -42,11 +42,10 @@ const 見積もる = compose(検証する, 価格を付ける);
 
 const 数量を確かめる = implement(検証する, {
   cases: {
-    申込: rules(
-      "数量を確かめる",
-      申込 => [guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] }))],
-      申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
-    ),
+    申込: action("数量を確かめる", {
+      guards: 申込 => [guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] }))],
+      run: 申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
+    }),
   },
 });
 

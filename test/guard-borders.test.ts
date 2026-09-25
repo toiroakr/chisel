@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   all,
   and,
   array,
@@ -22,7 +23,6 @@ import {
   ne,
   number,
   object,
-  rules,
   string,
   variants,
 } from "../src/index.js";
@@ -37,16 +37,15 @@ const 注文を受け付ける = behavior({
 
 const 上限で分ける = implement(注文を受け付ける, {
   cases: {
-    入力済み: rules(
-      "上限で分ける",
-      注文 => [
+    入力済み: action("上限で分ける", {
+      guards: 注文 => [
         guard(lte(注文.合計, 100000), () => ({
           result: { 結果: "要承認", 理由: "上限超過" },
           effects: [],
         })),
       ],
-      () => ({ result: { 結果: "受付" }, effects: [] }),
-    ),
+      run: () => ({ result: { 結果: "受付" }, effects: [] }),
+    }),
   },
 });
 
@@ -99,14 +98,13 @@ describe("a guard's border is met by reaching the comparison", () => {
   });
   const 二段で審査する = implement(審査する, {
     cases: {
-      申請済み: rules(
-        "二段で審査する",
-        申請 => [
+      申請済み: action("二段で審査する", {
+        guards: 申請 => [
           guard(gte(申請.会員, 1), () => ({ result: { 結果: "却下", 理由: "非会員" }, effects: [] })),
           guard(lte(申請.合計, 100), () => ({ result: { 結果: "却下", 理由: "上限超過" }, effects: [] })),
         ],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
 
@@ -132,16 +130,15 @@ describe("a guard's border is met by reaching the comparison", () => {
   it("excludes a guard's point the invariants of the position refuse", async () => {
     const ゼロ円は要承認 = implement(注文を受け付ける, {
       cases: {
-        入力済み: rules(
-          "ゼロ円は要承認",
-          注文 => [
+        入力済み: action("ゼロ円は要承認", {
+          guards: 注文 => [
             guard(gte(注文.合計, 1), () => ({
               result: { 結果: "要承認", 理由: "ゼロ円" },
               effects: [],
             })),
           ],
-          () => ({ result: { 結果: "受付" }, effects: [] }),
-        ),
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -172,16 +169,15 @@ describe("a border between two positions", () => {
   });
   const 在庫を確かめる = implement(注文を確定する, {
     cases: {
-      商品あり: rules(
-        "在庫を確かめる",
-        カート => [
+      商品あり: action("在庫を確かめる", {
+        guards: カート => [
           guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
             result: { 結果: "不可", 理由: "在庫不足" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "確定" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "確定" }, effects: [] }),
+      }),
     },
   });
 
@@ -222,11 +218,10 @@ describe("a border between two positions", () => {
     });
     const 予算内か = implement(比べる, {
       cases: {
-        入力済み: rules(
-          "予算内か",
-          入力 => [guard(lte(入力.見積, 入力.予算), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("予算内か", {
+          guards: 入力 => [guard(lte(入力.見積, 入力.予算), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -253,11 +248,10 @@ describe("classes cut from a range an object invariant bounds", () => {
     });
     const 上限 = implement(受け付ける, {
       cases: {
-        入力済み: rules(
-          "上限",
-          入力 => [guard(lte(入力.合計, 100), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("上限", {
+          guards: 入力 => [guard(lte(入力.合計, 100), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -277,11 +271,10 @@ describe("classes cut from a range an object invariant bounds", () => {
     });
     const 下限 = implement(受け付ける, {
       cases: {
-        入力済み: rules(
-          "下限",
-          入力 => [guard(gte(入力.合計, 0), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("下限", {
+          guards: 入力 => [guard(gte(入力.合計, 0), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -308,16 +301,15 @@ describe("elements a quantifier never reached", () => {
   });
   const 在庫を確かめる = implement(注文を確定する, {
     cases: {
-      商品あり: rules(
-        "在庫を確かめる",
-        カート => [
+      商品あり: action("在庫を確かめる", {
+        guards: カート => [
           guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
             result: { 結果: "不可", 理由: "在庫不足" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "確定" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "確定" }, effects: [] }),
+      }),
     },
   });
 
@@ -354,16 +346,15 @@ describe("generateExamples for guard borders", () => {
   });
   const 在庫を確かめる = implement(注文を確定する, {
     cases: {
-      商品あり: rules(
-        "在庫を確かめる",
-        カート => [
+      商品あり: action("在庫を確かめる", {
+        guards: カート => [
           guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
             result: { 結果: "不可", 理由: "在庫不足" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "確定" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "確定" }, effects: [] }),
+      }),
     },
   });
 
@@ -424,11 +415,10 @@ describe("classes a guard's threshold divides a position into", () => {
   const 判定 = (guards: (入力: TermOf<{ readonly 点数: number }>) => readonly Rule[]) =>
     implement(点数を判定する, {
       cases: {
-        採点済み: rules(
-          "判定",
-          入力 => guards(入力).map(condition => guard(condition, () => ({ result: {}, effects: [] }))),
-          () => ({ result: {}, effects: [] }),
-        ),
+        採点済み: action("判定", {
+          guards: 入力 => guards(入力).map(condition => guard(condition, () => ({ result: {}, effects: [] }))),
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
   const partitionsOf = async (implementation: ReturnType<typeof 判定>) =>
@@ -459,11 +449,10 @@ describe("classes a guard's threshold divides a position into", () => {
     });
     const 在庫内か = implement(比べる, {
       cases: {
-        入力済み: rules(
-          "在庫内か",
-          入力 => [guard(lte(入力.数量, 入力.在庫数), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("在庫内か", {
+          guards: 入力 => [guard(lte(入力.数量, 入力.在庫数), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -497,11 +486,10 @@ describe("borders of a rule that names one value", () => {
   const pointsOf = async (condition: (入力: TermOf<{ readonly 数量: number }>) => Rule) => {
     const 判定 = implement(判定する, {
       cases: {
-        入力済み: rules(
-          "判定",
-          入力 => [guard(condition(入力), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("判定", {
+          guards: 入力 => [guard(condition(入力), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -535,11 +523,10 @@ describe("borders of a rule that names one value", () => {
   it("parts the value an equality names from the values on either side of it", async () => {
     const 判定 = implement(判定する, {
       cases: {
-        入力済み: rules(
-          "判定",
-          入力 => [guard(eq(入力.数量, 10), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("判定", {
+          guards: 入力 => [guard(eq(入力.数量, 10), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -560,11 +547,10 @@ describe("comparisons Chisel could not read", () => {
     });
     const 順序 = implement(比べる, {
       cases: {
-        入力済み: rules(
-          "順序",
-          入力 => [guard(lt(入力.開始, 入力.終了), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("順序", {
+          guards: 入力 => [guard(lt(入力.開始, 入力.終了), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -588,11 +574,10 @@ describe("comparisons Chisel could not read", () => {
     });
     const 並び = implement(比べる, {
       cases: {
-        入力済み: rules(
-          "並び",
-          入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("並び", {
+          guards: 入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -620,11 +605,10 @@ describe("a guard on a length", () => {
   ) {
     const 確かめる = implement(明細を確かめる, {
       cases: {
-        入力済み: rules(
-          "確かめる",
-          注文 => [guard(condition(注文), () => ({ result: { 結果: "断る" }, effects: [] }))],
-          () => ({ result: { 結果: "受付" }, effects: [] }),
-        ),
+        入力済み: action("確かめる", {
+          guards: 注文 => [guard(condition(注文), () => ({ result: { 結果: "断る" }, effects: [] }))],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
       },
     });
     const report = await evaluateSpecification(
@@ -667,16 +651,15 @@ describe("a guard point no row can reach", () => {
   });
   const 二段 = implement(数量を見る, {
     cases: {
-      入力済み: rules(
-        "二段",
-        入力 => [
+      入力済み: action("二段", {
+        guards: 入力 => [
           guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), () => ({
             result: { 結果: "却下" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
 
@@ -712,11 +695,10 @@ describe("an equality between two positions", () => {
   async function reportFor(condition: (入力: TermOf<{ 状態: "入力済み"; 請求額: number; 入金額: number }>) => Rule) {
     const 照合 = implement(照合する, {
       cases: {
-        入力済み: rules(
-          "照合",
-          入力 => [guard(condition(入力), () => ({ result: { 結果: "不一致" }, effects: [] }))],
-          () => ({ result: { 結果: "一致" }, effects: [] }),
-        ),
+        入力済み: action("照合", {
+          guards: 入力 => [guard(condition(入力), () => ({ result: { 結果: "不一致" }, effects: [] }))],
+          run: () => ({ result: { 結果: "一致" }, effects: [] }),
+        }),
       },
     });
     return evaluateSpecification(

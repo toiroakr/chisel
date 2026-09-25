@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   all,
   array,
   behavior,
@@ -18,7 +19,6 @@ import {
   lte,
   lt,
   match,
-  rules,
   runImplementation,
   int,
   instant,
@@ -282,14 +282,12 @@ describe("generated rows and dependencies", () => {
     });
     const 料金表で決める = implement(送料を決める, {
       cases: {
-        確定済み: rules(
-          "料金表で決める",
-          () => [],
-          match(注文 => 注文.配送.方法, {
+        確定済み: action("料金表で決める", {
+          run: match(注文 => 注文.配送.方法, {
             宅配: (_, 依存) => ({ result: { 送料: 依存.料金表("宅配") }, effects: [] }),
             店頭受取: (_, 依存) => ({ result: { 送料: 依存.料金表("店頭受取") }, effects: [] }),
           }),
-        ),
+        }),
       },
     });
     const report = generationReport(
@@ -319,16 +317,15 @@ describe("a value dependency read in a guard condition", () => {
   });
   const 過去を断る = implement(予約する, {
     cases: {
-      申込済み: rules(
-        "過去を断る",
-        (申込, 依存) => [
+      申込済み: action("過去を断る", {
+        guards: (申込, 依存) => [
           guard(lt(依存.現在時刻, 申込.希望日時), () => ({
             result: { 結果: "過去" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
   const 今 = Temporal.Instant.from("2026-10-01T09:00:00Z");
@@ -446,9 +443,8 @@ describe("a value dependency read inside all", () => {
   });
   const 上限で断る = implement(注文する, {
     cases: {
-      入力済み: rules(
-        "上限で断る",
-        (注文, 依存) => [
+      入力済み: action("上限で断る", {
+        guards: (注文, 依存) => [
           guard(
             all(注文.明細, (行) => lte(行.数量, 依存.上限)),
             () => ({
@@ -457,8 +453,8 @@ describe("a value dependency read inside all", () => {
             }),
           ),
         ],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
 

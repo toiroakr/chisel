@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
   all,
   and,
   array,
@@ -21,7 +22,6 @@ import {
   match,
   object,
   or,
-  rules,
   runImplementation,
   SpecificationError,
   string,
@@ -47,16 +47,15 @@ const 注文を確定する = behavior({
 
 const 在庫を確かめて確定する = implement(注文を確定する, {
   cases: {
-    商品あり: rules(
-      "在庫を確かめて確定する",
-      カート => [
+    商品あり: action("在庫を確かめて確定する", {
+      guards: カート => [
         guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
       ],
-      カート => ({ result: { 結果: "確定", カートID: カート.カートID }, effects: [] }),
-    ),
+      run: カート => ({ result: { 結果: "確定", カートID: カート.カートID }, effects: [] }),
+    }),
   },
   controls: {},
 });
@@ -197,11 +196,10 @@ describe("verdict over a rules decision", () => {
     });
     const 混在 = implement(二つの状態, {
       cases: {
-        商品あり: rules(
-          "数量を確かめる",
-          入力 => [guard(lte(入力.数量, 10), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        商品あり: action("数量を確かめる", {
+          guards: 入力 => [guard(lte(入力.数量, 10), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
         確定済み: { kind: "decision", id: "何もしない", run: () => ({ result: {}, effects: [] }) },
       },
     });
@@ -222,16 +220,15 @@ describe("rules of a decision", () => {
   });
   const 会員歴か購入額 = implement(割引を判定する, {
     cases: {
-      入力済み: rules(
-        "会員歴か購入額",
-        入力 => [
+      入力済み: action("会員歴か購入額", {
+        guards: 入力 => [
           guard(or(gte(入力.会員歴, 3), gte(入力.購入額, 10000)), () => ({
             result: { 結果: "定価" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "割引" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "割引" }, effects: [] }),
+      }),
     },
   });
   const 会員歴で = example(割引を判定する, "会員歴が長い", {
@@ -268,7 +265,7 @@ describe("rules of a decision", () => {
 
   it("describes the way through a decision with no guard as going straight to what follows", async () => {
     const 常に定価 = implement(割引を判定する, {
-      cases: { 入力済み: rules("常に定価", () => [], () => ({ result: { 結果: "定価" }, effects: [] })) },
+      cases: { 入力済み: action("常に定価", { run: () => ({ result: { 結果: "定価" }, effects: [] }) }) },
     });
     const report = await evaluateSpecification(
       spec({ name: "定価", examples: examples(割引を判定する, []), implementation: 常に定価 }),
@@ -291,14 +288,12 @@ describe("match over a sum field", () => {
   });
   const 方法で決める = implement(送料を決める, {
     cases: {
-      確定済み: rules(
-        "方法で決める",
-        () => [],
-        match(注文 => 注文.配送.方法, {
+      確定済み: action("方法で決める", {
+        run: match(注文 => 注文.配送.方法, {
           宅配: () => ({ result: { 送料: 500 }, effects: [] }),
           店頭受取: () => ({ result: { 送料: 0 }, effects: [] }),
         }),
-      ),
+      }),
     },
   });
   const 宅配 = example(送料を決める, "宅配", {
@@ -359,14 +354,13 @@ describe("match over a sum field", () => {
     });
     const 重さと方法 = implement(重さで決める, {
       cases: {
-        確定済み: rules(
-          "重さと方法",
-          注文 => [guard(gte(注文.重さ, 1), () => ({ result: { 送料: 0 }, effects: [] }))],
-          match(注文 => 注文.配送.方法, {
+        確定済み: action("重さと方法", {
+          guards: 注文 => [guard(gte(注文.重さ, 1), () => ({ result: { 送料: 0 }, effects: [] }))],
+          run: match(注文 => 注文.配送.方法, {
             宅配: () => ({ result: { 送料: 500 }, effects: [] }),
             店頭受取: () => ({ result: { 送料: 0 }, effects: [] }),
           }),
-        ),
+        }),
       },
     });
     const existing = examples(重さで決める, [
@@ -398,11 +392,10 @@ describe("ways generate could not compose", () => {
     });
     const 並び = implement(並べる, {
       cases: {
-        入力済み: rules(
-          "並び",
-          入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
-          () => ({ result: {}, effects: [] }),
-        ),
+        入力済み: action("並び", {
+          guards: 入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+          run: () => ({ result: {}, effects: [] }),
+        }),
       },
     });
 
@@ -430,7 +423,7 @@ describe("what match can branch on", () => {
     expect(() =>
       implement(送る, {
         cases: {
-          確定済み: rules("メモで分ける", () => [], match(注文 => 注文.メモ, { 至急: 何もしない })),
+          確定済み: action("メモで分ける", { run: match(注文 => 注文.メモ, { 至急: 何もしない }) }),
         },
       }),
     ).toThrow(
@@ -442,12 +435,10 @@ describe("what match can branch on", () => {
     expect(() =>
       implement(送る, {
         cases: {
-          確定済み: rules(
-            "宅配だけ",
-            () => [],
-            // @ts-expect-error a match must have a case for every case of the sum
+          確定済み: action("宅配だけ", {
+            run: // @ts-expect-error a match must have a case for every case of the sum
             match(注文 => 注文.配送.方法, { 宅配: 何もしない }),
-          ),
+          }),
         },
       }),
     ).toThrow(new SpecificationError("match in 宅配だけ has no case for 店頭受取"));
@@ -457,16 +448,14 @@ describe("what match can branch on", () => {
     expect(() =>
       implement(送る, {
         cases: {
-          確定済み: rules(
-            "郵送もある",
-            () => [],
-            match(注文 => 注文.配送.方法, {
+          確定済み: action("郵送もある", {
+            run: match(注文 => 注文.配送.方法, {
               宅配: 何もしない,
               店頭受取: 何もしない,
               // @ts-expect-error 郵送 is not a case of the sum
               郵送: 何もしない,
             }),
-          ),
+          }),
         },
       }),
     ).toThrow(SpecificationError);
@@ -493,11 +482,10 @@ describe("rules written inline in spec", () => {
         ]),
         implementation: implement(受け付ける, {
           cases: {
-            入力済み: rules(
-              "上限",
-              入力 => [guard(lte(入力.合計, 100), () => ({ result: { 結果: "審査" }, effects: [] }))],
-              () => ({ result: { 結果: "受付" }, effects: [] }),
-            ),
+            入力済み: action("上限", {
+              guards: 入力 => [guard(lte(入力.合計, 100), () => ({ result: { 結果: "審査" }, effects: [] }))],
+              run: () => ({ result: { 結果: "受付" }, effects: [] }),
+            }),
           },
         }),
       }),
@@ -513,7 +501,7 @@ describe("rules written inline in spec", () => {
       implementation: implement(受け付ける, {
         cases: {
           // @ts-expect-error 却下 is not a result case of 受け付ける
-          入力済み: rules("上限", () => [], () => ({ result: { 結果: "却下" }, effects: [] })),
+          入力済み: action("上限", { run: () => ({ result: { 結果: "却下" }, effects: [] }) }),
         },
       }),
     });
@@ -560,7 +548,10 @@ describe("ways no row can take", () => {
   it("owes no row at a way whose conditions leave nothing on one value", async () => {
     const 二段 = implement(受け付ける, {
       cases: {
-        入力済み: rules("二段", 入力 => [guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), 却下)], 受付),
+        入力済み: action("二段", {
+          guards: 入力 => [guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), 却下)],
+          run: 受付,
+        }),
       },
     });
 
@@ -573,7 +564,7 @@ describe("ways no row can take", () => {
 
   it("owes no row at a way or an arm the invariants of the position leave nothing at", async () => {
     const 非負 = implement(受け付ける, {
-      cases: { 入力済み: rules("非負", 入力 => [guard(gte(入力.数量, 0), 却下)], 受付) },
+      cases: { 入力済み: action("非負", { guards: 入力 => [guard(gte(入力.数量, 0), 却下)], run: 受付 }) },
     });
 
     expect(await statuses(非負)).toStrictEqual({
@@ -585,11 +576,10 @@ describe("ways no row can take", () => {
   it("owes no row at a way whose comparison between two positions their bounds refuse", async () => {
     const 最低と比べる = implement(受け付ける, {
       cases: {
-        入力済み: rules(
-          "最低と比べる",
-          入力 => [guard(and(lte(入力.数量, 5), gte(入力.数量, 入力.最低)), 却下)],
-          受付,
-        ),
+        入力済み: action("最低と比べる", {
+          guards: 入力 => [guard(and(lte(入力.数量, 5), gte(入力.数量, 入力.最低)), 却下)],
+          run: 受付,
+        }),
       },
     });
 
@@ -603,11 +593,10 @@ describe("ways no row can take", () => {
   it("leaves a way undecided where a condition it cannot read shares a value with another", async () => {
     const 明細を見る = implement(受け付ける, {
       cases: {
-        入力済み: rules(
-          "明細を見る",
-          入力 => [guard(and(all(入力.明細, 行 => gte(行, 1)), gte(length(入力.明細), 1)), 却下)],
-          受付,
-        ),
+        入力済み: action("明細を見る", {
+          guards: 入力 => [guard(and(all(入力.明細, 行 => gte(行, 1)), gte(length(入力.明細), 1)), 却下)],
+          run: 受付,
+        }),
       },
     });
 
@@ -630,16 +619,15 @@ describe("a term from outside all read inside each", () => {
   });
   const 上限で断る = implement(上限を守る, {
     cases: {
-      入力済み: rules(
-        "上限で断る",
-        注文 => [
+      入力済み: action("上限で断る", {
+        guards: 注文 => [
           guard(all(注文.明細, 行 => lte(行.数量, 注文.上限)), () => ({
             result: { 結果: "超過" },
             effects: [],
           })),
         ],
-        () => ({ result: { 結果: "受付" }, effects: [] }),
-      ),
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
     },
   });
 
@@ -677,5 +665,54 @@ describe("a term from outside all read inside each", () => {
     );
 
     expect(注文.parse({ 上限: 1, 明細: [5] }).success).toBe(false);
+  });
+});
+
+describe("action", () => {
+  const 受け付ける = behavior({
+    name: "受け付ける",
+    input: variants("状態", { 入力済み: object({ 数量: int() }), 取消済み: object({}) }),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 受付 = () => ({ result: { 結果: "受付" as const }, effects: [] });
+  const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
+  const 実装 = implement(受け付ける, {
+    cases: {
+      入力済み: action("数量を確かめる", {
+        guards: 入力 => [guard(gte(入力.数量, 1), 却下)],
+        run: 受付,
+      }),
+      取消済み: action("取消済みは断る", { run: 却下 }),
+    },
+  });
+
+  it("answers from a guard that fails before run", async () => {
+    expect(await runImplementation(実装, { 状態: "入力済み", 数量: 0 })).toStrictEqual(却下());
+  });
+
+  it("answers from run once every guard holds", async () => {
+    expect(await runImplementation(実装, { 状態: "入力済み", 数量: 1 })).toStrictEqual(受付());
+  });
+
+  it("measures an action with only run as one with no branches", async () => {
+    const report = await evaluateSpecification(
+      spec({
+        name: "受付",
+        examples: examples(受け付ける, [
+          example(受け付ける, "取消済み", {
+            given: { 状態: "取消済み" },
+            expect: 却下(),
+          }),
+        ]),
+        implementation: 実装,
+      }),
+    );
+
+    expect(
+      report.measures.rules.status === "unavailable"
+        ? report.measures.rules
+        : report.measures.rules.rules.find(rule => rule.decision === "取消済みは断る"),
+    ).toMatchObject({ way: "otherwise", status: "met" });
   });
 });

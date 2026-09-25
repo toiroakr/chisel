@@ -1,4 +1,5 @@
 import {
+  action,
   behavior,
   compose,
   spec,
@@ -10,7 +11,6 @@ import {
   implementComposition,
   int,
   object,
-  rules,
   string,
   variants,
 } from "../../src/index.js";
@@ -43,13 +43,12 @@ export const 見積 = spec({
     見積もる,
     implement(検証する, {
       cases: {
-        申込: rules(
-          "数量を確かめる",
-          申込 => [
+        申込: action("数量を確かめる", {
+          guards: 申込 => [
             guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
           ],
-          申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
-        ),
+          run: 申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
+        }),
       },
     }),
     implement(価格を付ける, {

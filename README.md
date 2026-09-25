@@ -107,22 +107,18 @@ Changing the data or behavior model makes stale examples fail to compile. Runnin
 
 ## 4. Implement the model
 
-Once expectations are known, `implement()` supplies the executable model.
+Once expectations are known, `implement()` supplies the executable model: one `action(name, { guards?, run })` per input case. `run` computes the answer; `guards` (below) lists the conditions checked before it, each with the answer to give when it fails. The name is how reports refer to the action.
 
 ```ts
 const implementation = implement(cancelOrder, {
   cases: {
-    unpaid: {
-      kind: "decision",
-      id: "cancel-unpaid",
+    unpaid: action("cancel-unpaid", {
       run: order => ({
         result: { type: "accepted", orderId: order.orderId },
         effects: [{ type: "restock", orderId: order.orderId }],
       }),
-    },
-    paid: {
-      kind: "decision",
-      id: "cancel-paid",
+    }),
+    paid: action("cancel-paid", {
       run: order => ({
         result: { type: "accepted", orderId: order.orderId },
         effects: [
@@ -130,7 +126,7 @@ const implementation = implement(cancelOrder, {
           { type: "restock", orderId: order.orderId },
         ],
       }),
-    },
+    }),
   },
   controls: {
     refund: {
@@ -197,21 +193,20 @@ const Line = object({
 const Lines = array(Line).invariant(v => gte(length(v), 1));
 ```
 
-- **Arms and rules** of a decision written with `rules`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
+- **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
 
 ```ts
 const implementation = implement(checkout, {
   cases: {
-    withItems: rules(
-      "check stock, then confirm",
-      cart => [
+    withItems: action("check stock, then confirm", {
+      guards: cart => [
         guard(all(cart.lines, line => lte(line.quantity, line.stock)), () => ({
           result: { type: "rejected", reason: "out of stock" },
           effects: [],
         })),
       ],
-      cart => confirm(cart),
-    ),
+      run: cart => confirm(cart),
+    }),
   },
 });
 ```
@@ -237,7 +232,7 @@ const findMember = behavior({
 });
 ```
 
-Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. A rules decision reads a value dependency in a guard condition through the second argument of its builder, `rules("future only", (request, deps) => [guard(lt(deps.now, request.at), ...)], ...)`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [guard(lt(deps.now, request.at), ...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
 
 `check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). Every measure carries `status`, `reason` exactly where it is `unavailable`, and `weakening` exactly where something weakened it; every border point, arm and way carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 

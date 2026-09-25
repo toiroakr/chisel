@@ -62,13 +62,13 @@ export type {
 } from "./partition.js";
 
 export {
+  action,
   behavior,
   guard,
   implement,
   isBehavior,
   match,
   pending,
-  rules,
   runImplementation,
   SpecificationError,
 } from "./behavior.js";
