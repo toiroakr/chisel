@@ -488,9 +488,9 @@ describe("ways no row can take", () => {
   const 受け付ける = behavior("受け付ける", {
     input: variants("状態", {
       入力済み: object({
-        数量: int().invariant(v => v.gte(0)),
+        数量: int().refine(v => v.gte(0)),
         上限: int(),
-        最低: int().invariant(v => v.gte(10)),
+        最低: int().refine(v => v.gte(10)),
         明細: array(int()),
       }),
     }),
@@ -633,7 +633,7 @@ describe("a term from outside all read inside each", () => {
   });
 
   it("is enforced in an invariant", () => {
-    const 注文 = object({ 上限: int(), 明細: array(int()) }).invariant(v =>
+    const 注文 = object({ 上限: int(), 明細: array(int()) }).refine(v =>
       v.$明細.all(行 => 行.lte(v.$上限)),
     );
 

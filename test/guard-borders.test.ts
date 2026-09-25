@@ -20,7 +20,7 @@ import {
 import type { Rule, TermOf } from "../src/index.js";
 
 const 注文を受け付ける = behavior("注文を受け付ける", {
-  input: variants("状態", { 入力済み: object({ 合計: int().invariant(v => v.gte(0)) }) }),
+  input: variants("状態", { 入力済み: object({ 合計: int().refine(v => v.gte(0)) }) }),
   result: variants("結果", { 受付: object({}), 要承認: object({ 理由: string("理由") }) }),
   effects: variants("種類", {}),
 });
@@ -223,7 +223,7 @@ describe("classes cut from a range an object invariant bounds", () => {
   it("reads the admitted range from an invariant written on the object holding the field", async () => {
     const 受け付ける = behavior("受け付ける", {
       input: variants("状態", {
-        入力済み: object({ 合計: int() }).invariant(v => v.$合計.gte(0)),
+        入力済み: object({ 合計: int() }).refine(v => v.$合計.gte(0)),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -245,7 +245,7 @@ describe("classes cut from a range an object invariant bounds", () => {
   it("excludes a guard point an invariant on the object holding the field refuses", async () => {
     const 受け付ける = behavior("受け付ける", {
       input: variants("状態", {
-        入力済み: object({ 合計: int() }).invariant(v => v.$合計.gte(0)),
+        入力済み: object({ 合計: int() }).refine(v => v.$合計.gte(0)),
       }),
       result: object({}),
       effects: variants("種類", {}),

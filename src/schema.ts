@@ -16,7 +16,7 @@ export interface Schema<T> {
   readonly invariants: readonly Rule[];
   parse(value: unknown, path?: string): ValidationResult<T>;
   placeholder(): unknown;
-  invariant(rule: InvariantRule<T>): this;
+  refine(rule: InvariantRule<T>): this;
 }
 
 export type AnySchema = Schema<unknown>;
@@ -139,7 +139,7 @@ function invalid(path: string, message: string): ValidationResult<never> {
   return { success: false, issues: [{ path, message }] };
 }
 
-type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "invariant">;
+type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "refine">;
 
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
   return {
@@ -160,7 +160,7 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         .flatMap(conjuncts)
         .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder());
     },
-    invariant(rule: (self: TermOf<unknown>) => Rule) {
+    refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
     },
   } as unknown as S;

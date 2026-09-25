@@ -6,16 +6,16 @@ const クーポンコード = c.string("クーポンコード");
 
 const 明細 = c.object({
   商品ID,
-  数量: c.int().invariant(v => v.gte(1)),
-  単価: c.int().invariant(v => v.gte(0)),
-  在庫数: c.int().invariant(v => v.gte(0)),
+  数量: c.int().refine(v => v.gte(1)),
+  単価: c.int().refine(v => v.gte(0)),
+  在庫数: c.int().refine(v => v.gte(0)),
 });
 
 const カート = c.variants("状態", {
   空: c.object({ カートID }),
   商品あり: c.object({
     カートID,
-    明細: c.array(明細).invariant(v => v.length().gte(1)),
+    明細: c.array(明細).refine(v => v.length().gte(1)),
     クーポン: c.optional(クーポンコード),
   }),
   確定済み: c.object({ カートID }),
