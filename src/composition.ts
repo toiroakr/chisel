@@ -5,6 +5,7 @@ import type {
   AnySchema,
   AnyVariantsSchema,
   ArraySchema,
+  LiteralSchema,
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
@@ -222,8 +223,33 @@ function undeclaredPath(
       `${path}{}`,
     );
   }
+  if (answered.kind === "object" && isVariantsSchema(taken)) {
+    const named = (answered as ObjectSchema<ObjectShape>).shape[taken.discriminant];
+    if (named?.kind !== "literal") {
+      return undefined;
+    }
+    const tag = String((named as LiteralSchema<string>).value);
+    return taken.variantTags.includes(tag)
+      ? undeclaredPath(answered, taken.variants[tag], path, taken.discriminant)
+      : `${path}@${tag}`;
+  }
+  if (isVariantsSchema(answered) && taken.kind === "object") {
+    if (!Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)) {
+      return `${path}.${answered.discriminant}`;
+    }
+    for (const tag of answered.variantTags) {
+      const found = undeclaredPath(answered.variants[tag], taken, `${path}@${tag}`);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
-    for (const tag of answered.variantTags.filter(tag => taken.variantTags.includes(tag))) {
+    for (const tag of answered.variantTags) {
+      if (!taken.variantTags.includes(tag)) {
+        return `${path}@${tag}`;
+      }
       const found = undeclaredPath(
         answered.variants[tag],
         taken.variants[tag],

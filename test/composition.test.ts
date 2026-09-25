@@ -191,6 +191,108 @@ describe("compose", () => {
     });
   });
 
+  it("refuses a case of a nested sum that the second stage does not declare", () => {
+    const 支払方法を返す = behavior("支払方法を返す", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", {
+        有効: object({ 支払: variants("方法", { 現金: object({}), カード: object({ 番号: string("番号") }) }) }),
+      }),
+      effects: variants("種類", {}),
+    });
+    const 現金だけ受け取る = behavior("現金だけ受け取る", {
+      input: variants("結果", { 有効: object({ 支払: variants("方法", { 現金: object({}) }) }) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      compose("現金だけの合成", [external(支払方法を返す, "別のチーム"), external(現金だけ受け取る, "別のチーム")]),
+    ).toThrow(new SpecificationError("支払方法を返す answers @有効.支払@カード, which 現金だけ受け取る does not declare"));
+  });
+
+  describe("a nested sum the second stage takes as a plain object", () => {
+    const 支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string("番号"), 暗証: string("暗証") }) });
+    const 段 = (taken: AnySchema) =>
+      [
+        external(
+          behavior("支払を返す", {
+            input: variants("状態", { 申込: object({}) }),
+            result: variants("結果", { 有効: object({ 支払 }) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+        external(
+          behavior("object で受け取る", {
+            input: variants("結果", { 有効: object({ 支払: taken }) }),
+            result: variants("結果", { 見積: object({}) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+      ] as const;
+
+    it("refuses when the object does not declare the sum's discriminant", () => {
+      expect(() =>
+        compose("判別キーなし", 段(object({ 番号: optional(string("番号")), 暗証: optional(string("暗証")) }))),
+      ).toThrow(new SpecificationError("支払を返す answers @有効.支払.方法, which object で受け取る does not declare"));
+    });
+
+    it("refuses when the object does not declare a field one of the cases carries", () => {
+      expect(() =>
+        compose("暗証なし", 段(object({ 方法: string("方法"), 番号: optional(string("番号")) }))),
+      ).toThrow(new SpecificationError("支払を返す answers @有効.支払@カード.暗証, which object で受け取る does not declare"));
+    });
+
+    it("accepts an object declaring the discriminant and every field of every case", () => {
+      expect(() =>
+        compose(
+          "すべて宣言",
+          段(object({ 方法: string("方法"), 番号: optional(string("番号")), 暗証: optional(string("暗証")) })),
+        ),
+      ).not.toThrow();
+    });
+  });
+
+  describe("a plain object the second stage takes as a nested sum", () => {
+    const 受け取る支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string("番号") }) });
+    const 段 = (answered: AnySchema) =>
+      [
+        external(
+          behavior("object で返す", {
+            input: variants("状態", { 申込: object({}) }),
+            result: variants("結果", { 有効: object({ 支払: answered }) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+        external(
+          behavior("sum で受け取る", {
+            input: variants("結果", { 有効: object({ 支払: 受け取る支払 }) }),
+            result: variants("結果", { 見積: object({}) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+      ] as const;
+
+    it("compares the object with the case its literal discriminant names", () => {
+      expect(() =>
+        compose("暗証つき", 段(object({ 方法: literal("カード"), 番号: string("番号"), 暗証: string("暗証") }))),
+      ).toThrow(new SpecificationError("object で返す answers @有効.支払.暗証, which sum で受け取る does not declare"));
+    });
+
+    it("refuses when the case its literal discriminant names is not declared", () => {
+      expect(() => compose("振込", 段(object({ 方法: literal("振込") })))).toThrow(
+        new SpecificationError("object で返す answers @有効.支払@振込, which sum で受け取る does not declare"),
+      );
+    });
+
+    it("accepts an object whose discriminant is not a literal, since its case is only known at run time", () => {
+      expect(() => compose("方法は文字列", 段(object({ 方法: string("方法"), 暗証: string("暗証") })))).not.toThrow();
+    });
+  });
+
   it("does not count the discriminant a first stage's case declares for itself as undeclared", () => {
     const 状態を宣言する = behavior("状態を宣言する", {
       input: variants("状態", { 申込: object({}) }),
