@@ -186,28 +186,19 @@ function undeclaredPath(
   }
   if (answered.kind === "object" && taken.kind === "object") {
     const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
-    for (const [key, field] of Object.entries((answered as ObjectSchema<ObjectShape>).shape)) {
-      if (key === discriminant && !Object.hasOwn(takenShape, key)) {
-        continue;
-      }
-      const found = Object.hasOwn(takenShape, key)
+    return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
+      Object.hasOwn(takenShape, key)
         ? undeclaredPath(field, takenShape[key]!, `${path}.${key}`)
-        : `${path}.${key}`;
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
+        : key === discriminant
+          ? undefined
+          : `${path}.${key}`,
+    );
   }
   if (answered.kind === "object" && taken.kind === "record") {
     const value = (taken as RecordSchema<unknown>).value as AnySchema;
-    for (const [key, field] of Object.entries((answered as ObjectSchema<ObjectShape>).shape)) {
-      const found = undeclaredPath(field, value, `${path}.${key}`);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
+    return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
+      undeclaredPath(field, value, `${path}.${key}`),
+    );
   }
   if (answered.kind === "array" && taken.kind === "array") {
     return undeclaredPath(
@@ -234,31 +225,25 @@ function undeclaredPath(
       : `${path}@${tag}`;
   }
   if (isVariantsSchema(answered) && taken.kind === "object") {
-    if (!Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)) {
-      return `${path}.${answered.discriminant}`;
-    }
-    for (const tag of answered.variantTags) {
-      const found = undeclaredPath(answered.variants[tag], taken, `${path}@${tag}`);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
+    return Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)
+      ? firstFound(answered.variantTags, tag => undeclaredPath(answered.variants[tag], taken, `${path}@${tag}`))
+      : `${path}.${answered.discriminant}`;
   }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
-    for (const tag of answered.variantTags) {
-      if (!taken.variantTags.includes(tag)) {
-        return `${path}@${tag}`;
-      }
-      const found = undeclaredPath(
-        answered.variants[tag],
-        taken.variants[tag],
-        `${path}@${tag}`,
-        answered.discriminant,
-      );
-      if (found !== undefined) {
-        return found;
-      }
+    return firstFound(answered.variantTags, tag =>
+      taken.variantTags.includes(tag)
+        ? undeclaredPath(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, answered.discriminant)
+        : `${path}@${tag}`,
+    );
+  }
+  return undefined;
+}
+
+function firstFound<T>(items: readonly T[], find: (item: T) => string | undefined): string | undefined {
+  for (const item of items) {
+    const found = find(item);
+    if (found !== undefined) {
+      return found;
     }
   }
   return undefined;
