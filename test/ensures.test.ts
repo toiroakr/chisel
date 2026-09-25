@@ -83,7 +83,7 @@ describe("ensures", () => {
   });
 
   it("holds an outside implementation to what the behavior ensures", async () => {
-    const failures = await test(
+    const { failures } = await test(
       examples(注文を確定する, {
         "c-1を確定する": {
           given: { 状態: "商品あり", カートID: "c-1" },

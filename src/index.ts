@@ -132,6 +132,7 @@ export type {
   RuleCoverage,
   RulesMeasure,
   Specification,
+  TestOutcome,
   UnansweredExample,
   Verdict,
 } from "./specification.js";

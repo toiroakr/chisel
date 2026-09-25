@@ -261,4 +261,13 @@ The stages must name their cases by one discriminant; a case that would both dep
 
 ## Conformance
 
-`test` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model.
+`test` runs the human-approved examples against an external controller or service. This keeps model evaluation separate from checking whether infrastructure code conforms to the model. It returns the rows whose answer disagreed and the rows it skipped because their answer is still `todo`, so a test can choose whether an open answer may pass:
+
+```ts
+it("the order API answers as the examples say", async () => {
+  expect(await c.test(cancelOrderExamples, callOrderApi)).toStrictEqual({
+    failures: [],
+    skipped: [], // drop this line to let rows still marked todo pass
+  });
+});
+```

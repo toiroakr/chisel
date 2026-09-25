@@ -992,13 +992,20 @@ export function generate(
   return { rows: generated, notComposed };
 }
 
+export interface TestOutcome {
+  readonly failures: readonly ExampleFailure[];
+  readonly skipped: readonly { readonly name: string; readonly reason: string }[];
+}
+
 export async function test<B extends AnyBehavior>(
   exampleSet: ExampleSet<B>,
   subject: NoInfer<ConformanceSubject<B>>,
-): Promise<readonly ExampleFailure[]> {
+): Promise<TestOutcome> {
   const failures: ExampleFailure[] = [];
+  const skipped: { name: string; reason: string }[] = [];
   for (const row of exampleSet.rows) {
     if (isTodo(row.expect)) {
+      skipped.push({ name: row.name, reason: row.expect.reason });
       continue;
     }
     const { actual, failure } = await runAndCompare(row.name, row.given, row.expect, subject);
@@ -1021,7 +1028,7 @@ export async function test<B extends AnyBehavior>(
       failures.push(failure);
     }
   }
-  return failures;
+  return { failures, skipped };
 }
 
 interface Pairable {

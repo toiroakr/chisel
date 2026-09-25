@@ -151,7 +151,7 @@ describe("chisel", () => {
     });
 
     const report = await check(specification);
-    const failures = await test(rows, input =>
+    const { failures } = await test(rows, input =>
       perform(implementation, input),
     );
 
@@ -546,7 +546,7 @@ describe("test", () => {
       },
     });
 
-    const failures = await test(rows, () => ({
+    const { failures } = await test(rows, () => ({
       result: { type: "rejected" as const, reason: "already-published" },
       effects: [],
     }));
@@ -566,14 +566,14 @@ describe("test", () => {
       },
     });
 
-    const failures = await test(rows, () => {
+    const { failures } = await test(rows, () => {
       throw "boom";
     });
 
     expect(failures).toStrictEqual([{ name: "publish draft", message: "boom" }]);
   });
 
-  it("skips unanswered rows without calling the subject", async () => {
+  it("skips a row whose answer is still todo without calling the subject, and says so", async () => {
     const definition = publishingBehavior();
     const rows = examples(definition, {
       "published behavior is unanswered": {
@@ -588,8 +588,15 @@ describe("test", () => {
       return { result: { type: "accepted" as const, id: input.id }, effects: [] };
     });
 
-    expect(calls).toBe(0);
-    expect(failures).toStrictEqual([]);
+    expect({ calls, outcome: failures }).toStrictEqual({
+      calls: 0,
+      outcome: {
+        failures: [],
+        skipped: [
+          { name: "published behavior is unanswered", reason: "A human must decide repeated publication" },
+        ],
+      },
+    });
   });
 });
 
