@@ -25,10 +25,10 @@ const 数量を確定する = behavior({
 
 export const 数量確定 = spec({
   name: "数量確定",
-  examples: examples(数量を確定する, [
-    example(数量を確定する, "数量1", {
+  examples: examples(数量を確定する, {
+    "数量1": {
       given: { 状態: "入力済み", 数量: 1, 同意: true },
       expect: { result: {}, effects: [] },
-    }),
-  ]),
+    },
+  }),
 });

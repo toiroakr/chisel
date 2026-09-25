@@ -87,19 +87,19 @@ describe("chisel", () => {
 
   it("keeps human answers separate from the implementation", async () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-      example(definition, "published behavior is unanswered", {
+      },
+      "published behavior is unanswered": {
         given: { state: "published", id: "b" },
         expect: unanswered("A human must decide repeated publication"),
-      }),
-    ]);
+      },
+    });
     const specification = spec({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
@@ -128,22 +128,22 @@ describe("chisel", () => {
   it("accepts a model that satisfies all human-approved examples", async () => {
     const definition = publishingBehavior();
     const implementation = publishingImplementation(definition);
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-      example(definition, "reject published", {
+      },
+      "reject published": {
         given: { state: "published", id: "b" },
         expect: {
           result: { type: "rejected", reason: "already-published" },
           effects: [],
         },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,
@@ -184,22 +184,22 @@ describe("dependency issues", () => {
       dependsOn: ["mail"],
     });
     const implementation = publishingImplementation(definition);
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-      example(definition, "reject published", {
+      },
+      "reject published": {
         given: { state: "published", id: "b" },
         expect: {
           result: { type: "rejected", reason: "already-published" },
           effects: [],
         },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,
@@ -246,7 +246,7 @@ describe("dependency issues", () => {
     });
     const specification = spec({
       name: "publishing",
-      examples: examples(definition, []),
+      examples: examples(definition, {}),
       implementation,
     });
 
@@ -267,7 +267,7 @@ describe("dependency issues", () => {
     });
     const specification = spec({
       name: "publishing",
-      examples: examples(definition, []),
+      examples: examples(definition, {}),
     });
 
     const report = await evaluateSpecification(specification);
@@ -282,15 +282,15 @@ describe("evaluateSpecification failure reporting", () => {
   it("reports a failure when the implementation disagrees with an example", async () => {
     const definition = publishingBehavior();
     const implementation = publishingImplementation(definition);
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "wrong-id" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,
@@ -327,7 +327,7 @@ describe("evaluateSpecification failure reporting", () => {
     });
     const specification = spec({
       name: "publishing",
-      examples: examples(definition, []),
+      examples: examples(definition, {}),
       implementation,
     });
 
@@ -364,7 +364,7 @@ describe("evaluateSpecification failure reporting", () => {
     });
     const specification = spec({
       name: "publishing",
-      examples: examples(definition, []),
+      examples: examples(definition, {}),
       implementation,
     });
 
@@ -402,7 +402,7 @@ describe("evaluateSpecification failure reporting", () => {
     });
     const specification = spec({
       name: "publishing",
-      examples: examples(definition, []),
+      examples: examples(definition, {}),
       implementation,
     });
 
@@ -499,15 +499,15 @@ describe("runImplementation error handling", () => {
 describe("generateExamples", () => {
   it("only generates rows for variants not already covered by an example", () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-    ]);
+      },
+    });
 
     const generated = generateExamples(rows);
 
@@ -518,12 +518,12 @@ describe("generateExamples", () => {
 
   it("treats an unanswered row as covering its input variant", () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "published behavior is unanswered", {
+    const rows = examples(definition, {
+      "published behavior is unanswered": {
         given: { state: "published", id: "b" },
         expect: unanswered("A human must decide repeated publication"),
-      }),
-    ]);
+      },
+    });
 
     const generated = generateExamples(rows);
 
@@ -536,15 +536,15 @@ describe("generateExamples", () => {
 describe("verifyConformance", () => {
   it("reports a failure when the subject disagrees with an answered example", async () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-    ]);
+      },
+    });
 
     const failures = await verifyConformance(rows, () => ({
       result: { type: "rejected" as const, reason: "already-published" },
@@ -556,15 +556,15 @@ describe("verifyConformance", () => {
 
   it("stringifies a thrown non-Error value as the failure message", async () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-    ]);
+      },
+    });
 
     const failures = await verifyConformance(rows, () => {
       throw "boom";
@@ -575,12 +575,12 @@ describe("verifyConformance", () => {
 
   it("skips unanswered rows without calling the subject", async () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "published behavior is unanswered", {
+    const rows = examples(definition, {
+      "published behavior is unanswered": {
         given: { state: "published", id: "b" },
         expect: unanswered("A human must decide repeated publication"),
-      }),
-    ]);
+      },
+    });
     let calls = 0;
 
     const failures = await verifyConformance(rows, input => {
@@ -610,7 +610,7 @@ describe("isSpecification", () => {
     const definition = publishingBehavior();
     const specification = spec({
       name: "publishing",
-      examples: examples(definition, []),
+      examples: examples(definition, {}),
     });
 
     expect(isSpecification(specification)).toBe(true);
@@ -663,12 +663,12 @@ describe("runImplementation invalid input and cases", () => {
 describe("evaluateSpecification example validation", () => {
   it("reports a failure when an example's given value fails schema validation", async () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "invalid given", {
+    const rows = examples(definition, {
+      "invalid given": {
         given: { state: "archived", id: "a" } as never,
         expect: { result: { type: "accepted", id: "a" }, effects: [] },
-      }),
-    ]);
+      },
+    });
     const specification = spec({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
@@ -680,12 +680,12 @@ describe("evaluateSpecification example validation", () => {
 
   it("reports a failure when an example's expected result fails schema validation", async () => {
     const definition = publishingBehavior();
-    const rows = examples(definition, [
-      example(definition, "invalid expected result", {
+    const rows = examples(definition, {
+      "invalid expected result": {
         given: { state: "draft", id: "a" },
         expect: { result: { type: "unknown-type" } as never, effects: [] },
-      }),
-    ]);
+      },
+    });
     const specification = spec({ name: "publishing", examples: rows });
 
     const report = await evaluateSpecification(specification);
@@ -723,15 +723,15 @@ describe("evaluateSpecification example validation", () => {
         },
       },
     });
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,
@@ -773,16 +773,16 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       },
     });
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: { result: "accepted", effects: [{ type: "notify", id: "a" }] },
-      }),
-      example(definition, "reject published", {
+      },
+      "reject published": {
         given: { state: "published", id: "b" },
         expect: { result: "already-published", effects: [] },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,
@@ -824,22 +824,22 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       },
     });
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-      example(definition, "publish published", {
+      },
+      "publish published": {
         given: { state: "published", id: "b" },
         expect: {
           result: { type: "accepted", id: "b" },
           effects: [{ type: "notify", id: "b" }],
         },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,
@@ -901,22 +901,22 @@ describe("coverage-driven adequacy vetoes", () => {
         },
       },
     });
-    const rows = examples(definition, [
-      example(definition, "publish draft", {
+    const rows = examples(definition, {
+      "publish draft": {
         given: { state: "draft", id: "a" },
         expect: {
           result: { type: "accepted", id: "a" },
           effects: [{ type: "notify", id: "a" }],
         },
-      }),
-      example(definition, "reject published", {
+      },
+      "reject published": {
         given: { state: "published", id: "b" },
         expect: {
           result: { type: "rejected", reason: "already-published" },
           effects: [],
         },
-      }),
-    ]);
+      },
+    });
     const specification = spec({
       name: "publishing",
       examples: rows,

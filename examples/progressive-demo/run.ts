@@ -20,21 +20,21 @@ import { 完成した仕様 } from "./stage-04-complete.spec.js";
 
 const 段階1のスケッチ = spec({
   name: "段階1: dataとbehaviorの宣言",
-  examples: examples(段階1の振る舞い, []),
+  examples: examples(段階1の振る舞い, {}),
 });
 
 await show(
   "STEP 1 — dataとbehaviorの外形を書く",
   "まだ実装もexampleも書かない。Chiselが入力variantごとの未回答exampleを生成する。",
   段階1のスケッチ,
-  "予約をキャンセルする",
+  { showGenerated: true },
 );
 
 await show(
   "STEP 2 — 人間が期待値を埋める",
   "生成された入力に対して期待するresultとeffectsを人間が決める。この時点では実装がなくてもよい。",
   最初の回答,
-  "予約をキャンセルする",
+  { showGenerated: true },
 );
 
 showTypeBreak();
@@ -43,7 +43,7 @@ await show(
   "STEP 3 — dataとbehaviorを更新する",
   "予約確定に宿泊開始日時とキャンセル要求日時を追加する。古いexampleは型エラーになり、更新後の入力形を持つexampleが生成される。",
   詳細化した仕様,
-  "予約をキャンセルする",
+  { showGenerated: true },
 );
 
 await show(
@@ -56,18 +56,18 @@ async function show(
   title: string,
   description: string,
   specification: Specification,
-  behaviorBinding?: string,
+  options: { readonly showGenerated?: boolean } = {},
 ): Promise<void> {
   console.log(`\n${title}`);
   console.log(description);
   const report = await evaluateSpecification(specification);
   console.log(formatReport(report));
 
-  if (behaviorBinding !== undefined) {
+  if (options.showGenerated === true) {
     const generated = generateExamples(specification.examples);
     if (generated.length > 0) {
       console.log("生成されたexample:");
-      console.log(formatGeneratedRows(behaviorBinding, generated));
+      console.log(formatGeneratedRows(generated));
     }
   }
 }
@@ -124,17 +124,14 @@ function formatReport(report: AdequacyReport): string {
   return lines.join("\n");
 }
 
-function formatGeneratedRows(
-  behaviorBinding: string,
-  generated: readonly GeneratedExample[],
-): string {
+function formatGeneratedRows(generated: readonly GeneratedExample[]): string {
   return generated
     .map(
       row =>
-        `example(${behaviorBinding}, ${JSON.stringify(row.name)}, {\n` +
+        `${JSON.stringify(row.name)}: {\n` +
         `  given: ${formatTypeScriptValue(row.given).replaceAll("\n", "\n  ")},\n` +
         `  expect: unanswered(${JSON.stringify(row.reason)}),\n` +
-        "})",
+        "}",
     )
     .join(",\n");
 }

@@ -33,12 +33,12 @@ export const 見積もる = compose(検証する, 価格を付ける);
 
 export const 見積 = spec({
   name: "見積",
-  examples: examples(見積もる, [
-    example(見積もる, "2個", {
+  examples: examples(見積もる, {
+    "2個": {
       given: { 状態: "申込", 数量: 2 },
       expect: { result: { 結果: "見積", 金額: 200 }, effects: [] },
-    }),
-  ]),
+    },
+  }),
   implementation: implementComposition(
     見積もる,
     implement(検証する, {

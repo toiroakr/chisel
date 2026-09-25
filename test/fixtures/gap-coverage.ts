@@ -60,15 +60,15 @@ const implementation = implement(definition, {
 
 export const inlineSpec = spec({
   name: "inline check",
-  examples: examples(definition, [
-    example(definition, "ready", {
+  examples: examples(definition, {
+    "ready": {
       given: { state: "ready", id: "a" },
       expect: unanswered("undecided"),
-    }),
-    example(definition, "archived", {
+    },
+    "archived": {
       given: { state: "archived", id: "b" },
       expect: { result: { type: "ok", id: "b" }, effects: [] },
-    }),
-  ]),
+    },
+  }),
   implementation,
 });

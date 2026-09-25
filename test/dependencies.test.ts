@@ -52,13 +52,13 @@ describe("a value dependency", () => {
     const report = await evaluateSpecification(
       spec({
         name: "受付",
-        examples: examples(受付する, [
-          example(受付する, "今の時刻で受け付ける", {
+        examples: examples(受付する, {
+          "今の時刻で受け付ける": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
             with: { 現在時刻: 時刻 },
             expect: { result: { 受付日時: 時刻 }, effects: [] },
-          }),
-        ]),
+          },
+        }),
         implementation: 今で受け付ける,
       }),
     );
@@ -70,15 +70,15 @@ describe("a value dependency", () => {
     const report = await evaluateSpecification(
       spec({
         name: "受付",
-        examples: examples(受付する, [
-          example(受付する, "時刻を書き忘れた", {
+        examples: examples(受付する, {
+          "時刻を書き忘れた": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
             expect: {
               result: { 受付日時: Temporal.Instant.from("2026-10-01T09:00:00Z") },
               effects: [],
             },
-          }),
-        ]),
+          },
+        }),
         implementation: 今で受け付ける,
       }),
     );
@@ -92,15 +92,15 @@ describe("a value dependency", () => {
     const report = await evaluateSpecification(
       spec({
         name: "受付",
-        examples: examples(受付する, [
-          example(受付する, "時刻を書き忘れた", {
+        examples: examples(受付する, {
+          "時刻を書き忘れた": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
             expect: {
               result: { 受付日時: Temporal.Instant.from("2026-10-01T09:00:00Z") },
               effects: [],
             },
-          }),
-        ]),
+          },
+        }),
         implementation: 今で受け付ける,
       }),
     );
@@ -120,16 +120,16 @@ describe("a value a row writes for a dependency", () => {
     const report = await evaluateSpecification(
       spec({
         name: "受付",
-        examples: examples(受付する, [
-          example(受付する, "時刻を文字列で書いた", {
+        examples: examples(受付する, {
+          "時刻を文字列で書いた": {
             given: { 状態: "申込済み", 申込ID: "a-1" },
             with: { 現在時刻: "2026-10-01T09:00:00Z" as never },
             expect: {
               result: { 受付日時: Temporal.Instant.from("2026-10-01T09:00:00Z") },
               effects: [],
             },
-          }),
-        ]),
+          },
+        }),
         implementation: 今で受け付ける,
       }),
     );
@@ -164,16 +164,16 @@ describe("a function dependency", () => {
     },
   });
   const 商品で = (商品ID: string, 在庫あり: boolean) =>
-    example(在庫を確かめる, `${商品ID}の在庫`, {
+    ({ [`${商品ID}の在庫`]: example(在庫を確かめる, {
       given: { 状態: "注文済み", 商品ID },
       expect: { result: { 在庫あり }, effects: [] },
-    });
+    }) });
 
   it("is stood in for by a fake table matched on the input it is asked", async () => {
     const report = await evaluateSpecification(
       spec({
         name: "在庫",
-        examples: examples(在庫を確かめる, [商品で("商品-A", true), 商品で("商品-B", false)]),
+        examples: examples(在庫を確かめる, { ...商品で("商品-A", true), ...商品で("商品-B", false) }),
         implementation: 照会して答える,
         fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10], ["商品-B", 0]])],
       }),
@@ -186,7 +186,7 @@ describe("a function dependency", () => {
     const report = await evaluateSpecification(
       spec({
         name: "在庫",
-        examples: examples(在庫を確かめる, [商品で("商品-C", false)]),
+        examples: examples(在庫を確かめる, { ...商品で("商品-C", false) }),
         implementation: 照会して答える,
         fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10]])],
       }),
@@ -201,7 +201,7 @@ describe("a function dependency", () => {
     const report = await evaluateSpecification(
       spec({
         name: "在庫",
-        examples: examples(在庫を確かめる, [商品で("商品-C", false)]),
+        examples: examples(在庫を確かめる, { ...商品で("商品-C", false) }),
         implementation: 照会して答える,
         fakes: [fake(在庫を確かめる, "在庫を照会する", [["商品-A", 10]], { otherwise: 0 })],
       }),
@@ -215,7 +215,7 @@ describe("a function dependency", () => {
       await evaluateSpecification(
         spec({
           name: "在庫",
-          examples: examples(在庫を確かめる, []),
+          examples: examples(在庫を確かめる, {}),
           implementation: 照会して答える,
           ...(fakes === undefined ? {} : { fakes }),
         }),
@@ -259,13 +259,13 @@ describe("generated rows and dependencies", () => {
 
     expect(
       generateExamples(
-        examples(受付する2, [
-          example(受付する2, "紹介なし", {
+        examples(受付する2, {
+          "紹介なし": {
             given: { 状態: "申込済み" },
             with: { 現在時刻: 時刻 },
             expect: { result: { 受付日時: 時刻 }, effects: [] },
-          }),
-        ]),
+          },
+        }),
       ).map(row => row.with),
     ).toStrictEqual([{ 現在時刻: 時刻 }]);
   });
@@ -291,12 +291,12 @@ describe("generated rows and dependencies", () => {
       },
     });
     const report = generationReport(
-      examples(送料を決める, [
-        example(送料を決める, "宅配", {
+      examples(送料を決める, {
+        "宅配": {
           given: { 状態: "確定済み", 配送: { 方法: "宅配" } },
           expect: { result: { 送料: 500 }, effects: [] },
-        }),
-      ]),
+        },
+      }),
       料金表で決める,
     );
 
@@ -335,11 +335,11 @@ describe("a value dependency read in a guard condition", () => {
     希望日時: Temporal.Instant,
     結果: "受付" | "過去",
   ) =>
-    example(予約する, 名前, {
+    ({ [名前]: example(予約する, {
       given: { 状態: "申込済み", 希望日時 },
       with: { 現在時刻: 今 },
       expect: { result: { 結果 }, effects: [] },
-    });
+    }) });
 
   it("is evaluated against the dependency the run is given", async () => {
     expect(
@@ -358,10 +358,10 @@ describe("a value dependency read in a guard condition", () => {
     const report = await evaluateSpecification(
       spec({
         name: "予約",
-        examples: examples(予約する, [
-          行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
-          行("昨日", Temporal.Instant.from("2026-09-30T09:00:00Z"), "過去"),
-        ]),
+        examples: examples(予約する, {
+          ...行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
+          ...行("昨日", Temporal.Instant.from("2026-09-30T09:00:00Z"), "過去"),
+        }),
         implementation: 過去を断る,
         fakes: [fake(予約する, "採番", [["x", "n-1"]])],
       }),
@@ -374,9 +374,9 @@ describe("a value dependency read in a guard condition", () => {
     const report = await evaluateSpecification(
       spec({
         name: "予約",
-        examples: examples(予約する, [
-          行("ちょうど1ns後", 今.add({ nanoseconds: 1 }), "受付"),
-        ]),
+        examples: examples(予約する, {
+          ...行("ちょうど1ns後", 今.add({ nanoseconds: 1 }), "受付"),
+        }),
         implementation: 過去を断る,
         fakes: [fake(予約する, "採番", [["x", "n-1"]])],
       }),
@@ -405,7 +405,7 @@ describe("a value dependency read in a guard condition", () => {
     const report = await evaluateSpecification(
       spec({
         name: "予約",
-        examples: examples(予約する, []),
+        examples: examples(予約する, {}),
         implementation: 過去を断る,
       }),
     );
@@ -415,9 +415,9 @@ describe("a value dependency read in a guard condition", () => {
 
   it("generates a row at a point by moving the position against the value the row stands in with", () => {
     const generated = generateExamples(
-      examples(予約する, [
-        行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
-      ]),
+      examples(予約する, {
+        ...行("明日", Temporal.Instant.from("2026-10-02T09:00:00Z"), "受付"),
+      }),
       過去を断る,
     ).find((row) => row.name.endsWith("OFF (= 0)"));
 
@@ -472,7 +472,7 @@ describe("a value dependency read inside all", () => {
     const report = await evaluateSpecification(
       spec({
         name: "注文",
-        examples: examples(注文する, []),
+        examples: examples(注文する, {}),
         implementation: 上限で断る,
       }),
     );
@@ -491,12 +491,12 @@ describe("a dependency declared as another behavior", () => {
       clause.always("照会した商品を答える", (問い, 答え) => eq(答え.商品ID, 問い.商品ID)),
     ],
   });
-  const 在庫照会の例 = examples(在庫を照会する, [
-    example(在庫を照会する, "商品-Aは10個", {
+  const 在庫照会の例 = examples(在庫を照会する, {
+    "商品-Aは10個": {
       given: { 種別: "商品", 商品ID: "商品-A" },
       expect: { result: { 商品ID: "商品-A", 在庫数: 10 }, effects: [] },
-    }),
-  ]);
+    },
+  });
   const 注文する = behavior({
     name: "注文する",
     input: variants("状態", { 入力済み: object({ 商品ID: string("商品ID") }) }),
@@ -521,12 +521,12 @@ describe("a dependency declared as another behavior", () => {
     return evaluateSpecification(
       spec({
         name: "注文",
-        examples: examples(注文する, [
-          example(注文する, "商品-A", {
+        examples: examples(注文する, {
+          "商品-A": {
             given: { 状態: "入力済み", 商品ID: "商品-A" },
             expect: { result: { 在庫あり: true }, effects: [] },
-          }),
-        ]),
+          },
+        }),
         implementation: 在庫で決める,
         fakes: [fake(注文する, "在庫", rows)],
       }),

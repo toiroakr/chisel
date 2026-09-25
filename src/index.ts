@@ -120,6 +120,7 @@ export type {
   DependencyIssue,
   Example,
   ExampleFailure,
+  ExampleRow,
   ExampleSet,
   GeneratedExample,
   Incompleteness,

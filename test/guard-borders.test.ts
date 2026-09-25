@@ -50,20 +50,20 @@ const 上限で分ける = implement(注文を受け付ける, {
 });
 
 function 合計で(合計: number) {
-  return example(注文を受け付ける, `合計${合計}`, {
+  return { [`合計${合計}`]: example(注文を受け付ける, {
     given: { 状態: "入力済み", 合計 },
     expect:
       合計 <= 100000
         ? { result: { 結果: "受付" }, effects: [] }
         : { result: { 結果: "要承認", 理由: "上限超過" }, effects: [] },
-  });
+  }) };
 }
 
 async function guardBorders(rows: readonly ReturnType<typeof 合計で>[]) {
   const report = await evaluateSpecification(
     spec({
       name: "受付",
-      examples: examples(注文を受け付ける, rows),
+      examples: examples(注文を受け付ける, Object.assign({}, ...rows)),
       implementation: 上限で分ける,
     }),
   );
@@ -112,12 +112,12 @@ describe("a guard's border is met by reaching the comparison", () => {
     const report = await evaluateSpecification(
       spec({
         name: "審査",
-        examples: examples(審査する, [
-          example(審査する, "非会員は合計に関係なく却下", {
+        examples: examples(審査する, {
+          "非会員は合計に関係なく却下": {
             given: { 状態: "申請済み", 会員: 0, 合計: 100 },
             expect: { result: { 結果: "却下", 理由: "非会員" }, effects: [] },
-          }),
-        ]),
+          },
+        }),
         implementation: 二段で審査する,
       }),
     );
@@ -144,7 +144,7 @@ describe("a guard's border is met by reaching the comparison", () => {
     const report = await evaluateSpecification(
       spec({
         name: "受付",
-        examples: examples(注文を受け付ける, []),
+        examples: examples(注文を受け付ける, {}),
         implementation: ゼロ円は要承認,
       }),
     );
@@ -185,12 +185,12 @@ describe("a border between two positions", () => {
     const report = await evaluateSpecification(
       spec({
         name: "確定",
-        examples: examples(注文を確定する, [
-          example(注文を確定する, "ちょうど在庫分", {
+        examples: examples(注文を確定する, {
+          "ちょうど在庫分": {
             given: { 状態: "商品あり", 明細: [{ 数量: 5, 在庫数: 9 }, { 数量: 3, 在庫数: 3 }] },
             expect: { result: { 結果: "確定" }, effects: [] },
-          }),
-        ]),
+          },
+        }),
         implementation: 在庫を確かめる,
       }),
     );
@@ -225,7 +225,7 @@ describe("a border between two positions", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "比較", examples: examples(比べる, []), implementation: 予算内か }),
+      spec({ name: "比較", examples: examples(比べる, {}), implementation: 予算内か }),
     );
 
     expect(report.borders[0]!.points[1]).toStrictEqual({
@@ -255,7 +255,7 @@ describe("classes cut from a range an object invariant bounds", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "上限", examples: examples(受け付ける, []), implementation: 上限 }),
+      spec({ name: "上限", examples: examples(受け付ける, {}), implementation: 上限 }),
     );
 
     expect(report.partitions).toMatchObject([{ missing: ["0 <= v <= 100", "100 < v"] }]);
@@ -278,7 +278,7 @@ describe("classes cut from a range an object invariant bounds", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "下限", examples: examples(受け付ける, []), implementation: 下限 }),
+      spec({ name: "下限", examples: examples(受け付ける, {}), implementation: 下限 }),
     );
 
     expect(report.borders[0]!.points.map(point => point.status)).toStrictEqual([
@@ -317,12 +317,12 @@ describe("elements a quantifier never reached", () => {
     const report = await evaluateSpecification(
       spec({
         name: "確定",
-        examples: examples(注文を確定する, [
-          example(注文を確定する, "先頭の明細が在庫不足", {
+        examples: examples(注文を確定する, {
+          "先頭の明細が在庫不足": {
             given: { 状態: "商品あり", 明細: [{ 数量: 4, 在庫数: 3 }, { 数量: 1, 在庫数: 5 }] },
             expect: { result: { 結果: "不可", 理由: "在庫不足" }, effects: [] },
-          }),
-        ]),
+          },
+        }),
         implementation: 在庫を確かめる,
       }),
     );
@@ -359,12 +359,12 @@ describe("generateExamples for guard borders", () => {
   });
 
   it("moves one side of a compared pair so the difference stands at each point no row reached", () => {
-    const existing = examples(注文を確定する, [
-      example(注文を確定する, "ちょうど在庫分", {
+    const existing = examples(注文を確定する, {
+      "ちょうど在庫分": {
         given: { 状態: "商品あり", 明細: [{ 数量: 3, 在庫数: 3 }] },
         expect: { result: { 結果: "確定" }, effects: [] },
-      }),
-    ]);
+      },
+    });
 
     expect(
       generateExamples(existing, 在庫を確かめる).map(row => ({ name: row.name, given: row.given })),
@@ -390,7 +390,7 @@ describe("classes a guard's threshold divides a position into", () => {
     const report = await evaluateSpecification(
       spec({
         name: "受付",
-        examples: examples(注文を受け付ける, [合計で(100000)]),
+        examples: examples(注文を受け付ける, { ...合計で(100000) }),
         implementation: 上限で分ける,
       }),
     );
@@ -424,7 +424,7 @@ describe("classes a guard's threshold divides a position into", () => {
   const partitionsOf = async (implementation: ReturnType<typeof 判定>) =>
     (
       await evaluateSpecification(
-        spec({ name: "判定", examples: examples(点数を判定する, []), implementation }),
+        spec({ name: "判定", examples: examples(点数を判定する, {}), implementation }),
       )
     ).partitions;
 
@@ -456,7 +456,7 @@ describe("classes a guard's threshold divides a position into", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "比較", examples: examples(比べる, []), implementation: 在庫内か }),
+      spec({ name: "比較", examples: examples(比べる, {}), implementation: 在庫内か }),
     );
 
     expect(report.partitions.map(partition => partition.kind)).toStrictEqual([
@@ -466,7 +466,7 @@ describe("classes a guard's threshold divides a position into", () => {
   });
 
   it("offers a row in each class a guard threshold drew that no row is in", () => {
-    const names = generateExamples(examples(注文を受け付ける, [合計で(100000)]), 上限で分ける).map(
+    const names = generateExamples(examples(注文を受け付ける, { ...合計で(100000) }), 上限で分ける).map(
       row => row.name,
     );
 
@@ -493,7 +493,7 @@ describe("borders of a rule that names one value", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "判定", examples: examples(判定する, []), implementation: 判定 }),
+      spec({ name: "判定", examples: examples(判定する, {}), implementation: 判定 }),
     );
     return report.borders[0]!.points;
   };
@@ -530,7 +530,7 @@ describe("borders of a rule that names one value", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "判定", examples: examples(判定する, []), implementation: 判定 }),
+      spec({ name: "判定", examples: examples(判定する, {}), implementation: 判定 }),
     );
 
     expect(report.partitions).toMatchObject([{ missing: ["v < 10", "v = 10", "10 < v"] }]);
@@ -554,7 +554,7 @@ describe("comparisons Chisel could not read", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "順序", examples: examples(比べる, []), implementation: 順序 }),
+      spec({ name: "順序", examples: examples(比べる, {}), implementation: 順序 }),
     );
 
     expect(report.borders[0]!.points.map(point => point.relation)).toStrictEqual([
@@ -581,7 +581,7 @@ describe("comparisons Chisel could not read", () => {
       },
     });
     const report = await evaluateSpecification(
-      spec({ name: "並び", examples: examples(比べる, []), implementation: 並び }),
+      spec({ name: "並び", examples: examples(比べる, {}), implementation: 並び }),
     );
 
     expect(report.measures.comparisons).toStrictEqual({
@@ -614,12 +614,12 @@ describe("a guard on a length", () => {
     const report = await evaluateSpecification(
       spec({
         name: "明細",
-        examples: examples(明細を確かめる, [
-          example(明細を確かめる, "行", {
+        examples: examples(明細を確かめる, {
+          "行": {
             given: { 状態: "入力済み", ...given },
             expect: { result: { 結果: "受付" }, effects: [] },
-          }),
-        ]),
+          },
+        }),
         implementation: 確かめる,
       }),
     );
@@ -665,7 +665,7 @@ describe("a guard point no row can reach", () => {
 
   it("owes no row at a point of a comparison only reached with values outside it", async () => {
     const report = await evaluateSpecification(
-      spec({ name: "二段", examples: examples(数量を見る, []), implementation: 二段 }),
+      spec({ name: "二段", examples: examples(数量を見る, {}), implementation: 二段 }),
     );
 
     expect(
@@ -677,7 +677,7 @@ describe("a guard point no row can reach", () => {
 
   it("offers no row at such a point", () => {
     expect(
-      generateExamples(examples(数量を見る, []), 二段)
+      generateExamples(examples(数量を見る, {}), 二段)
         .map(row => row.name)
         .filter(name => /@入力済み\.数量 (ON \(= 5\)|OFF \(= 4\)|OUT \(< 4\))/.test(name)),
     ).toStrictEqual([]);
@@ -702,7 +702,7 @@ describe("an equality between two positions", () => {
       },
     });
     return evaluateSpecification(
-      spec({ name: "照合", examples: examples(照合する, []), implementation: 照合 }),
+      spec({ name: "照合", examples: examples(照合する, {}), implementation: 照合 }),
     );
   }
 

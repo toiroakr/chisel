@@ -41,12 +41,12 @@ const 注文を確定する = behavior({
 
 describe("generateExamples starts from what the rows already say", () => {
   it("moves one position of an existing row rather than composing from placeholders", () => {
-    const existing = examples(注文を確定する, [
-      example(注文を確定する, "クーポンなし", {
+    const existing = examples(注文を確定する, {
+      "クーポンなし": {
         given: { 状態: "商品あり", カートID: "カート-7" },
         expect: { result: {}, effects: [] },
-      }),
-    ]);
+      },
+    });
 
     expect(generateExamples(existing).map(row => row.given)).toStrictEqual([
       { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
@@ -56,12 +56,12 @@ describe("generateExamples starts from what the rows already say", () => {
 
 describe("generateExamples for classes", () => {
   it("offers a row for a class no row is in under a case some row already covers", () => {
-    const existing = examples(注文を確定する, [
-      example(注文を確定する, "クーポンなし", {
+    const existing = examples(注文を確定する, {
+      "クーポンなし": {
         given: { 状態: "商品あり", カートID: "c-1" },
         expect: unanswered(),
-      }),
-    ]);
+      },
+    });
 
     expect(generateExamples(existing)).toStrictEqual([
       {
@@ -247,12 +247,12 @@ describe("generateExamples below a length of zero", () => {
   });
 
   it("offers no row for a guard's point below a length of zero", () => {
-    const existing = examples(見出しを確かめる, [
-      example(見出しを確かめる, "一文字", {
+    const existing = examples(見出しを確かめる, {
+      "一文字": {
         given: { 状態: "入力済み", 見出し: "a" },
         expect: { result: { 結果: "受付" }, effects: [] },
-      }),
-    ]);
+      },
+    });
 
     expect(generateExamples(existing, 空を断る).map(row => row.name)).toStrictEqual([
       "見出しを確かめる: @入力済み.見出し OFF (= 0)",
@@ -278,12 +278,12 @@ describe("generateExamples for a guard on an array with no invariant", () => {
   });
 
   it("resizes the array to the length a guard point asks for", () => {
-    const existing = examples(明細を確かめる, [
-      example(明細を確かめる, "一件", {
+    const existing = examples(明細を確かめる, {
+      "一件": {
         given: { 状態: "入力済み", 明細: [1] },
         expect: { result: { 結果: "受付" }, effects: [] },
-      }),
-    ]);
+      },
+    });
 
     expect(generateExamples(existing, 空を断る).map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", 明細: [] },
@@ -308,12 +308,12 @@ describe("guard points generate cannot compose", () => {
         }),
       },
     });
-    const existing = examples(比べる, [
-      example(比べる, "上限なし", {
+    const existing = examples(比べる, {
+      "上限なし": {
         given: { 状態: "入力済み", 数量: 1 },
         expect: { result: { 結果: "受付" }, effects: [] },
-      }),
-    ]);
+      },
+    });
 
     expect(
       generationReport(existing, 上限と比べる).notComposed.filter(line =>

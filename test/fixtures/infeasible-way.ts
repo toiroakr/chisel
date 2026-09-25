@@ -35,6 +35,6 @@ const 二段 = implement(受け付ける, {
 
 export const 受付 = spec({
   name: "受付",
-  examples: examples(受け付ける, []),
+  examples: examples(受け付ける, {}),
   implementation: 二段,
 });

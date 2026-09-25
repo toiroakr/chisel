@@ -294,23 +294,28 @@ export function isUnanswered(value: unknown): value is Unanswered {
   );
 }
 
-export function example<B extends AnyBehavior>(
-  definition: B,
-  name: string,
-  value: {
-    readonly given: BehaviorInput<B>;
-    readonly with?: BehaviorWith<B>;
-    readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
-  },
-): Example<B> {
-  return { kind: "example", name, ...value };
+export interface ExampleRow<B extends AnyBehavior> {
+  readonly given: BehaviorInput<B>;
+  readonly with?: BehaviorWith<B>;
+  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
 }
 
-export function examples<
-  B extends AnyBehavior,
-  const Rows extends readonly Example<B>[],
->(behavior: B, rows: Rows): ExampleSet<B> {
-  return { kind: "example-set", behavior, rows };
+export function example<B extends AnyBehavior>(
+  _definition: B,
+  row: NoInfer<ExampleRow<B>>,
+): ExampleRow<B> {
+  return row;
+}
+
+export function examples<B extends AnyBehavior>(
+  behavior: B,
+  table: NoInfer<Readonly<Record<string, ExampleRow<B>>>>,
+): ExampleSet<B> {
+  return {
+    kind: "example-set",
+    behavior,
+    rows: Object.entries(table).map(([name, row]) => ({ kind: "example" as const, name, ...row })),
+  };
 }
 
 export function spec<B extends AnyBehavior>(options: {

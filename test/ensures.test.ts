@@ -65,12 +65,12 @@ describe("ensures", () => {
     const report = await evaluateSpecification(
       spec({
         name: "確定",
-        examples: examples(注文を確定する, [
-          example(注文を確定する, "別のカートが確定したと書いた", {
+        examples: examples(注文を確定する, {
+          "別のカートが確定したと書いた": {
             given: { 状態: "商品あり", カートID: "c-1" },
             expect: { result: { 結果: "確定", カートID: "c-2" }, effects: [] },
-          }),
-        ]),
+          },
+        }),
       }),
     );
 
@@ -84,12 +84,12 @@ describe("ensures", () => {
 
   it("holds an outside implementation to what the behavior ensures", async () => {
     const failures = await verifyConformance(
-      examples(注文を確定する, [
-        example(注文を確定する, "c-1を確定する", {
+      examples(注文を確定する, {
+        "c-1を確定する": {
           given: { 状態: "商品あり", カートID: "c-1" },
           expect: { result: { 結果: "確定", カートID: "c-1" }, effects: [] },
-        }),
-      ]),
+        },
+      }),
       () => ({ result: { 結果: "確定", カートID: "c-9" }, effects: [] }),
     );
 
@@ -131,12 +131,12 @@ describe("borders an ensures clause draws", () => {
     const report = await evaluateSpecification(
       spec({
         name: "照会",
-        examples: examples(会員を探す, [
-          example(会員を探す, "番号1の会員", {
+        examples: examples(会員を探す, {
+          "番号1の会員": {
             given: { 状態: "照会", 会員番号: 1 },
             expect: { result: { 結果: "見つかった", 会員番号: 1 }, effects: [] },
-          }),
-        ]),
+          },
+        }),
       }),
     );
 
@@ -167,7 +167,7 @@ describe("borders an ensures clause draws", () => {
       ],
     });
     const report = await evaluateSpecification(
-      spec({ name: "探す", examples: examples(探す, []) }),
+      spec({ name: "探す", examples: examples(探す, {}) }),
     );
 
     expect(report.borders).toStrictEqual([]);
@@ -266,7 +266,7 @@ describe("how much of an ensures rule the check reads", () => {
 
   async function readings() {
     const report = await evaluateSpecification(
-      spec({ name: "見積", examples: examples(見積もる, []) }),
+      spec({ name: "見積", examples: examples(見積もる, {}) }),
     );
     return report.ensures;
   }

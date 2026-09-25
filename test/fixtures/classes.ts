@@ -24,15 +24,15 @@ const 注文を確定する = behavior({
 
 export const 注文確定 = spec({
   name: "注文確定",
-  examples: examples(注文を確定する, [
-    example(注文を確定する, "クーポンなしで確定する", {
+  examples: examples(注文を確定する, {
+    "クーポンなしで確定する": {
       given: { 状態: "商品あり", カートID: "c-1" },
       expect: {
         result: { 結果: "確定", カートID: "c-1" },
         effects: [{ 種類: "決済要求", カートID: "c-1" }],
       },
-    }),
-  ]),
+    },
+  }),
   implementation: implement(注文を確定する, {
     cases: {
       商品あり: {

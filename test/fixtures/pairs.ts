@@ -9,10 +9,10 @@ const 送る = behavior({
 
 export const 送付 = spec({
   name: "送付",
-  examples: examples(送る, [
-    example(送る, "ギフトを速達で", {
+  examples: examples(送る, {
+    "ギフトを速達で": {
       given: { 状態: "入力済み", ギフト: true, 速達: true },
       expect: { result: {}, effects: [] },
-    }),
-  ]),
+    },
+  }),
 });

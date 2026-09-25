@@ -152,7 +152,7 @@ describe("chisel generate", () => {
 
     expect(result.exitCode).toBe(0);
     const stdout = stdoutOf(result);
-    expect(stdout).toMatch(/example\(cancelOrder, "cancel-order: preparing"/);
+    expect(stdout).toMatch(/^  "cancel-order: preparing": \{$/m);
     expect(stdout).toMatch(/expect: unanswered\(/);
   });
 
@@ -160,18 +160,18 @@ describe("chisel generate", () => {
     const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts")]);
 
     expect(stdoutOf(result).match(/^import .* from "chisel";$/gm)).toStrictEqual([
-      'import { spec, example, examples, unanswered } from "chisel";',
+      'import { examples, spec, unanswered } from "chisel";',
     ]);
     expect(stdoutOf(result)).toContain(
       [
-        "export const unreferencedBehaviorExamples = examples(unreferencedBehavior, [",
-        '  example(unreferencedBehavior, "unreferenced: ready", {',
+        "export const unreferencedBehaviorExamples = examples(unreferencedBehavior, {",
+        '  "unreferenced: ready": {',
         "    given: {",
         '      state: "ready",',
         '      id: "<Id>",',
         "    },",
         '    expect: unanswered("readyの期待結果を人間が決める必要があります"),',
-        "  }),",
+        "  },",
       ].join("\n"),
     );
     expect(stdoutOf(result)).toContain(
@@ -187,7 +187,7 @@ describe("chisel generate", () => {
   it("prints only rows, each with a trailing comma, for a specification that has examples", async () => {
     const result = await run(["generate", fixture("examples/order-cancellation.spec.ts")]);
 
-    expect(stdoutOf(result)).toMatch(/^  \}\),$/m);
+    expect(stdoutOf(result)).toMatch(/^  \},$/m);
     expect(stdoutOf(result)).not.toMatch(/^import /m);
   });
 

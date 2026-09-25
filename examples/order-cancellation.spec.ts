@@ -122,8 +122,8 @@ const implementation = implement(cancelOrder, {
   },
 });
 
-const cancellationExamples = examples(cancelOrder, [
-  example(cancelOrder, "cancel an unpaid order", {
+const cancellationExamples = examples(cancelOrder, {
+  "cancel an unpaid order": {
     given: { state: "unpaid", orderId: "o-1" },
     expect: {
       result: {
@@ -138,8 +138,8 @@ const cancellationExamples = examples(cancelOrder, [
         },
       ],
     },
-  }),
-  example(cancelOrder, "cancel a paid order", {
+  },
+  "cancel a paid order": {
     given: { state: "paid", orderId: "o-2", paymentId: "p-2" },
     expect: {
       result: {
@@ -159,22 +159,22 @@ const cancellationExamples = examples(cancelOrder, [
         },
       ],
     },
-  }),
-  example(cancelOrder, "reject a shipped order", {
+  },
+  "reject a shipped order": {
     given: { state: "shipped", orderId: "o-3", shipmentId: "s-3" },
     expect: {
       result: { type: "rejected", reason: "already-shipped" },
       effects: [],
     },
-  }),
-  example(cancelOrder, "reject an already cancelled order", {
+  },
+  "reject an already cancelled order": {
     given: { state: "cancelled", orderId: "o-4" },
     expect: {
       result: { type: "rejected", reason: "already-cancelled" },
       effects: [],
     },
-  }),
-]);
+  },
+});
 
 export const orderCancellation = spec({
   name: "order cancellation",

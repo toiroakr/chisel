@@ -79,7 +79,7 @@ const generateCommand = defineCommand({
   run: async args => {
     const targets = await loadTargets(args.file);
     if (targets.some(target => target.synthesized)) {
-      console.log('import { spec, example, examples, unanswered } from "chisel";\n');
+      console.log('import { examples, spec, unanswered } from "chisel";\n');
     }
     for (const target of targets) {
       const { rows: generated, notComposed } = generationReport(
@@ -141,7 +141,7 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
       behaviorBinding: binding,
       specification: spec({
         name: definition.name,
-        examples: examples(definition, []),
+        examples: examples(definition, {}),
       }),
       synthesized: true,
     });
@@ -405,13 +405,13 @@ function formatGeneratedExamples(
     return `${binding}: 未網羅の入力variantはありません`;
   }
 
-  const rows = generated.map(row => `${formatGeneratedExample(binding, row)},\n`).join("");
+  const rows = generated.map(row => `${formatGeneratedExample(row)},\n`).join("");
   if (!target.synthesized) {
     return rows.trimEnd();
   }
 
   return [
-    `export const ${binding}Examples = examples(${binding}, [\n${rows}]);`,
+    `export const ${binding}Examples = examples(${binding}, {\n${rows}});`,
     "",
     `export const ${binding}Specification = spec({`,
     `  name: ${JSON.stringify(target.specification.name)},`,
@@ -420,16 +420,13 @@ function formatGeneratedExamples(
   ].join("\n");
 }
 
-function formatGeneratedExample(
-  binding: string,
-  generated: GeneratedExample,
-): string {
+function formatGeneratedExample(generated: GeneratedExample): string {
   const given = indent(formatTypeScriptValue(generated.given), 4);
   const written =
     generated.with === undefined
       ? ""
       : `\n    with: ${indent(formatTypeScriptValue(generated.with), 4).trimStart()},`;
-  return `  example(${binding}, ${JSON.stringify(generated.name)}, {\n    given: ${given.trimStart()},${written}\n    expect: unanswered(${JSON.stringify(generated.reason)}),\n  })`;
+  return `  ${JSON.stringify(generated.name)}: {\n    given: ${given.trimStart()},${written}\n    expect: unanswered(${JSON.stringify(generated.reason)}),\n  }`;
 }
 
 function indent(value: string, spaces: number): string {

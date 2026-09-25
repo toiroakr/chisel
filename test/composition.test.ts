@@ -158,20 +158,20 @@ describe("running a composition", () => {
 });
 
 describe("the adequacy of a composition", () => {
-  const 行 = [
-    example(見積もる, "2個", {
+  const 行 = examples(見積もる, {
+    "2個": {
       given: { 状態: "申込", 数量: 2 },
       expect: { result: { 結果: "見積", 金額: 200 }, effects: [{ 種類: "通知", 金額: 200 }] },
-    }),
-    example(見積もる, "0個は無効", {
+    },
+    "0個は無効": {
       given: { 状態: "申込", 数量: 0 },
       expect: { result: { 結果: "無効", 理由: "数量なし" }, effects: [] },
-    }),
-  ];
+    },
+  });
 
   it("is measured over the composition's own cases, including one that departed early", async () => {
     const report = await evaluateSpecification(
-      spec({ name: "見積", examples: examples(見積もる, 行), implementation: 見積もり }),
+      spec({ name: "見積", examples: 行, implementation: 見積もり }),
     );
 
     expect({
@@ -201,9 +201,9 @@ describe("a composition row whose answer is owed", () => {
     const report = await evaluateSpecification(
       spec({
         name: "見積",
-        examples: examples(見積もる, [
-          example(見積もる, "3個", { given: { 状態: "申込", 数量: 3 }, expect: unanswered("未定") }),
-        ]),
+        examples: examples(見積もる, {
+          "3個": { given: { 状態: "申込", 数量: 3 }, expect: unanswered("未定") },
+        }),
         implementation: 見積もり,
       }),
     );

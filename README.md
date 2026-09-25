@@ -53,11 +53,11 @@ export const cancelOrder = behavior({
 chisel generate ./cancel-order.spec.ts
 ```
 
-Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `spec` wraps yet, the output also carries the `import` line and a `spec` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` array.
+Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `spec` wraps yet, the output also carries the `import` line and a `spec` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` table.
 
 ```ts
-export const cancelOrderExamples = examples(cancelOrder, [
-  example(cancelOrder, "cancel-order: unpaid", {
+export const cancelOrderExamples = examples(cancelOrder, {
+  "cancel-order: unpaid": {
     given: {
       state: "unpaid",
       orderId: "<OrderId>",
@@ -65,8 +65,8 @@ export const cancelOrderExamples = examples(cancelOrder, [
     expect: unanswered(
       "Expected result for unpaid must be decided by a human",
     ),
-  }),
-  example(cancelOrder, "cancel-order: paid", {
+  },
+  "cancel-order: paid": {
     given: {
       state: "paid",
       orderId: "<OrderId>",
@@ -75,33 +75,37 @@ export const cancelOrderExamples = examples(cancelOrder, [
     expect: unanswered(
       "Expected result for paid must be decided by a human",
     ),
-  }),
-]);
+  },
+});
 ```
 
 ## 3. Fill expectations
 
-A human replaces `unanswered()` with the expected result and effect trace.
+A human replaces `unanswered()` with the expected result and effect trace. `examples(behavior, { name: row })` is a table keyed by the row's name, which the report uses to point at a row; two rows with one name do not compile. Each row's `given` and `expect` are typed by the behavior, so a row that no longer fits the model fails to compile.
 
 ```ts
-example(cancelOrder, "cancel a paid order", {
-  given: {
-    state: "paid",
-    orderId: "o-1",
-    paymentId: "p-1",
-  },
-  expect: {
-    result: {
-      type: "accepted",
+export const cancelOrderExamples = examples(cancelOrder, {
+  "cancel a paid order": {
+    given: {
+      state: "paid",
       orderId: "o-1",
+      paymentId: "p-1",
     },
-    effects: [
-      { type: "refund", paymentId: "p-1" },
-      { type: "restock", orderId: "o-1" },
-    ],
+    expect: {
+      result: {
+        type: "accepted",
+        orderId: "o-1",
+      },
+      effects: [
+        { type: "refund", paymentId: "p-1" },
+        { type: "restock", orderId: "o-1" },
+      ],
+    },
   },
 });
 ```
+
+To build a row outside the table (a helper, or a row shared by several specifications), `example(behavior, { given, expect })` types it by the behavior, and it is put in a table under a name: `examples(cancelOrder, { "paid": paidRow })`. Rows are kept in the order written, except that names which are plain integers (`"1"`, `"100"`) come first, as JavaScript orders such keys.
 
 Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants, classes and border points, each composed from an answered row with only the position in question moved.
 
@@ -246,7 +250,7 @@ const quote = compose(validate, price); // validate: order -> valid | invalid, p
 
 export const quoteSpec = spec({
   name: "quote",
-  examples: examples(quote, [/* rows expecting quoted, and invalid */]),
+  examples: examples(quote, { /* rows expecting quoted, and invalid */ }),
   implementation: implementComposition(quote, validateImpl, priceImpl),
 });
 ```
