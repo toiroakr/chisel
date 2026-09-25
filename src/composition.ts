@@ -13,7 +13,7 @@ import type {
   VariantsSchema,
   VariantTable,
 } from "./schema.js";
-import { isVariantsSchema, variants } from "./schema.js";
+import { isVariantsSchema, literal, variants } from "./schema.js";
 
 type Stages = readonly [AnyBehavior, AnyBehavior, ...AnyBehavior[]];
 
@@ -147,7 +147,9 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
       throw new SpecificationError(
         mismatch.reason === "undeclared"
           ? `${first.name} answers ${mismatch.path}, which ${second.name} does not declare`
-          : `${first.name} does not always answer ${mismatch.path}, which ${second.name} requires`,
+          : mismatch.reason === "missing"
+            ? `${first.name} does not always answer ${mismatch.path}, which ${second.name} requires`
+            : `${first.name} answers ${mismatch.path} as ${mismatch.answered}, which ${second.name} takes as ${mismatch.taken}`,
       );
     }
   }
@@ -174,10 +176,10 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
   };
 }
 
-interface Mismatch {
-  readonly path: string;
-  readonly reason: "undeclared" | "missing";
-}
+type Mismatch =
+  | { readonly path: string; readonly reason: "undeclared" }
+  | { readonly path: string; readonly reason: "missing" }
+  | { readonly path: string; readonly reason: "incompatible"; readonly answered: string; readonly taken: string };
 
 function undeclared(path: string): Mismatch {
   return { path, reason: "undeclared" };
@@ -185,6 +187,37 @@ function undeclared(path: string): Mismatch {
 
 function missing(path: string): Mismatch {
   return { path, reason: "missing" };
+}
+
+function incompatible(path: string, answered: string, taken: string): Mismatch {
+  return { path, reason: "incompatible", answered, taken };
+}
+
+function takes(answered: AnySchema, taken: AnySchema): boolean {
+  if (answered.kind === "literal") {
+    const value = (answered as LiteralSchema<string | number | boolean | null>).value;
+    switch (taken.kind) {
+      case "literal":
+        return (taken as LiteralSchema<string | number | boolean | null>).value === value;
+      case "string":
+        return typeof value === "string";
+      case "number":
+        return typeof value === "number";
+      case "integer":
+        return Number.isInteger(value);
+      case "boolean":
+        return typeof value === "boolean";
+      default:
+        return false;
+    }
+  }
+  return answered.kind === taken.kind || (answered.kind === "integer" && taken.kind === "number");
+}
+
+function kindOf(schema: AnySchema): string {
+  return schema.kind === "literal"
+    ? `literal ${JSON.stringify((schema as LiteralSchema<string | number | boolean | null>).value)}`
+    : schema.kind;
 }
 
 function mismatchOf(
@@ -243,24 +276,45 @@ function mismatchOf(
     );
   }
   if (answered.kind === "object" && isVariantsSchema(taken)) {
-    const named = (answered as ObjectSchema<ObjectShape>).shape[taken.discriminant];
+    const answeredShape = (answered as ObjectSchema<ObjectShape>).shape;
+    const named = Object.hasOwn(answeredShape, taken.discriminant) ? answeredShape[taken.discriminant] : undefined;
     if (named === undefined || named.kind === "optional") {
       return missing(`${path}.${taken.discriminant}`);
     }
-    if (named.kind !== "literal") {
-      return undefined;
+    const tag = named.kind === "literal" ? (named as LiteralSchema<string | number | boolean | null>).value : undefined;
+    if (typeof tag !== "string") {
+      return incompatible(
+        `${path}.${taken.discriminant}`,
+        kindOf(named),
+        taken.variantTags.map(each => JSON.stringify(each)).join(" | "),
+      );
     }
-    const tag = String((named as LiteralSchema<string>).value);
     return taken.variantTags.includes(tag)
       ? mismatchOf(answered, taken.variants[tag], path, taken.discriminant)
       : undeclared(`${path}@${tag}`);
   }
   if (isVariantsSchema(answered) && taken.kind === "object") {
-    return Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)
-      ? firstFound(answered.variantTags, tag =>
-          mismatchOf(answered.variants[tag], taken, `${path}@${tag}`, answered.discriminant),
-        )
-      : undeclared(`${path}.${answered.discriminant}`);
+    const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
+    const takenDiscriminant = Object.hasOwn(takenShape, answered.discriminant)
+      ? takenShape[answered.discriminant]
+      : undefined;
+    return takenDiscriminant === undefined
+      ? undeclared(`${path}.${answered.discriminant}`)
+      : firstFound(
+          answered.variantTags,
+          tag =>
+            mismatchOf(literal(tag), takenDiscriminant, `${path}@${tag}.${answered.discriminant}`) ??
+            mismatchOf(answered.variants[tag], taken, `${path}@${tag}`, answered.discriminant),
+        );
+  }
+  if (isVariantsSchema(answered) && taken.kind === "record") {
+    const value = (taken as RecordSchema<unknown>).value as AnySchema;
+    return firstFound(
+      answered.variantTags,
+      tag =>
+        mismatchOf(literal(tag), value, `${path}@${tag}.${answered.discriminant}`) ??
+        mismatchOf(answered.variants[tag], taken, `${path}@${tag}`),
+    );
   }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
     if (answered.discriminant !== taken.discriminant) {
@@ -272,7 +326,7 @@ function mismatchOf(
         : undeclared(`${path}@${tag}`),
     );
   }
-  return undefined;
+  return takes(answered, taken) ? undefined : incompatible(path, kindOf(answered), kindOf(taken));
 }
 
 function firstFound<T, R>(items: readonly T[], find: (item: T) => R | undefined): R | undefined {

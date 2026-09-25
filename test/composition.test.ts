@@ -15,6 +15,7 @@ import {
   implement,
   int,
   literal,
+  number,
   object,
   optional,
   record,
@@ -268,6 +269,94 @@ describe("compose", () => {
     });
   });
 
+  describe("refusing a value of a type the second stage does not take", () => {
+    const 段 = (answered: AnySchema, taken: AnySchema) =>
+      [
+        external(
+          behavior("返す", {
+            input: variants("状態", { 申込: object({}) }),
+            result: variants("結果", { 有効: object({ 値: answered }) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+        external(
+          behavior("受け取る", {
+            input: variants("結果", { 有効: object({ 値: taken }) }),
+            result: variants("結果", { 見積: object({}) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+      ] as const;
+
+    it("refuses a leaf of another type", () => {
+      expect(() => compose("型違い", 段(array(int()), array(string("文字列"))))).toThrow(
+        new SpecificationError("返す answers @有効.値[] as integer, which 受け取る takes as string"),
+      );
+    });
+
+    it("refuses a container of another kind", () => {
+      expect(() => compose("配列を object で", 段(array(int()), object({})))).toThrow(
+        new SpecificationError("返す answers @有効.値 as array, which 受け取る takes as object"),
+      );
+    });
+
+    it("accepts a literal where the second stage takes its type", () => {
+      expect(() => compose("リテラルを文字列で", 段(literal("現金"), string("方法")))).not.toThrow();
+    });
+
+    it("refuses a string where the second stage takes one literal", () => {
+      expect(() => compose("文字列をリテラルで", 段(string("方法"), literal("現金")))).toThrow(
+        new SpecificationError('返す answers @有効.値 as string, which 受け取る takes as literal "現金"'),
+      );
+    });
+
+    it("refuses a literal of another value", () => {
+      expect(() => compose("別のリテラル", 段(literal("カード"), literal("現金")))).toThrow(
+        new SpecificationError('返す answers @有効.値 as literal "カード", which 受け取る takes as literal "現金"'),
+      );
+    });
+
+    it("accepts an integer where the second stage takes a number", () => {
+      expect(() => compose("整数を数値で", 段(int(), number()))).not.toThrow();
+    });
+
+    it("refuses a number where the second stage takes an integer, since it may not be whole", () => {
+      expect(() => compose("数値を整数で", 段(number(), int()))).toThrow(
+        new SpecificationError("返す answers @有効.値 as number, which 受け取る takes as integer"),
+      );
+    });
+
+    it("refuses a case of an answered sum whose tag the object's discriminant literal does not take", () => {
+      expect(() =>
+        compose("カードを現金で", 段(variants("方法", { カード: object({}) }), object({ 方法: literal("現金") }))),
+      ).toThrow(new SpecificationError('返す answers @有効.値@カード.方法 as literal "カード", which 受け取る takes as literal "現金"'));
+    });
+
+    it("accepts a sum where the second stage takes a record whose value every tag and field fits", () => {
+      expect(() =>
+        compose("sum を表で", 段(variants("方法", { カード: object({ 番号: string("番号") }) }), record(string("値")))),
+      ).not.toThrow();
+    });
+
+    it("refuses a sum where a case carries a field the record's value does not take", () => {
+      expect(() =>
+        compose("sum を数値の表で", 段(variants("方法", { カード: object({ 回数: int() }) }), record(string("値")))),
+      ).toThrow(new SpecificationError("返す answers @有効.値@カード.回数 as integer, which 受け取る takes as string"));
+    });
+
+    it("refuses a record where the second stage takes an object, since a record may carry any key", () => {
+      expect(() => compose("表を object で", 段(record(int()), object({ 数量: optional(int()) })))).toThrow(
+        new SpecificationError("返す answers @有効.値 as record, which 受け取る takes as object"),
+      );
+    });
+
+    it("leaves invariants to run time", () => {
+      expect(() => compose("範囲は実行時", 段(int(), int().invariant(v => gte(v, 1))))).not.toThrow();
+    });
+  });
+
   it("refuses a nested sum whose discriminant the second stage names differently", () => {
     const 方法で返す = behavior("方法で返す", {
       input: variants("状態", { 申込: object({}) }),
@@ -386,8 +475,41 @@ describe("compose", () => {
       );
     });
 
-    it("accepts an object whose discriminant is not a literal, since its case is only known at run time", () => {
-      expect(() => compose("方法は文字列", 段(object({ 方法: string("方法"), 暗証: string("暗証") })))).not.toThrow();
+    it("refuses an object whose discriminant is a string, which may name no case", () => {
+      expect(() => compose("方法は文字列", 段(object({ 方法: string("方法"), 番号: string("番号") })))).toThrow(
+        new SpecificationError('object で返す answers @有効.支払.方法 as string, which sum で受け取る takes as "現金" | "カード"'),
+      );
+    });
+
+    it("refuses an object whose discriminant is a literal that is not a string, which never names a case", () => {
+      expect(() => compose("方法は数値", 段(object({ 方法: literal(1) })))).toThrow(
+        new SpecificationError('object で返す answers @有効.支払.方法 as literal 1, which sum で受け取る takes as "現金" | "カード"'),
+      );
+    });
+
+    it("does not read a discriminant named like an Object.prototype member from the prototype", () => {
+      const [返す, 受け取る] = [
+        external(
+          behavior("構築子なしで返す", {
+            input: variants("状態", { 申込: object({}) }),
+            result: variants("結果", { 有効: object({ 支払: object({}) }) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+        external(
+          behavior("構築子で受け取る", {
+            input: variants("結果", { 有効: object({ 支払: variants("constructor", { 現金: object({}) }) }) }),
+            result: variants("結果", { 見積: object({}) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+      ];
+
+      expect(() => compose("構築子", [返す, 受け取る])).toThrow(
+        new SpecificationError("構築子なしで返す does not always answer @有効.支払.constructor, which 構築子で受け取る requires"),
+      );
     });
   });
 
