@@ -367,6 +367,12 @@ describe("compose", () => {
     it("leaves invariants to run time", () => {
       expect(() => compose("範囲は実行時", 段(int(), int().invariant(v => gte(v, 1))))).not.toThrow();
     });
+
+    it("parses a literal with the second stage's schema, invariants included, since it has one value", () => {
+      expect(() => compose("範囲外のリテラル", 段(literal(0), int().invariant(v => gte(v, 1))))).toThrow(
+        new SpecificationError("返す answers @有効.値 as literal 0, which 受け取る takes as integer"),
+      );
+    });
   });
 
   it("refuses a nested sum whose discriminant the second stage names differently", () => {
