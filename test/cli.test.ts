@@ -143,6 +143,16 @@ describe("chisel check with a composition", () => {
   });
 });
 
+describe("chisel check with an external implementation", () => {
+  it("prints each row it could not run and why", async () => {
+    const result = await run(["check", fixture("test/fixtures/external.ts")]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^  ! 実行できなかった行: 商品Aは10個 — 外部の段のため実行できない（在庫を照会する: 在庫サービスが答える）$/m,
+    );
+  });
+});
+
 describe("chisel generate", () => {
   it("prints ready-to-paste example rows for uncovered input variants", async () => {
     const result = await run([
@@ -176,9 +186,23 @@ describe("chisel generate", () => {
     );
     expect(stdoutOf(result)).toContain(
       [
+        "export const unreferencedBehaviorImplementation = c.implement(unreferencedBehavior, {",
+        "  cases: {",
+        '    ready: c.todo("readyの判断を決める必要があります"),',
+        '    archived: c.todo("archivedの判断を決める必要があります"),',
+        "  },",
+        "  controls: {",
+        '    none: c.todo("noneの制御を決める必要があります"),',
+        "  },",
+        "});",
+      ].join("\n"),
+    );
+    expect(stdoutOf(result)).toContain(
+      [
         "export const unreferencedBehaviorSpecification = c.spec({",
         '  name: "unreferenced",',
         "  examples: unreferencedBehaviorExamples,",
+        "  implementation: unreferencedBehaviorImplementation,",
         "});",
       ].join("\n"),
     );

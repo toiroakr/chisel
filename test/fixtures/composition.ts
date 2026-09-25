@@ -28,8 +28,6 @@ const 価格を付ける = behavior({
   effects: variants("種類", {}),
 });
 
-export const 見積もる = compose("見積もる", 検証する, 価格を付ける);
-
 const 検証するの実装 = implement(検証する, {
   cases: {
     申込: action("数量を確かめる", {
@@ -49,6 +47,8 @@ const 価格を付けるの実装 = implement(価格を付ける, {
   },
 });
 
+export const [見積もる, 見積もるの実装] = compose("見積もる", [検証するの実装, 価格を付けるの実装]);
+
 export const 見積 = spec({
   name: "見積",
   examples: examples(見積もる, {
@@ -57,5 +57,5 @@ export const 見積 = spec({
       expect: { result: { 結果: "見積", 金額: 200 }, effects: [] },
     },
   }),
-  implementation: implement(見積もる, { stages: [検証するの実装, 価格を付けるの実装] }),
+  implementation: 見積もるの実装,
 });

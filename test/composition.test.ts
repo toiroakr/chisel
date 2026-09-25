@@ -9,6 +9,7 @@ import {
   check,
   example,
   examples,
+  external,
   implement,
   int,
   object,
@@ -37,7 +38,6 @@ const 価格を付ける = behavior({
   effects: variants("種類", { 通知: object({ 金額: int() }) }),
 });
 
-const 見積もる = compose("見積もる", 検証する, 価格を付ける);
 
 const 検証するの実装 = implement(検証する, {
   cases: {
@@ -64,7 +64,7 @@ const 価格を付けるの実装 = implement(価格を付ける, {
   },
 });
 
-const 見積もるの実装 = implement(見積もる, { stages: [検証するの実装, 価格を付けるの実装] });
+const [見積もる, 見積もるの実装] = compose("見積もる", [検証するの実装, 価格を付けるの実装]);
 
 describe("compose", () => {
   it("takes the first stage's input and answers the cases the second stage did not consume beside its own", () => {
@@ -89,7 +89,7 @@ describe("compose", () => {
       effects: variants("種類", {}),
     });
 
-    expect(() => compose("別物につなぐ", 検証する, 別物)).toThrow(
+    expect(() => compose("別物につなぐ", [検証するの実装, external(別物, "別のチーム")])).toThrow(
       new SpecificationError("別物 receives none of the cases 検証する answers"),
     );
   });
@@ -102,7 +102,7 @@ describe("compose", () => {
       effects: variants("種類", {}),
     });
 
-    expect(() => compose("無効も返す合成", 検証する, 無効も返す)).toThrow(
+    expect(() => compose("無効も返す合成", [検証するの実装, external(無効も返す, "別のチーム")])).toThrow(
       new SpecificationError(
         "無効 departs 検証する and is answered by 無効も返す; a value cannot say which rail it is on",
       ),
@@ -141,11 +141,11 @@ describe("running a composition", () => {
         無効: { kind: "decision", id: "無効を完了", run: () => ({ result: { 結果: "完了" }, effects: [] }) },
       },
     });
-    const 三段 = compose("三段", 検証する, 価格を付ける, 無効を受ける);
+    const [三段, 三段の実装] = compose("三段", [検証するの実装, 価格を付けるの実装, 無効を受けるの実装]);
 
     expect({
       result: 三段.result.variantTags,
-      answer: await perform(implement(三段, { stages: [検証するの実装, 価格を付けるの実装, 無効を受けるの実装] }), {
+      answer: await perform(三段の実装, {
         状態: "申込",
         数量: 0,
       }),
@@ -227,33 +227,20 @@ describe("composing a composition", () => {
         無効: action("無効を完了", { run: () => ({ result: { 結果: "完了" as const }, effects: [] }) }),
       },
     });
-    const 入れ子 = compose("入れ子", 見積もる, 無効を受ける);
 
     expect(
-      await perform(implement(入れ子, { stages: [見積もるの実装, 無効を受けるの実装] }), {
+      await perform(compose("入れ子", [見積もるの実装, 無効を受けるの実装])[1], {
         状態: "申込",
         数量: 2,
       }),
     ).toStrictEqual({ result: { 結果: "完了" }, effects: [{ 種類: "通知", 金額: 200 }] });
   });
 
-  it("refuses implementations that are not of its stages", () => {
-    expect(() =>
-      implement(見積もる, { stages: [価格を付けるの実装, 検証するの実装] as never }),
-    ).toThrow(new SpecificationError("The implementations do not implement the stages of 見積もる"));
-  });
 });
 
-describe("the stages an implementation is given", () => {
-  it("must be one implementation per stage, in order, at compile time", () => {
-    // @ts-expect-error 見積もる has two stages
-    expect(() => implement(見積もる, { stages: [検証するの実装] })).toThrow(SpecificationError);
-  });
-
-  it("belong only to a composition", () => {
-    // @ts-expect-error 検証する is not a composition
-    expect(() => implement(検証する, { stages: [検証するの実装] })).toThrow(
-      new SpecificationError("検証する is not a composition, so it has no stages"),
-    );
+describe("the stages a composition is given", () => {
+  it("are at least two, at compile time", () => {
+    // @ts-expect-error a composition needs two stages or more
+    expect(() => compose("一段", [検証するの実装])).toThrow(SpecificationError);
   });
 });

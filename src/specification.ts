@@ -358,6 +358,18 @@ export async function check(
     ...(row.with ?? {}),
   });
   const incompleteness: Incompleteness[] = [];
+  const externals = externalsIn(specification.implementation);
+  const notRunFor = (row: Example<AnyBehavior>): boolean => {
+    if (externals.length === 0) {
+      return false;
+    }
+    incompleteness.push({
+      kind: "row not run",
+      subject: row.name,
+      reason: `外部の段のため実行できない（${externals.join("、")}）`,
+    });
+    return true;
+  };
   const unstoodFor = (row: Example<AnyBehavior>): string | undefined => {
     const written = (row.with ?? {}) as Readonly<Record<string, unknown>>;
     for (const [name, value] of Object.entries(written)) {
@@ -418,6 +430,9 @@ export async function check(
           ? undefined
           : implementation.cases[inputTag];
       const unstoodOwed = unstoodFor(row);
+      if (implementation !== undefined && notRunFor(row)) {
+        continue;
+      }
       if (implementation !== undefined && unstoodOwed !== undefined) {
         failures.push({ name: row.name, message: unstoodOwed });
         incompleteness.push({ kind: "row not run", subject: row.name, reason: unstoodOwed });
@@ -484,6 +499,9 @@ export async function check(
 
     const implementation = specification.implementation;
     const unstood = unstoodFor(row);
+    if (implementation !== undefined && notRunFor(row)) {
+      continue;
+    }
     if (implementation !== undefined && unstood !== undefined) {
       failures.push({ name: row.name, message: unstood });
       incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
@@ -730,7 +748,7 @@ export async function check(
   const verdict: Verdict =
     !adequate || armGap
       ? "not_satisfied"
-      : comparisons.status === "partial" || armUndecided
+      : comparisons.status === "partial" || armUndecided || externals.length > 0
         ? "undetermined"
         : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")
@@ -1121,6 +1139,9 @@ function measureRules(
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
   }
+  if (implementation.external !== undefined) {
+    return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
+  }
   const decisions = Object.values(implementation.cases);
   const notRead = decisions.flatMap(decision =>
     decision.kind === "decision" ? [decision.id] : [],
@@ -1156,6 +1177,9 @@ function measureArms(
 ): Measure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
+  }
+  if (implementation.external !== undefined) {
+    return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
   const decisions = Object.values(implementation.cases);
   const notRead = decisions.flatMap(decision =>
@@ -1215,6 +1239,18 @@ function measureArms(
   return arms.length === 0
     ? { status: "unavailable", reason: "not measured", notRead }
     : { status: "partial", arms, notRead };
+}
+
+function externalsIn(implementation: AnyImplementation | undefined): string[] {
+  if (implementation === undefined) {
+    return [];
+  }
+  if (implementation.external !== undefined) {
+    return [`${implementation.behavior.name}: ${implementation.external.reason}`];
+  }
+  return implementation.pipeline === undefined
+    ? []
+    : implementation.pipeline.flatMap(stage => externalsIn(stage));
 }
 
 function unmetStatus(

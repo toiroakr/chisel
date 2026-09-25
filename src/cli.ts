@@ -8,7 +8,7 @@ import { tsImport } from "tsx/esm/api";
 import * as v from "valibot";
 import { isBehavior } from "./behavior.js";
 import type { AnyBehavior } from "./behavior.js";
-import { formatTypeScriptValue } from "./codegen.js";
+import { formatKey, formatTypeScriptValue } from "./codegen.js";
 import {
   spec,
   check,
@@ -191,6 +191,11 @@ function formatReport(report: AdequacyReport): string {
   for (const issue of report.dependencyIssues) {
     const scope = issue.variant === undefined ? "behavior" : issue.variant;
     lines.push(`  ! 依存関係の誤り (${scope}): ${issue.reason}`);
+  }
+  for (const item of report.incompleteness) {
+    if (!report.failures.some(failure => failure.name === item.subject)) {
+      lines.push(`  ! 実行できなかった行: ${item.subject} — ${item.reason}`);
+    }
   }
   for (const issue of report.modelIssues) {
     lines.push(`  ! モデルの誤り: ${issue}`);
@@ -407,15 +412,35 @@ function formatGeneratedExamples(
 
   const rows = generated.map(row => `${formatGeneratedExample(row)},\n`).join("");
   if (!target.synthesized) {
-    return rows.trimEnd();
+    return target.specification.implementation === undefined
+      ? `${rows.trimEnd()}\n\n${formatImplementationScaffold(target)}`
+      : rows.trimEnd();
   }
 
   return [
     `export const ${binding}Examples = c.examples(${binding}, {\n${rows}});`,
     "",
+    formatImplementationScaffold(target),
+    "",
     `export const ${binding}Specification = c.spec({`,
     `  name: ${JSON.stringify(target.specification.name)},`,
     `  examples: ${binding}Examples,`,
+    `  implementation: ${binding}Implementation,`,
+    "});",
+  ].join("\n");
+}
+
+function formatImplementationScaffold(target: LoadedTarget): string {
+  const definition = target.specification.examples.behavior;
+  const entries = (tags: readonly string[], what: string) =>
+    tags.map(tag => `    ${formatKey(tag)}: c.todo(${JSON.stringify(`${tag}の${what}を決める必要があります`)}),`);
+  const controls = definition.effects.variantTags;
+  return [
+    `export const ${target.behaviorBinding}Implementation = c.implement(${target.behaviorBinding}, {`,
+    "  cases: {",
+    ...entries(definition.input.variantTags, "判断"),
+    "  },",
+    ...(controls.length === 0 ? [] : ["  controls: {", ...entries(controls, "制御"), "  },"]),
     "});",
   ].join("\n");
 }

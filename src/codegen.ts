@@ -40,7 +40,7 @@ function format(value: unknown, level: number): string {
   throw new TypeError(`Cannot format ${typeof value} as TypeScript`);
 }
 
-function formatKey(key: string): string {
+export function formatKey(key: string): string {
   return /^[\p{ID_Start}$_][\p{ID_Continue}$\u200C\u200D]*$/u.test(key) ? key : JSON.stringify(key);
 }
 

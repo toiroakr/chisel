@@ -64,6 +64,7 @@ export type {
 export {
   action,
   behavior,
+  external,
   guard,
   implement,
   isBehavior,
@@ -140,4 +141,4 @@ export type { EnsuresClassification, EnsuresReading, EnsuresReport } from "./ens
 export { reportDocument, reportSchemaVersion } from "./report-json.js";
 export type { ReportSource, Weakening } from "./report-json.js";
 export { compose, isComposition } from "./composition.js";
-export type { Composition, StageImplementations } from "./composition.js";
+export type { Composition } from "./composition.js";

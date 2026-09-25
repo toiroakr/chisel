@@ -55,7 +55,7 @@ export const cancelOrder = c.behavior({
 chisel generate ./cancel-order.spec.ts
 ```
 
-Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `spec` wraps yet, the output also carries the `import` line and a `spec` block to paste after the behavior; for one that has a specification, only the rows are printed, ready to go into its `examples(...)` table.
+Chisel emits TypeScript rows for every uncovered input variant, then for every class and border point no row stands in yet (see [Analysis](#analysis)). The rows are written the way hand-written examples are (bare keys where the key is an identifier, trailing commas), so they paste as they are. For a behavior no `spec` wraps yet, the output also carries the `import` line, an implementation whose every case and control is `c.todo(...)`, and a `spec` block to paste after the behavior (a specification with no implementation gets the implementation scaffold too); for one that has a specification, only the rows are printed, ready to go into its `examples(...)` table.
 
 ```ts
 export const cancelOrderExamples = c.examples(cancelOrder, {
@@ -244,17 +244,12 @@ Every answer an example writes, the model produces or a conformance subject retu
 
 ## Composition
 
-A behavior declares what goes in and what comes out; `implement` supplies how. Composition follows the same split. `c.compose(name, first, second, ...more)` declares a new behavior that connects others the way Souther's `>->` does: of the cases a stage answers, those the next stage takes as input flow on to it, and the rest depart the main line and are answered as they are. `c.implement(composition, { stages: [...] })` then supplies how, from one implementation per stage.
+`c.compose(name, [firstImplementation, secondImplementation, ...more])` connects behaviors the way Souther's `>->` does: of the cases a stage answers, those the next stage takes as input flow on to it, and the rest depart the main line and are answered as they are. It takes the stages' implementations and returns the composition's declaration and its implementation together.
 
 ```ts
-const validate = c.behavior({ /* order -> valid | invalid */ });
-const price = c.behavior({ /* valid -> quoted */ });
-
-const quote = c.compose("quote", validate, price); // order -> invalid | quoted
-
-const quoteImplementation = c.implement(quote, {
-  stages: [validateImplementation, priceImplementation],
-});
+const [quote, quoteImplementation] = c.compose("quote", [validateImplementation, priceImplementation]);
+// validate: order -> valid | invalid, price: valid -> quoted
+// quote: order -> invalid | quoted
 
 export const quoteSpec = c.spec({
   name: "quote",
@@ -263,7 +258,9 @@ export const quoteSpec = c.spec({
 });
 ```
 
-The composition is an ordinary behavior, so it is given examples and a specification like any other, and a row may expect a case that departed at an early stage, which no stage's own examples can state. A stage may itself be a composition, implemented by its own implementation. The stages must name their cases by one discriminant; a case that would both depart one stage and be answered by a later one is refused, since a value cannot say which rail it is on. A departed case stays departed through the later stages. Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
+A stage need not be written yet: `generate` prints an implementation whose every case is `c.todo(...)`, so a composition can be declared and given examples before any stage is implemented. A stage Chisel will never run, one answered by another service, is `c.external(behavior, reason)`: it is not `todo` (nothing is owed), and `check` reports the rows it cannot run (`incompleteness`, printed as rows it could not run) and leaves the verdict `undetermined`; the production code is checked with `c.test` instead.
+
+The composition is an ordinary behavior, so a row may expect a case that departed at an early stage, which no stage's own examples can state. A stage may itself be a composition's implementation. The stages must name their cases by one discriminant; a case that would both depart one stage and be answered by a later one is refused, since a value cannot say which rail it is on. A departed case stays departed through the later stages. Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
 
 ## Conformance
 

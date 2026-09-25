@@ -45,14 +45,17 @@ type Folded<Acc extends AnyBehavior, Rest extends readonly AnyBehavior[]> = Rest
   ? Folded<Joined<Acc, Next>, Others>
   : Acc;
 
-type Tail<T extends readonly unknown[]> = T extends readonly [unknown, ...infer Rest] ? Rest : [];
+export type Composition<S extends readonly AnyBehavior[]> = S extends readonly [
+  infer Head extends AnyBehavior,
+  ...infer Rest extends readonly AnyBehavior[],
+]
+  ? Folded<Head, Rest> & { readonly stages: S }
+  : never;
 
-export type Composition<S extends Stages> = Folded<S[0], Tail<S>> & {
-  readonly stages: S;
-};
+type Implementations = readonly [AnyImplementation, AnyImplementation, ...AnyImplementation[]];
 
-export type StageImplementations<S extends readonly AnyBehavior[]> = {
-  readonly [K in keyof S]: Implementation<S[K]>;
+type BehaviorsOf<I extends readonly AnyImplementation[]> = {
+  readonly [K in keyof I]: I[K] extends Implementation<infer B> ? B : never;
 };
 
 interface Joint {
@@ -60,47 +63,49 @@ interface Joint {
   readonly departed: readonly string[];
 }
 
-export function compose<const S extends Stages>(name: string, ...stages: S): Composition<S> {
-  const [head, ...rest] = stages;
-  const chain: (AnyBehavior & Joint)[] = [];
-  let joined: AnyBehavior = head;
+export function compose<const I extends Implementations>(
+  name: string,
+  implementations: I,
+): readonly [
+  Composition<BehaviorsOf<I>>,
+  Implementation<Composition<BehaviorsOf<I>>>,
+] {
+  if (implementations.length < 2) {
+    throw new SpecificationError(`${name} needs two stages or more`);
+  }
+  const [first, ...rest] = implementations as unknown as [AnyImplementation, ...AnyImplementation[]];
+  let behavior: AnyBehavior = first.behavior;
+  let implementation: AnyImplementation = first;
   rest.forEach((next, index) => {
-    joined = join(joined, next, index === rest.length - 1 ? name : `${joined.name} >-> ${next.name}`);
-    chain.push(joined as AnyBehavior & Joint);
+    behavior = join(
+      behavior,
+      next.behavior,
+      index === rest.length - 1 ? name : `${behavior.name} >-> ${next.behavior.name}`,
+    );
+    implementation = {
+      kind: "implementation",
+      behavior,
+      cases: {} as AnyImplementation["cases"],
+      controls: { ...implementation.controls, ...next.controls },
+      pipeline: [implementation, next],
+    };
   });
-  return { ...joined, stages, chain } as unknown as Composition<S>;
+  const composition = {
+    ...behavior,
+    stages: implementations.map(item => item.behavior),
+  } as unknown as Composition<BehaviorsOf<I>>;
+  return [
+    composition,
+    { ...implementation, behavior: composition } as unknown as Implementation<
+      Composition<BehaviorsOf<I>>
+    >,
+  ];
 }
 
 export function isComposition(
   definition: AnyBehavior,
 ): definition is AnyBehavior & { readonly stages: Stages } {
   return (definition as { readonly stages?: unknown }).stages !== undefined;
-}
-
-export function implementStages(
-  definition: AnyBehavior & { readonly stages: Stages },
-  implementations: readonly AnyImplementation[],
-): AnyImplementation {
-  const { stages } = definition;
-  const chain = (definition as unknown as { readonly chain: readonly AnyBehavior[] }).chain;
-  if (
-    implementations.length !== stages.length ||
-    implementations.some((implementation, index) => implementation.behavior !== stages[index])
-  ) {
-    throw new SpecificationError(`The implementations do not implement the stages of ${definition.name}`);
-  }
-  const [first, ...rest] = implementations as [AnyImplementation, ...AnyImplementation[]];
-  let joined = first;
-  rest.forEach((next, index) => {
-    joined = {
-      kind: "implementation",
-      behavior: index === rest.length - 1 ? definition : chain[index]!,
-      cases: {} as AnyImplementation["cases"],
-      controls: { ...joined.controls, ...next.controls },
-      pipeline: [joined, next],
-    };
-  });
-  return joined;
 }
 
 function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavior & Joint {

@@ -1,5 +1,3 @@
-import type { StageImplementations } from "./composition.js";
-import { implementStages, isComposition } from "./composition.js";
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
@@ -152,6 +150,7 @@ export interface Implementation<B extends AnyBehavior> {
   readonly cases: ImplementationCases<B>;
   readonly controls: ControlTable<B["effects"]>;
   readonly pipeline?: readonly [Implementation<AnyBehavior>, Implementation<AnyBehavior>];
+  readonly external?: { readonly reason: string };
 }
 
 export type AnyImplementation = Implementation<AnyBehavior>;
@@ -291,39 +290,13 @@ export function brokenEnsures(
   );
 }
 
-type StagesOf<B> = B extends { readonly stages: infer Stages extends readonly AnyBehavior[] }
-  ? Stages
-  : never;
-
-export type ImplementOptions<B extends AnyBehavior> =
-  | {
-      readonly cases: ImplementationCases<B>;
-      readonly controls?: ControlTable<B["effects"]>;
-    }
-  | { readonly stages: StageImplementations<StagesOf<B>> };
-
 export function implement<B extends AnyBehavior>(
   definition: B,
-  options: NoInfer<ImplementOptions<B>>,
+  options: NoInfer<{
+    readonly cases: ImplementationCases<B>;
+    readonly controls?: ControlTable<B["effects"]>;
+  }>,
 ): Implementation<NoInfer<B>> {
-  return implementAny(definition, options as never) as unknown as Implementation<NoInfer<B>>;
-}
-
-function implementAny(
-  definition: AnyBehavior,
-  options:
-    | { readonly stages: readonly AnyImplementation[] }
-    | {
-        readonly cases: ImplementationCases<AnyBehavior>;
-        readonly controls?: ControlTable<AnyVariantsSchema>;
-      },
-): AnyImplementation {
-  if ("stages" in options) {
-    if (!isComposition(definition)) {
-      throw new SpecificationError(`${definition.name} is not a composition, so it has no stages`);
-    }
-    return implementStages(definition, options.stages);
-  }
   for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
     checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
   }
@@ -331,7 +304,17 @@ function implementAny(
     kind: "implementation",
     behavior: definition,
     cases: options.cases,
-    controls: options.controls ?? {},
+    controls: options.controls ?? ({} as ControlTable<B["effects"]>),
+  };
+}
+
+export function external<B extends AnyBehavior>(definition: B, reason: string): Implementation<B> {
+  return {
+    kind: "implementation",
+    behavior: definition,
+    cases: {} as ImplementationCases<B>,
+    controls: {} as ControlTable<B["effects"]>,
+    external: { reason },
   };
 }
 
@@ -416,6 +399,11 @@ export async function runTraced<B extends AnyBehavior>(
     throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
   }
 
+  if (implementation.external !== undefined) {
+    throw new SpecificationError(
+      `${definition.name} is implemented outside Chisel: ${implementation.external.reason}`,
+    );
+  }
   if (implementation.pipeline !== undefined) {
     const execution = await runStages(implementation.pipeline, parsedInput.value, deps);
     return {
