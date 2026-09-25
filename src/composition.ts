@@ -145,7 +145,9 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
     );
     if (mismatch !== undefined) {
       throw new SpecificationError(
-        `${first.name} answers ${mismatch.path}, which ${second.name} does not declare`,
+        mismatch.reason === "undeclared"
+          ? `${first.name} answers ${mismatch.path}, which ${second.name} does not declare`
+          : `${first.name} does not always answer ${mismatch.path}, which ${second.name} requires`,
       );
     }
   }
@@ -174,11 +176,15 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
 
 interface Mismatch {
   readonly path: string;
-  readonly reason: "undeclared";
+  readonly reason: "undeclared" | "missing";
 }
 
 function undeclared(path: string): Mismatch {
   return { path, reason: "undeclared" };
+}
+
+function missing(path: string): Mismatch {
+  return { path, reason: "missing" };
 }
 
 function mismatchOf(
@@ -188,25 +194,38 @@ function mismatchOf(
   discriminant?: string,
 ): Mismatch | undefined {
   if (answered.kind === "optional") {
-    return mismatchOf((answered as OptionalSchema<unknown>).schema as AnySchema, taken, `${path}?`);
+    const held = (answered as OptionalSchema<unknown>).schema as AnySchema;
+    return taken.kind === "optional"
+      ? mismatchOf(held, (taken as OptionalSchema<unknown>).schema as AnySchema, `${path}?`)
+      : (mismatchOf(held, taken, `${path}?`) ?? missing(path));
   }
   if (taken.kind === "optional") {
     return mismatchOf(answered, (taken as OptionalSchema<unknown>).schema as AnySchema, path);
   }
   if (answered.kind === "object" && taken.kind === "object") {
+    const answeredShape = (answered as ObjectSchema<ObjectShape>).shape;
     const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
-    return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
-      Object.hasOwn(takenShape, key)
-        ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
-        : key === discriminant
+    return (
+      firstFound(Object.entries(answeredShape), ([key, field]) =>
+        Object.hasOwn(takenShape, key)
+          ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
+          : key === discriminant
+            ? undefined
+            : undeclared(`${path}.${key}`),
+      ) ??
+      firstFound(Object.entries(takenShape), ([key, field]) =>
+        field.kind === "optional" || key === discriminant || Object.hasOwn(answeredShape, key)
           ? undefined
-          : undeclared(`${path}.${key}`),
+          : missing(`${path}.${key}`),
+      )
     );
   }
   if (answered.kind === "object" && taken.kind === "record") {
     const value = (taken as RecordSchema<unknown>).value as AnySchema;
     return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
-      mismatchOf(field, value, `${path}.${key}`),
+      field.kind === "optional"
+        ? mismatchOf((field as OptionalSchema<unknown>).schema as AnySchema, value, `${path}.${key}?`)
+        : mismatchOf(field, value, `${path}.${key}`),
     );
   }
   if (answered.kind === "array" && taken.kind === "array") {
@@ -225,7 +244,10 @@ function mismatchOf(
   }
   if (answered.kind === "object" && isVariantsSchema(taken)) {
     const named = (answered as ObjectSchema<ObjectShape>).shape[taken.discriminant];
-    if (named?.kind !== "literal") {
+    if (named === undefined || named.kind === "optional") {
+      return missing(`${path}.${taken.discriminant}`);
+    }
+    if (named.kind !== "literal") {
       return undefined;
     }
     const tag = String((named as LiteralSchema<string>).value);
@@ -235,7 +257,9 @@ function mismatchOf(
   }
   if (isVariantsSchema(answered) && taken.kind === "object") {
     return Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)
-      ? firstFound(answered.variantTags, tag => mismatchOf(answered.variants[tag], taken, `${path}@${tag}`))
+      ? firstFound(answered.variantTags, tag =>
+          mismatchOf(answered.variants[tag], taken, `${path}@${tag}`, answered.discriminant),
+        )
       : undeclared(`${path}.${answered.discriminant}`);
   }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {

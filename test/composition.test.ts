@@ -210,6 +210,64 @@ describe("compose", () => {
     ).toThrow(new SpecificationError("支払方法を返す answers @有効.支払@カード, which 現金だけ受け取る does not declare"));
   });
 
+  describe("refusing a field the second stage requires but the first stage does not always answer", () => {
+    const 段 = (answered: Record<string, AnySchema>, taken: Record<string, AnySchema>) =>
+      [
+        external(
+          behavior("返す", {
+            input: variants("状態", { 申込: object({}) }),
+            result: variants("結果", { 有効: object(answered) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+        external(
+          behavior("受け取る", {
+            input: variants("結果", { 有効: object(taken) }),
+            result: variants("結果", { 見積: object({}) }),
+            effects: variants("種類", {}),
+          }),
+          "別のチーム",
+        ),
+      ] as const;
+
+    it("refuses a required field the first stage does not answer at all", () => {
+      expect(() => compose("価格なし", 段({ 数量: int() }, { 数量: int(), 価格: int() }))).toThrow(
+        new SpecificationError("返す does not always answer @有効.価格, which 受け取る requires"),
+      );
+    });
+
+    it("refuses a required field the first stage answers only as optional", () => {
+      expect(() => compose("価格は任意", 段({ 価格: optional(int()) }, { 価格: int() }))).toThrow(
+        new SpecificationError("返す does not always answer @有効.価格, which 受け取る requires"),
+      );
+    });
+
+    it("refuses a required field missing from an array element", () => {
+      expect(() =>
+        compose("明細の価格なし", 段({ 明細: array(object({ 数量: int() })) }, { 明細: array(object({ 数量: int(), 価格: int() })) })),
+      ).toThrow(new SpecificationError("返す does not always answer @有効.明細[].価格, which 受け取る requires"));
+    });
+
+    it("refuses a required field one case of an answered sum does not carry", () => {
+      expect(() =>
+        compose(
+          "現金には番号なし",
+          段(
+            { 支払: variants("方法", { 現金: object({}), カード: object({ 番号: string("番号") }) }) },
+            { 支払: object({ 方法: string("方法"), 番号: string("番号") }) },
+          ),
+        ),
+      ).toThrow(new SpecificationError("返す does not always answer @有効.支払@現金.番号, which 受け取る requires"));
+    });
+
+    it("accepts an optional field answered into a record, which requires no key", () => {
+      expect(() =>
+        compose("表で受け取る", 段({ 価格: object({ りんご: optional(int()) }) }, { 価格: record(int()) })),
+      ).not.toThrow();
+    });
+  });
+
   it("refuses a nested sum whose discriminant the second stage names differently", () => {
     const 方法で返す = behavior("方法で返す", {
       input: variants("状態", { 申込: object({}) }),
@@ -319,6 +377,12 @@ describe("compose", () => {
     it("refuses when the case its literal discriminant names is not declared", () => {
       expect(() => compose("振込", 段(object({ 方法: literal("振込") })))).toThrow(
         new SpecificationError("object で返す answers @有効.支払@振込, which sum で受け取る does not declare"),
+      );
+    });
+
+    it("refuses an object that does not answer the discriminant the sum needs", () => {
+      expect(() => compose("方法なし", 段(object({ 番号: string("番号") })))).toThrow(
+        new SpecificationError("object で返す does not always answer @有効.支払.方法, which sum で受け取る requires"),
       );
     });
 
