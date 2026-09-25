@@ -32,8 +32,8 @@ export interface Execution<Result, Effect> {
   readonly effects: readonly Effect[];
 }
 
-export interface Pending {
-  readonly kind: "pending";
+export interface Todo {
+  readonly kind: "todo";
   readonly reason: string;
 }
 
@@ -82,7 +82,7 @@ export interface ControlPolicy {
 }
 
 export type ControlTable<Effects extends AnyVariantsSchema> = Readonly<
-  Partial<Record<Tags<Effects>, ControlPolicy | Pending>>
+  Partial<Record<Tags<Effects>, ControlPolicy | Todo>>
 >;
 
 export interface EnsuresClause {
@@ -141,7 +141,7 @@ export type ImplementationCases<B extends AnyBehavior> = {
         BehaviorEffect<B>,
         BehaviorDeps<B>
       >
-    | Pending;
+    | Todo;
 };
 
 export interface Implementation<B extends AnyBehavior> {
@@ -202,8 +202,16 @@ export function action<Input, Result, Effect, Deps = unknown>(
   };
 }
 
-export function pending(reason: string): Pending {
-  return { kind: "pending", reason };
+export function todo(reason = "まだ決めていません"): Todo {
+  return { kind: "todo", reason };
+}
+
+export function isTodo(value: unknown): value is Todo {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Readonly<Record<string, unknown>>).kind === "todo"
+  );
 }
 
 export function behavior<
@@ -400,8 +408,8 @@ export async function runTraced<B extends AnyBehavior>(
   if (selected === undefined) {
     throw new SpecificationError(`No decision for input variant ${tag}`);
   }
-  if (selected.kind === "pending") {
-    throw new SpecificationError(`Pending decision for ${tag}: ${selected.reason}`);
+  if (selected.kind === "todo") {
+    throw new SpecificationError(`Todo decision for ${tag}: ${selected.reason}`);
   }
 
   const arms: ArmTaken[] = [];

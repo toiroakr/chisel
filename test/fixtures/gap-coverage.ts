@@ -1,4 +1,5 @@
 import {
+  todo,
   behavior,
   spec,
   example,
@@ -7,7 +8,6 @@ import {
   object,
   string,
   variants,
-  unanswered,
 } from "../../src/index.js";
 
 const Input = variants("state", {
@@ -63,7 +63,7 @@ export const inlineSpec = spec({
   examples: examples(definition, {
     "ready": {
       given: { state: "ready", id: "a" },
-      expect: unanswered("undecided"),
+      expect: todo("undecided"),
     },
     "archived": {
       given: { state: "archived", id: "b" },

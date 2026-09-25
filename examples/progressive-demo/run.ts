@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  todo,
   spec,
   evaluateSpecification,
   examples,
@@ -130,7 +131,7 @@ function formatGeneratedRows(generated: readonly GeneratedExample[]): string {
       row =>
         `${JSON.stringify(row.name)}: {\n` +
         `  given: ${formatTypeScriptValue(row.given).replaceAll("\n", "\n  ")},\n` +
-        `  expect: unanswered(${JSON.stringify(row.reason)}),\n` +
+        `  expect: todo(${JSON.stringify(row.reason)}),\n` +
         "}",
     )
     .join(",\n");

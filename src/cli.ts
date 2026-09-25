@@ -79,7 +79,7 @@ const generateCommand = defineCommand({
   run: async args => {
     const targets = await loadTargets(args.file);
     if (targets.some(target => target.synthesized)) {
-      console.log('import { examples, spec, unanswered } from "chisel";\n');
+      console.log('import { examples, spec, todo } from "chisel";\n');
     }
     for (const target of targets) {
       const { rows: generated, notComposed } = generationReport(
@@ -426,7 +426,7 @@ function formatGeneratedExample(generated: GeneratedExample): string {
     generated.with === undefined
       ? ""
       : `\n    with: ${indent(formatTypeScriptValue(generated.with), 4).trimStart()},`;
-  return `  ${JSON.stringify(generated.name)}: {\n    given: ${given.trimStart()},${written}\n    expect: unanswered(${JSON.stringify(generated.reason)}),\n  }`;
+  return `  ${JSON.stringify(generated.name)}: {\n    given: ${given.trimStart()},${written}\n    expect: todo(${JSON.stringify(generated.reason)}),\n  }`;
 }
 
 function indent(value: string, spaces: number): string {

@@ -62,7 +62,7 @@ export const cancelOrderExamples = examples(cancelOrder, {
       state: "unpaid",
       orderId: "<OrderId>",
     },
-    expect: unanswered(
+    expect: todo(
       "Expected result for unpaid must be decided by a human",
     ),
   },
@@ -72,7 +72,7 @@ export const cancelOrderExamples = examples(cancelOrder, {
       orderId: "<OrderId>",
       paymentId: "<PaymentId>",
     },
-    expect: unanswered(
+    expect: todo(
       "Expected result for paid must be decided by a human",
     ),
   },
@@ -81,7 +81,7 @@ export const cancelOrderExamples = examples(cancelOrder, {
 
 ## 3. Fill expectations
 
-A human replaces `unanswered()` with the expected result and effect trace. `examples(behavior, { name: row })` is a table keyed by the row's name, which the report uses to point at a row; two rows with one name do not compile. Each row's `given` and `expect` are typed by the behavior, so a row that no longer fits the model fails to compile.
+A human replaces `todo()` with the expected result and effect trace. `todo(reason)` is the one marker for anything not decided yet: an answer here, and also a case of `implement` or an effect's control policy that is still open. `examples(behavior, { name: row })` is a table keyed by the row's name, which the report uses to point at a row; two rows with one name do not compile. Each row's `given` and `expect` are typed by the behavior, so a row that no longer fits the model fails to compile.
 
 ```ts
 export const cancelOrderExamples = examples(cancelOrder, {

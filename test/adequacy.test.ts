@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  todo,
   action,
   behavior,
   boolean,
@@ -20,7 +21,6 @@ import {
   optional,
   string,
   variants,
-  unanswered,
 } from "../src/index.js";
 
 const Cart = variants("状態", {
@@ -82,7 +82,7 @@ describe("equivalence partitions in the adequacy report", () => {
         examples: examples(注文を確定する, {
           "クーポンありはまだ決めていない": {
             given: { 状態: "商品あり", カートID: "c-2", クーポン: "C-1" },
-            expect: unanswered(),
+            expect: todo(),
           },
         }),
       }),
@@ -266,7 +266,7 @@ describe("graded evidence in the adequacy report", () => {
         examples: examples(判定する, {
           "まだ決めていない": {
             given: { 状態: "商品あり", カートID: "c-1" },
-            expect: unanswered(),
+            expect: todo(),
           },
         }),
         implementation: 常に不可,
@@ -402,7 +402,7 @@ describe("border points in the adequacy report", () => {
       spec({
         name: "数量",
         examples: examples(数量を確定する, {
-          "まだ": { given: { 状態: "入力済み", 数量: 1 }, expect: unanswered() },
+          "まだ": { given: { 状態: "入力済み", 数量: 1 }, expect: todo() },
         }),
       }),
     );

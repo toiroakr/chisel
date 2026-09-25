@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  todo,
   action,
   generationReport,
   not,
@@ -22,7 +23,6 @@ import {
   optional,
   string,
   variants,
-  unanswered,
 } from "../src/index.js";
 
 const Cart = variants("状態", {
@@ -59,7 +59,7 @@ describe("generateExamples for classes", () => {
     const existing = examples(注文を確定する, {
       "クーポンなし": {
         given: { 状態: "商品あり", カートID: "c-1" },
-        expect: unanswered(),
+        expect: todo(),
       },
     });
 

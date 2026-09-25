@@ -14,7 +14,7 @@ npm run demo
 node dist/cli.js generate examples/progressive-demo/stage-01-sketch.spec.ts
 ```
 
-Chiselは`受付済み`、`予約確定`、`チェックイン済み`、`キャンセル済み`それぞれについて、`expect: unanswered()`のTypeScript exampleを生成します。
+Chiselは`受付済み`、`予約確定`、`チェックイン済み`、`キャンセル済み`それぞれについて、`expect: todo()`のTypeScript exampleを生成します。
 
 ## 2. 人間が期待値を埋める
 

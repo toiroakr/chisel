@@ -255,7 +255,7 @@ export function fakeWarningsOf(requires: Requirements, tables: readonly FakeTabl
       rows
         .filter(
           row =>
-            row.expect.kind !== "unanswered" &&
+            row.expect.kind !== "todo" &&
             isDeepStrictEqual(row.given, asked) &&
             !isDeepStrictEqual(row.expect.result, answer),
         )

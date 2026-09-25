@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  todo,
   action,
   all,
   and,
@@ -26,7 +27,6 @@ import {
   SpecificationError,
   string,
   variants,
-  unanswered,
 } from "../src/index.js";
 import type { Implementation } from "../src/index.js";
 
@@ -124,7 +124,7 @@ describe("arms of a rules decision", () => {
           ...在庫あり,
           "在庫不足はまだ決めていない": {
             given: { 状態: "商品あり", カートID: "c-2", 明細: [{ 数量: 4, 在庫数: 3 }] },
-            expect: unanswered(),
+            expect: todo(),
           },
         }),
         implementation: 在庫を確かめて確定する,

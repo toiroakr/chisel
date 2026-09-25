@@ -68,7 +68,8 @@ export {
   implement,
   isBehavior,
   match,
-  pending,
+  isTodo,
+  todo,
   runImplementation,
   SpecificationError,
 } from "./behavior.js";
@@ -91,7 +92,7 @@ export type {
   ImplementationCases,
   Match,
   Otherwise,
-  Pending,
+  Todo,
   RulesDecision,
 } from "./behavior.js";
 
@@ -102,9 +103,7 @@ export {
   examples,
   generateExamples,
   generationReport,
-  isUnanswered,
   isSpecification,
-  unanswered,
   verifyConformance,
 } from "./specification.js";
 export type {
@@ -134,7 +133,6 @@ export type {
   RuleCoverage,
   RulesMeasure,
   Specification,
-  Unanswered,
   UnansweredExample,
   Verdict,
 } from "./specification.js";

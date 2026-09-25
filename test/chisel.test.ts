@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  action,
+  todo,
   behavior,
   spec,
   evaluateSpecification,
@@ -10,12 +12,10 @@ import {
   isBehavior,
   isSpecification,
   object,
-  pending,
   runImplementation,
   SpecificationError,
   string,
   variants,
-  unanswered,
   verifyConformance,
 } from "../src/index.js";
 
@@ -97,7 +97,7 @@ describe("chisel", () => {
       },
       "published behavior is unanswered": {
         given: { state: "published", id: "b" },
-        expect: unanswered("A human must decide repeated publication"),
+        expect: todo("A human must decide repeated publication"),
       },
     });
     const specification = spec({ name: "publishing", examples: rows });
@@ -315,7 +315,7 @@ describe("evaluateSpecification failure reporting", () => {
             effects: [{ type: "notify", id: input.id }],
           }),
         },
-        published: pending("再公開時の挙動が未確定です"),
+        published: todo("再公開時の挙動が未確定です"),
       },
       controls: {
         notify: {
@@ -397,7 +397,7 @@ describe("evaluateSpecification failure reporting", () => {
         },
       },
       controls: {
-        notify: pending("制御方針が未確定です"),
+        notify: todo("制御方針が未確定です"),
       },
     });
     const specification = spec({
@@ -427,7 +427,7 @@ describe("runImplementation error handling", () => {
             effects: [{ type: "notify", id: input.id }],
           }),
         },
-        published: pending("再公開時の挙動が未確定です"),
+        published: todo("再公開時の挙動が未確定です"),
       },
       controls: {},
     });
@@ -521,7 +521,7 @@ describe("generateExamples", () => {
     const rows = examples(definition, {
       "published behavior is unanswered": {
         given: { state: "published", id: "b" },
-        expect: unanswered("A human must decide repeated publication"),
+        expect: todo("A human must decide repeated publication"),
       },
     });
 
@@ -578,7 +578,7 @@ describe("verifyConformance", () => {
     const rows = examples(definition, {
       "published behavior is unanswered": {
         given: { state: "published", id: "b" },
-        expect: unanswered("A human must decide repeated publication"),
+        expect: todo("A human must decide repeated publication"),
       },
     });
     let calls = 0;
@@ -933,5 +933,42 @@ describe("coverage-driven adequacy vetoes", () => {
     });
     expect(report.controlGaps).toStrictEqual([]);
     expect(report.adequate).toBe(false);
+  });
+});
+
+describe("todo", () => {
+  const 受け付ける = behavior({
+    name: "受け付ける",
+    input: variants("状態", { 入力済み: object({}), 取消済み: object({}) }),
+    result: variants("結果", { 受付: object({}) }),
+    effects: variants("種類", { 通知: object({}) }),
+  });
+
+  it("marks an owed answer, an unwritten case and an undecided control alike", async () => {
+    const report = await evaluateSpecification(
+      spec({
+        name: "受付",
+        examples: examples(受け付ける, {
+          入力済み: { given: { 状態: "入力済み" }, expect: todo("答えは未定") },
+        }),
+        implementation: implement(受け付ける, {
+          cases: {
+            入力済み: action("受け付ける", { run: () => ({ result: { 結果: "受付" }, effects: [] }) }),
+            取消済み: todo("取消の扱いは未定"),
+          },
+          controls: { 通知: todo("通知の方式は未定") },
+        }),
+      }),
+    );
+
+    expect({
+      unanswered: report.unanswered.map(row => row.reason),
+      pending: report.pendingDecisions.map(item => item.reason),
+      controls: report.controlGaps.map(gap => gap.reason),
+    }).toStrictEqual({
+      unanswered: ["答えは未定"],
+      pending: ["取消の扱いは未定"],
+      controls: ["通知の方式は未定"],
+    });
   });
 });

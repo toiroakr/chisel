@@ -7,6 +7,7 @@ import type {
   BehaviorResult,
   Execution,
   Implementation,
+  Todo,
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
@@ -23,6 +24,7 @@ import {
 import {
   brokenEnsures,
   comparisonsReached,
+  isTodo,
   runImplementation,
   runTraced,
   traceSync,
@@ -71,11 +73,6 @@ async function runAndCompare<B extends AnyBehavior>(
   }
 }
 
-export interface Unanswered {
-  readonly kind: "unanswered";
-  readonly reason: string;
-}
-
 export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
   ? Partial<ValueDependencies<Requires>>
   : never;
@@ -85,7 +82,7 @@ export interface Example<B extends AnyBehavior> {
   readonly name: string;
   readonly given: BehaviorInput<B>;
   readonly with?: BehaviorWith<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
+  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Todo;
 }
 
 export interface ExampleSet<B extends AnyBehavior> {
@@ -280,24 +277,10 @@ export type ConformanceSubject<B extends AnyBehavior> = (
   | Execution<BehaviorResult<B>, BehaviorEffect<B>>
   | Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>>;
 
-export function unanswered(
-  reason = "期待結果を人間が決める必要があります",
-): Unanswered {
-  return { kind: "unanswered", reason };
-}
-
-export function isUnanswered(value: unknown): value is Unanswered {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as Readonly<Record<string, unknown>>).kind === "unanswered"
-  );
-}
-
 export interface ExampleRow<B extends AnyBehavior> {
   readonly given: BehaviorInput<B>;
   readonly with?: BehaviorWith<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Unanswered;
+  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Todo;
 }
 
 export function example<B extends AnyBehavior>(
@@ -423,7 +406,7 @@ export async function evaluateSpecification(
       continue;
     }
 
-    if (isUnanswered(row.expect)) {
+    if (isTodo(row.expect)) {
       unansweredRows.push({
         name: row.name,
         variant: inputTag,
@@ -441,7 +424,7 @@ export async function evaluateSpecification(
       } else if (
         implementation !== undefined &&
         (implementation.stages !== undefined ||
-          (decision !== undefined && decision.kind !== "pending"))
+          (decision !== undefined && decision.kind !== "todo"))
       ) {
         try {
           const traced = await runTraced(implementation, row.given, standIns(row) as never);
@@ -552,7 +535,7 @@ export async function evaluateSpecification(
       ? []
       : Object.entries(specification.implementation.cases).flatMap(
           ([variant, decision]) =>
-            decision.kind === "pending"
+            decision.kind === "todo"
               ? [{ variant, reason: decision.reason }]
               : [],
         );
@@ -565,7 +548,7 @@ export async function evaluateSpecification(
           if (control === undefined) {
             return [{ effect, reason: "control policy is missing" }];
           }
-          return "kind" in control && control.kind === "pending"
+          return "kind" in control && control.kind === "todo"
             ? [{ effect, reason: control.reason }]
             : [];
         });
@@ -827,7 +810,7 @@ export function generationReport(
       .filter((tag): tag is string => tag !== undefined),
   );
 
-  const answeredRows = rows.filter(row => !isUnanswered(row.expect));
+  const answeredRows = rows.filter(row => !isTodo(row.expect));
   const origins = answeredRows.map(row => row.given);
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
     const written = answeredRows.find(row => row.given === origin)?.with;
@@ -1022,7 +1005,7 @@ export async function verifyConformance<B extends AnyBehavior>(
 ): Promise<readonly ExampleFailure[]> {
   const failures: ExampleFailure[] = [];
   for (const row of exampleSet.rows) {
-    if (isUnanswered(row.expect)) {
+    if (isTodo(row.expect)) {
       continue;
     }
     const { actual, failure } = await runAndCompare(row.name, row.given, row.expect, subject);

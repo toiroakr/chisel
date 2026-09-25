@@ -1,4 +1,5 @@
 import {
+  todo,
   behavior,
   spec,
   example,
@@ -6,7 +7,6 @@ import {
   implement,
   literal,
   object,
-  pending,
   string,
   variants,
 } from "../src/index.js";
@@ -94,7 +94,7 @@ const implementation = implement(cancelOrder, {
         ],
       }),
     },
-    preparing: pending("Whether preparation can be cancelled is undecided"),
+    preparing: todo("Whether preparation can be cancelled is undecided"),
     shipped: {
       kind: "decision",
       id: "reject-shipped",
@@ -113,7 +113,7 @@ const implementation = implement(cancelOrder, {
     },
   },
   controls: {
-    refund: pending("Compensation after a successful refund is undecided"),
+    refund: todo("Compensation after a successful refund is undecided"),
     restock: {
       execution: "outbox",
       idempotency: "required",

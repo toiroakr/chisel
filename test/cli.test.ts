@@ -153,14 +153,14 @@ describe("chisel generate", () => {
     expect(result.exitCode).toBe(0);
     const stdout = stdoutOf(result);
     expect(stdout).toMatch(/^  "cancel-order: preparing": \{$/m);
-    expect(stdout).toMatch(/expect: unanswered\(/);
+    expect(stdout).toMatch(/expect: todo\(/);
   });
 
   it("wraps rows for a behavior with no specification in imports and spec", async () => {
     const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts")]);
 
     expect(stdoutOf(result).match(/^import .* from "chisel";$/gm)).toStrictEqual([
-      'import { examples, spec, unanswered } from "chisel";',
+      'import { examples, spec, todo } from "chisel";',
     ]);
     expect(stdoutOf(result)).toContain(
       [
@@ -170,7 +170,7 @@ describe("chisel generate", () => {
         '      state: "ready",',
         '      id: "<Id>",',
         "    },",
-        '    expect: unanswered("readyの期待結果を人間が決める必要があります"),',
+        '    expect: todo("readyの期待結果を人間が決める必要があります"),',
         "  },",
       ].join("\n"),
     );

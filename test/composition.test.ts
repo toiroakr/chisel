@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  todo,
   action,
   behavior,
   compose,
@@ -18,7 +19,6 @@ import {
   SpecificationError,
   string,
   variants,
-  unanswered,
 } from "../src/index.js";
 
 const 検証する = behavior({
@@ -202,7 +202,7 @@ describe("a composition row whose answer is owed", () => {
       spec({
         name: "見積",
         examples: examples(見積もる, {
-          "3個": { given: { 状態: "申込", 数量: 3 }, expect: unanswered("未定") },
+          "3個": { given: { 状態: "申込", 数量: 3 }, expect: todo("未定") },
         }),
         implementation: 見積もり,
       }),
