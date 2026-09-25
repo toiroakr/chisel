@@ -77,14 +77,12 @@ describe("chisel check", () => {
     expect(stdoutOf(result)).toMatch(/実装\s+なし/);
   });
 
-  it("lists unanswered examples, dependency issues, and failures in the report", async () => {
+  it("lists unanswered examples and failures in the report", async () => {
     const result = await run(["check", fixture("test/fixtures/gap-coverage.ts")]);
     const stdout = stdoutOf(result);
 
     expect(stdout).toMatch(/! 未回答のexample: ready — undecided/);
-    expect(stdout).toMatch(
-      /! 依存関係の誤り \(behavior\): 未知の作用'mail'に依存すると宣言されています/,
-    );
+    expect(stdout).not.toMatch(/依存関係の誤り/);
     expect(stdout).toMatch(/✗ archived: Expected/);
   });
 });
@@ -374,7 +372,7 @@ describe("chisel check --json", () => {
       schemaVersion: document.schemaVersion,
       reports: document.reports.map(({ specification, verdict }) => ({ specification, verdict })),
     }).toStrictEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       reports: [{ specification: "注文確定", verdict: "not_satisfied" }],
     });
   });

@@ -141,7 +141,6 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
       ...secondResult.variants,
     }),
     effects: mergedEffects(first, second),
-    dependsOn: [...new Set([...first.dependsOn, ...second.dependsOn])],
     requires: mergedRequires(first, second),
     ensures: [],
     pair: [first, second],

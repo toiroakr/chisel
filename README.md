@@ -44,7 +44,6 @@ export const cancelOrder = c.behavior("cancel-order", {
   input: Order,
   result: CancelResult,
   effects: CancelEffect,
-  dependsOn: ["refund", "restock"],
 });
 ```
 

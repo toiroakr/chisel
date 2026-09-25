@@ -117,7 +117,6 @@ export type {
   CoverageStatus,
   ControlGap,
   Coverage,
-  DependencyIssue,
   Example,
   ExampleFailure,
   ExampleRow,

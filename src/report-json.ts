@@ -5,7 +5,7 @@ import type {
   RulesMeasure,
 } from "./specification.js";
 
-export const reportSchemaVersion = 1;
+export const reportSchemaVersion = 2;
 
 export interface ReportSource {
   readonly id: string;

@@ -37,7 +37,6 @@ export const cancelOrder = c.behavior("cancel-order", {
   input: Order,
   result: CancelResult,
   effects: CancelEffect,
-  dependsOn: ["refund", "restock"],
 });
 
 const implementation = c.implement(cancelOrder, {
@@ -62,7 +61,6 @@ const implementation = c.implement(cancelOrder, {
     paid: {
       kind: "decision",
       id: "cancel-paid",
-      dependsOn: ["refund", "restock"],
       run: order => ({
         result: {
           type: "accepted",

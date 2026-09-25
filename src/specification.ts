@@ -123,11 +123,6 @@ export interface ControlGap {
   readonly reason: string;
 }
 
-export interface DependencyIssue {
-  readonly variant: string | undefined;
-  readonly reason: string;
-}
-
 export interface AdequacyReport {
   readonly specification: string;
   readonly behavior: string;
@@ -138,7 +133,6 @@ export interface AdequacyReport {
   readonly unanswered: readonly UnansweredExample[];
   readonly pendingDecisions: readonly PendingDecision[];
   readonly controlGaps: readonly ControlGap[];
-  readonly dependencyIssues: readonly DependencyIssue[];
   readonly modelIssues: readonly string[];
   readonly incompleteness: readonly Incompleteness[];
   readonly ensures: EnsuresReport;
@@ -573,28 +567,6 @@ export async function check(
             : [];
         });
 
-  const knownEffects = new Set(definition.effects.variantTags);
-  const unknownDependency = (tag: string): boolean => !knownEffects.has(tag);
-  const dependencyIssues: DependencyIssue[] = [
-    ...definition.dependsOn.filter(unknownDependency).map(tag => ({
-      variant: undefined,
-      reason: `未知の作用'${tag}'に依存すると宣言されています`,
-    })),
-    ...(specification.implementation === undefined
-      ? []
-      : Object.entries(specification.implementation.cases).flatMap(
-          ([variant, decision]) =>
-            decision.kind === "decision"
-              ? (decision.dependsOn ?? [])
-                  .filter(unknownDependency)
-                  .map(tag => ({
-                    variant,
-                    reason: `未知の作用'${tag}'に依存すると宣言されています`,
-                  }))
-              : [],
-        )),
-  ];
-
   const refusedInputs = excludedCases(definition.input);
   const input = coverage(definition.input.variantTags, coveredInputs, refusedInputs);
   const result = isVariantsSchema(definition.result)
@@ -719,7 +691,6 @@ export async function check(
     unansweredRows.length === 0 &&
     pendingDecisions.length === 0 &&
     controlGaps.length === 0 &&
-    dependencyIssues.length === 0 &&
     modelIssues.length === 0 &&
     input.missing.length === 0 &&
     result.missing.length === 0 &&
@@ -768,7 +739,6 @@ export async function check(
     unanswered: unansweredRows,
     pendingDecisions,
     controlGaps,
-    dependencyIssues,
     modelIssues,
     incompleteness,
     ensures: readEnsures(definition),
