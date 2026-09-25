@@ -51,6 +51,17 @@ describe("generateExamples starts from what the rows already say", () => {
     ]);
   });
 
+  it("offers a row for a case whose only row has a given the input schema refuses, as check counts it uncovered", () => {
+    const existing = examples(注文を確定する, {
+      "古い行": {
+        given: { 状態: "商品あり", カートID: "カート-1", 消したフィールド: true } as never,
+        expect: { result: {}, effects: [] },
+      },
+    });
+
+    expect(generate(existing).rows.map(row => row.name)).toContain("注文を確定する: 商品あり");
+  });
+
   it("skips an answered row whose given the input schema refuses when choosing where to start", () => {
     const existing = examples(注文を確定する, {
       "古い行": {

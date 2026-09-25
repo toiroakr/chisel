@@ -786,7 +786,8 @@ export function generate(
   implementation?: AnyImplementation,
 ): GenerationReport {
   const definition = target.kind === "behavior" ? target : target.behavior;
-  const rows = target.kind === "behavior" ? [] : target.rows;
+  const rows =
+    target.kind === "behavior" ? [] : target.rows.filter(row => definition.input.parse(row.given).success);
   const existing = new Set(
     rows
       .map(row => tagOf(definition.input, row.given))
@@ -794,9 +795,7 @@ export function generate(
   );
 
   const answeredRows = rows.filter(row => !isTodo(row.expect));
-  const origins = answeredRows
-    .filter(row => definition.input.parse(row.given).success)
-    .map(row => row.given);
+  const origins = answeredRows.map(row => row.given);
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
     const written = answeredRows.find(row => row.given === origin)?.with;
     return written === undefined ? {} : { with: written };
