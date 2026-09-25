@@ -287,6 +287,11 @@ export function object<const Shape extends ObjectShape>(
         issues.push(...result.issues);
       }
     }
+    for (const key of Object.keys(source)) {
+      if (!Object.hasOwn(shape, key)) {
+        issues.push({ path: `${path}.${key}`, message: "Unexpected key" });
+      }
+    }
 
     return issues.length > 0
       ? { success: false, issues }
@@ -410,7 +415,7 @@ export function variants<
 
     const source = value as Readonly<Record<string, unknown>>;
     const tag = source[discriminant];
-    if (typeof tag !== "string" || !(tag in variants)) {
+    if (typeof tag !== "string" || !Object.hasOwn(variants, tag)) {
       return invalid(
         `${path}.${discriminant}`,
         `Expected one of ${variantTags.join(", ")}`,
@@ -422,7 +427,8 @@ export function variants<
       return invalid(`${path}.${discriminant}`, `Unknown variant ${tag}`);
     }
 
-    const result = variant.parse(value, path);
+    const { [discriminant]: _tag, ...fields } = source;
+    const result = variant.parse(Object.hasOwn(variant.shape, discriminant) ? source : fields, path);
     return result.success
       ? valid({ [discriminant]: tag, ...result.value } as VariantsValue<
           Discriminant,

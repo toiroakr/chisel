@@ -573,6 +573,57 @@ describe("perform invalid input and cases", () => {
   });
 });
 
+describe("undeclared keys", () => {
+  it("fails a row whose model answers with a key the result does not declare", async () => {
+    const definition = publishingBehavior();
+    const implementation = implement(definition, {
+      cases: {
+        draft: action("leak the input", {
+          run: input => {
+            const answer = { ...input, secret: "leak" };
+            return { result: { type: "accepted", ...answer }, effects: [] };
+          },
+        }),
+        published: action("reject", {
+          run: () => ({ result: { type: "rejected", reason: "already-published" }, effects: [] }),
+        }),
+      },
+      controls: { notify: { execution: "queue", idempotency: "required", compensation: "none" } },
+    });
+    const rows = examples(definition, {
+      "publish a draft": {
+        given: { state: "draft", id: "a" },
+        expect: { result: { type: "accepted", id: "a" }, effects: [] },
+      },
+    });
+
+    const report = await check(spec("publishing", { examples: rows, implementation }));
+
+    expect(report.failures).toStrictEqual([
+      {
+        name: "publish a draft",
+        message: "Invalid result: $.state: Unexpected key; $.secret: Unexpected key",
+      },
+    ]);
+  });
+
+  it("fails a row whose given carries a key the input does not declare", async () => {
+    const definition = publishingBehavior();
+    const rows = examples(definition, {
+      "draft with a stray key": {
+        given: { state: "draft", id: "a", secret: "leak" } as never,
+        expect: { result: { type: "accepted", id: "a" }, effects: [] },
+      },
+    });
+
+    const report = await check(spec("publishing", { examples: rows }));
+
+    expect(report.failures).toStrictEqual([
+      { name: "draft with a stray key", message: "Example input is invalid" },
+    ]);
+  });
+});
+
 describe("check example validation", () => {
   it("reports a failure when an example's given value fails schema validation", async () => {
     const definition = publishingBehavior();

@@ -786,7 +786,8 @@ export function generate(
   implementation?: AnyImplementation,
 ): GenerationReport {
   const definition = target.kind === "behavior" ? target : target.behavior;
-  const rows = target.kind === "behavior" ? [] : target.rows;
+  const rows =
+    target.kind === "behavior" ? [] : target.rows.filter(row => definition.input.parse(row.given).success);
   const existing = new Set(
     rows
       .map(row => tagOf(definition.input, row.given))

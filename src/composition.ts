@@ -1,8 +1,19 @@
 import type { AnyBehavior, AnyImplementation, Behavior, Implementation } from "./behavior.js";
 import { SpecificationError } from "./behavior.js";
 import type { Requirements } from "./dependency.js";
-import type { AnyVariantsSchema, VariantsSchema, VariantTable } from "./schema.js";
-import { isVariantsSchema, variants } from "./schema.js";
+import type {
+  AnySchema,
+  AnyVariantsSchema,
+  ArraySchema,
+  LiteralSchema,
+  ObjectSchema,
+  ObjectShape,
+  OptionalSchema,
+  RecordSchema,
+  VariantsSchema,
+  VariantTable,
+} from "./schema.js";
+import { isVariantsSchema, literal, variants } from "./schema.js";
 
 type Stages = readonly [AnyBehavior, AnyBehavior, ...AnyBehavior[]];
 
@@ -125,6 +136,23 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
   if (flowing.length === 0) {
     throw new SpecificationError(`${second.name} receives none of the cases ${first.name} answers`);
   }
+  for (const tag of flowing) {
+    const mismatch = mismatchOf(
+      firstResult.variants[tag]!,
+      second.input.variants[tag]!,
+      `@${tag}`,
+      { discriminant: firstResult.discriminant, tag },
+    );
+    if (mismatch !== undefined) {
+      throw new SpecificationError(
+        mismatch.reason === "undeclared"
+          ? `${first.name} answers ${mismatch.path}, which ${second.name} does not declare`
+          : mismatch.reason === "missing"
+            ? `${first.name} does not always answer ${mismatch.path}, which ${second.name} requires`
+            : `${first.name} answers ${mismatch.path} as ${mismatch.answered}, which ${second.name} takes as ${mismatch.taken}`,
+      );
+    }
+  }
   const departing = firstResult.variantTags.filter(tag => !flowing.includes(tag));
   const colliding = departing.find(tag => secondResult.variantTags.includes(tag));
   if (colliding !== undefined) {
@@ -146,6 +174,159 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
     pair: [first, second],
     departed: [...departing, ...departedOf(second)],
   };
+}
+
+type Mismatch =
+  | { readonly path: string; readonly reason: "undeclared" }
+  | { readonly path: string; readonly reason: "missing" }
+  | { readonly path: string; readonly reason: "incompatible"; readonly answered: string; readonly taken: string };
+
+function undeclared(path: string): Mismatch {
+  return { path, reason: "undeclared" };
+}
+
+function missing(path: string): Mismatch {
+  return { path, reason: "missing" };
+}
+
+function incompatible(path: string, answered: string, taken: string): Mismatch {
+  return { path, reason: "incompatible", answered, taken };
+}
+
+function takes(answered: AnySchema, taken: AnySchema): boolean {
+  if (answered.kind === "literal") {
+    return taken.parse((answered as LiteralSchema<string | number | boolean | null>).value).success;
+  }
+  return answered.kind === taken.kind || (answered.kind === "integer" && taken.kind === "number");
+}
+
+function kindOf(schema: AnySchema): string {
+  if (schema.kind !== "literal") {
+    return schema.kind;
+  }
+  const value = (schema as LiteralSchema<string | number | boolean | null>).value;
+  return `literal ${typeof value === "string" ? JSON.stringify(value) : String(value)}`;
+}
+
+function mismatchOf(
+  answered: AnySchema,
+  taken: AnySchema,
+  path: string,
+  enclosing?: { readonly discriminant: string; readonly tag: string },
+): Mismatch | undefined {
+  if (answered.kind === "optional") {
+    const held = (answered as OptionalSchema<unknown>).schema as AnySchema;
+    return taken.kind === "optional"
+      ? mismatchOf(held, (taken as OptionalSchema<unknown>).schema as AnySchema, `${path}?`)
+      : (mismatchOf(held, taken, `${path}?`) ?? missing(path));
+  }
+  if (taken.kind === "optional") {
+    return mismatchOf(answered, (taken as OptionalSchema<unknown>).schema as AnySchema, path);
+  }
+  if (answered.kind === "object" && taken.kind === "object") {
+    const answeredShape = (answered as ObjectSchema<ObjectShape>).shape;
+    const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
+    return (
+      firstFound(Object.entries(answeredShape), ([key, field]) =>
+        key === enclosing?.discriminant
+          ? Object.hasOwn(takenShape, key)
+            ? mismatchOf(literal(enclosing.tag), takenShape[key]!, `${path}.${key}`)
+            : undefined
+          : Object.hasOwn(takenShape, key)
+            ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
+            : undeclared(`${path}.${key}`),
+      ) ??
+      firstFound(Object.entries(takenShape), ([key, field]) =>
+        Object.hasOwn(answeredShape, key)
+          ? undefined
+          : key === enclosing?.discriminant
+            ? mismatchOf(literal(enclosing.tag), field, `${path}.${key}`)
+            : field.kind === "optional"
+              ? undefined
+              : missing(`${path}.${key}`),
+      )
+    );
+  }
+  if (answered.kind === "object" && taken.kind === "record") {
+    const value = (taken as RecordSchema<unknown>).value as AnySchema;
+    return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
+      field.kind === "optional"
+        ? mismatchOf((field as OptionalSchema<unknown>).schema as AnySchema, value, `${path}.${key}?`)
+        : mismatchOf(field, value, `${path}.${key}`),
+    );
+  }
+  if (answered.kind === "array" && taken.kind === "array") {
+    return mismatchOf(
+      (answered as ArraySchema<unknown>).element as AnySchema,
+      (taken as ArraySchema<unknown>).element as AnySchema,
+      `${path}[]`,
+    );
+  }
+  if (answered.kind === "record" && taken.kind === "record") {
+    return mismatchOf(
+      (answered as RecordSchema<unknown>).value as AnySchema,
+      (taken as RecordSchema<unknown>).value as AnySchema,
+      `${path}{}`,
+    );
+  }
+  if (answered.kind === "object" && isVariantsSchema(taken)) {
+    const answeredShape = (answered as ObjectSchema<ObjectShape>).shape;
+    const named = Object.hasOwn(answeredShape, taken.discriminant) ? answeredShape[taken.discriminant] : undefined;
+    if (named === undefined || named.kind === "optional") {
+      return missing(`${path}.${taken.discriminant}`);
+    }
+    const tag = named.kind === "literal" ? (named as LiteralSchema<string | number | boolean | null>).value : undefined;
+    if (typeof tag !== "string") {
+      return incompatible(
+        `${path}.${taken.discriminant}`,
+        kindOf(named),
+        taken.variantTags.map(each => JSON.stringify(each)).join(" | "),
+      );
+    }
+    return taken.variantTags.includes(tag)
+      ? mismatchOf(answered, taken.variants[tag], path, { discriminant: taken.discriminant, tag })
+      : undeclared(`${path}@${tag}`);
+  }
+  if (isVariantsSchema(answered) && taken.kind === "object") {
+    return Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)
+      ? firstFound(answered.variantTags, tag =>
+          mismatchOf(answered.variants[tag], taken, `${path}@${tag}`, { discriminant: answered.discriminant, tag }),
+        )
+      : undeclared(`${path}.${answered.discriminant}`);
+  }
+  if (isVariantsSchema(answered) && taken.kind === "record") {
+    const value = (taken as RecordSchema<unknown>).value as AnySchema;
+    return firstFound(
+      answered.variantTags,
+      tag =>
+        mismatchOf(literal(tag), value, `${path}@${tag}.${answered.discriminant}`) ??
+        mismatchOf(answered.variants[tag], taken, `${path}@${tag}`),
+    );
+  }
+  if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
+    if (answered.discriminant !== taken.discriminant) {
+      return undeclared(`${path}.${answered.discriminant}`);
+    }
+    return firstFound(answered.variantTags, tag =>
+      taken.variantTags.includes(tag)
+        ? mismatchOf(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, {
+            discriminant: answered.discriminant,
+            tag,
+          })
+        : undeclared(`${path}@${tag}`),
+    );
+  }
+  return takes(answered, taken) ? undefined : incompatible(path, kindOf(answered), kindOf(taken));
+}
+
+function firstFound<T, R>(items: readonly T[], find: (item: T) => R | undefined): R | undefined {
+  for (const item of items) {
+    const found = find(item);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 function departedOf(definition: AnyBehavior): readonly string[] {
