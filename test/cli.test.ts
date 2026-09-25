@@ -136,7 +136,7 @@ describe("chisel check with a composition", () => {
     const stdout = stdoutOf(result);
 
     expect([
-      /^見積 \(検証する >-> 価格を付ける\)$/m.test(stdout),
+      /^見積 \(見積もる\)$/m.test(stdout),
       /^  結果variant +1\/2; 未網羅 無効$/m.test(stdout),
       /^  分岐 +対象なし \(not applicable\)$/m.test(stdout),
     ]).toStrictEqual([true, true, true]);

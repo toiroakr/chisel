@@ -8,7 +8,6 @@ import {
   gte,
   guard,
   implement,
-  implementComposition,
   int,
   object,
   string,
@@ -29,7 +28,26 @@ const 価格を付ける = behavior({
   effects: variants("種類", {}),
 });
 
-export const 見積もる = compose(検証する, 価格を付ける);
+export const 見積もる = compose("見積もる", 検証する, 価格を付ける);
+
+const 検証するの実装 = implement(検証する, {
+  cases: {
+    申込: action("数量を確かめる", {
+      guards: 申込 => [
+        guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
+      ],
+      run: 申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
+    }),
+  },
+});
+
+const 価格を付けるの実装 = implement(価格を付ける, {
+  cases: {
+    有効: action("単価100円", {
+      run: 有効 => ({ result: { 結果: "見積", 金額: 有効.数量 * 100 }, effects: [] }),
+    }),
+  },
+});
 
 export const 見積 = spec({
   name: "見積",
@@ -39,26 +57,5 @@ export const 見積 = spec({
       expect: { result: { 結果: "見積", 金額: 200 }, effects: [] },
     },
   }),
-  implementation: implementComposition(
-    見積もる,
-    implement(検証する, {
-      cases: {
-        申込: action("数量を確かめる", {
-          guards: 申込 => [
-            guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
-          ],
-          run: 申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
-        }),
-      },
-    }),
-    implement(価格を付ける, {
-      cases: {
-        有効: {
-          kind: "decision",
-          id: "単価100円",
-          run: 有効 => ({ result: { 結果: "見積", 金額: 有効.数量 * 100 }, effects: [] }),
-        },
-      },
-    }),
-  ),
+  implementation: implement(見積もる, { stages: [検証するの実装, 価格を付けるの実装] }),
 });

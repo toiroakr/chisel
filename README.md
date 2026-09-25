@@ -244,20 +244,26 @@ Every answer an example writes, the model produces or a conformance subject retu
 
 ## Composition
 
-`compose(first, second)` connects two behaviors the way Souther's `>->` does: of the cases `first` answers, those `second` takes as input flow on to it, and the rest depart the main line and are answered as they are. The result is an ordinary behavior, so it is given examples and a specification like any other, and a row may expect a case that departed at the first stage, which no stage's own examples can state.
+A behavior declares what goes in and what comes out; `implement` supplies how. Composition follows the same split. `c.compose(name, first, second, ...more)` declares a new behavior that connects others the way Souther's `>->` does: of the cases a stage answers, those the next stage takes as input flow on to it, and the rest depart the main line and are answered as they are. `c.implement(composition, { stages: [...] })` then supplies how, from one implementation per stage.
 
 ```ts
-const quote = c.compose(validate, price); // validate: order -> valid | invalid, price: valid -> quoted
-// quote: order -> invalid | quoted
+const validate = c.behavior({ /* order -> valid | invalid */ });
+const price = c.behavior({ /* valid -> quoted */ });
+
+const quote = c.compose("quote", validate, price); // order -> invalid | quoted
+
+const quoteImplementation = c.implement(quote, {
+  stages: [validateImplementation, priceImplementation],
+});
 
 export const quoteSpec = c.spec({
   name: "quote",
   examples: c.examples(quote, { /* rows expecting quoted, and invalid */ }),
-  implementation: c.implementComposition(quote, validateImpl, priceImpl),
+  implementation: quoteImplementation,
 });
 ```
 
-The stages must name their cases by one discriminant; a case that would both depart the first stage and be answered by the second is refused, since a value cannot say which rail it is on. A case that departed stays departed through later compositions (`compose(compose(f, g), h)` never hands `h` what departed `f`). Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
+The composition is an ordinary behavior, so it is given examples and a specification like any other, and a row may expect a case that departed at an early stage, which no stage's own examples can state. A stage may itself be a composition, implemented by its own implementation. The stages must name their cases by one discriminant; a case that would both depart one stage and be answered by a later one is refused, since a value cannot say which rail it is on. A departed case stays departed through the later stages. Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
 
 ## Conformance
 

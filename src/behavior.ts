@@ -1,3 +1,5 @@
+import type { StageImplementations } from "./composition.js";
+import { implementStages, isComposition } from "./composition.js";
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
@@ -149,7 +151,7 @@ export interface Implementation<B extends AnyBehavior> {
   readonly behavior: B;
   readonly cases: ImplementationCases<B>;
   readonly controls: ControlTable<B["effects"]>;
-  readonly stages?: readonly [Implementation<AnyBehavior>, Implementation<AnyBehavior>];
+  readonly pipeline?: readonly [Implementation<AnyBehavior>, Implementation<AnyBehavior>];
 }
 
 export type AnyImplementation = Implementation<AnyBehavior>;
@@ -289,13 +291,39 @@ export function brokenEnsures(
   );
 }
 
+type StagesOf<B> = B extends { readonly stages: infer Stages extends readonly AnyBehavior[] }
+  ? Stages
+  : never;
+
+export type ImplementOptions<B extends AnyBehavior> =
+  | {
+      readonly cases: ImplementationCases<B>;
+      readonly controls?: ControlTable<B["effects"]>;
+    }
+  | { readonly stages: StageImplementations<StagesOf<B>> };
+
 export function implement<B extends AnyBehavior>(
   definition: B,
-  options: NoInfer<{
-    readonly cases: ImplementationCases<B>;
-    readonly controls?: ControlTable<B["effects"]>;
-  }>,
+  options: NoInfer<ImplementOptions<B>>,
 ): Implementation<NoInfer<B>> {
+  return implementAny(definition, options as never) as unknown as Implementation<NoInfer<B>>;
+}
+
+function implementAny(
+  definition: AnyBehavior,
+  options:
+    | { readonly stages: readonly AnyImplementation[] }
+    | {
+        readonly cases: ImplementationCases<AnyBehavior>;
+        readonly controls?: ControlTable<AnyVariantsSchema>;
+      },
+): AnyImplementation {
+  if ("stages" in options) {
+    if (!isComposition(definition)) {
+      throw new SpecificationError(`${definition.name} is not a composition, so it has no stages`);
+    }
+    return implementStages(definition, options.stages);
+  }
   for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
     checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
   }
@@ -303,7 +331,7 @@ export function implement<B extends AnyBehavior>(
     kind: "implementation",
     behavior: definition,
     cases: options.cases,
-    controls: options.controls ?? ({} as ControlTable<B["effects"]>),
+    controls: options.controls ?? {},
   };
 }
 
@@ -388,8 +416,8 @@ export async function runTraced<B extends AnyBehavior>(
     throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
   }
 
-  if (implementation.stages !== undefined) {
-    const execution = await runStages(implementation.stages, parsedInput.value, deps);
+  if (implementation.pipeline !== undefined) {
+    const execution = await runStages(implementation.pipeline, parsedInput.value, deps);
     return {
       execution: validated(definition, parsedInput.value, execution),
       arms: [],

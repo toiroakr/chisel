@@ -10,7 +10,6 @@ import {
   example,
   examples,
   implement,
-  implementComposition,
   int,
   object,
   guard,
@@ -38,9 +37,9 @@ const 価格を付ける = behavior({
   effects: variants("種類", { 通知: object({ 金額: int() }) }),
 });
 
-const 見積もる = compose(検証する, 価格を付ける);
+const 見積もる = compose("見積もる", 検証する, 価格を付ける);
 
-const 数量を確かめる = implement(検証する, {
+const 検証するの実装 = implement(検証する, {
   cases: {
     申込: action("数量を確かめる", {
       guards: 申込 => [guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] }))],
@@ -49,7 +48,7 @@ const 数量を確かめる = implement(検証する, {
   },
 });
 
-const 単価100円 = implement(価格を付ける, {
+const 価格を付けるの実装 = implement(価格を付ける, {
   cases: {
     有効: {
       kind: "decision",
@@ -65,7 +64,7 @@ const 単価100円 = implement(価格を付ける, {
   },
 });
 
-const 見積もり = implementComposition(見積もる, 数量を確かめる, 単価100円);
+const 見積もるの実装 = implement(見積もる, { stages: [検証するの実装, 価格を付けるの実装] });
 
 describe("compose", () => {
   it("takes the first stage's input and answers the cases the second stage did not consume beside its own", () => {
@@ -75,7 +74,7 @@ describe("compose", () => {
       result: 見積もる.result.variantTags,
       effects: 見積もる.effects.variantTags,
     }).toStrictEqual({
-      name: "検証する >-> 価格を付ける",
+      name: "見積もる",
       input: ["申込"],
       result: ["無効", "見積"],
       effects: ["通知"],
@@ -90,7 +89,7 @@ describe("compose", () => {
       effects: variants("種類", {}),
     });
 
-    expect(() => compose(検証する, 別物)).toThrow(
+    expect(() => compose("別物につなぐ", 検証する, 別物)).toThrow(
       new SpecificationError("別物 receives none of the cases 検証する answers"),
     );
   });
@@ -103,7 +102,7 @@ describe("compose", () => {
       effects: variants("種類", {}),
     });
 
-    expect(() => compose(検証する, 無効も返す)).toThrow(
+    expect(() => compose("無効も返す合成", 検証する, 無効も返す)).toThrow(
       new SpecificationError(
         "無効 departs 検証する and is answered by 無効も返す; a value cannot say which rail it is on",
       ),
@@ -113,14 +112,14 @@ describe("compose", () => {
 
 describe("running a composition", () => {
   it("passes a case the second stage receives on to it", async () => {
-    expect(await perform(見積もり, { 状態: "申込", 数量: 2 })).toStrictEqual({
+    expect(await perform(見積もるの実装, { 状態: "申込", 数量: 2 })).toStrictEqual({
       result: { 結果: "見積", 金額: 200 },
       effects: [{ 種類: "通知", 金額: 200 }],
     });
   });
 
   it("answers a case the second stage does not receive as it departed", async () => {
-    expect(await perform(見積もり, { 状態: "申込", 数量: 0 })).toStrictEqual({
+    expect(await perform(見積もるの実装, { 状態: "申込", 数量: 0 })).toStrictEqual({
       result: { 結果: "無効", 理由: "数量なし" },
       effects: [],
     });
@@ -136,17 +135,17 @@ describe("running a composition", () => {
       result: variants("結果", { 完了: object({}) }),
       effects: variants("種類", {}),
     });
-    const 完了する = implement(無効を受ける, {
+    const 無効を受けるの実装 = implement(無効を受ける, {
       cases: {
         見積: { kind: "decision", id: "見積を完了", run: () => ({ result: { 結果: "完了" }, effects: [] }) },
         無効: { kind: "decision", id: "無効を完了", run: () => ({ result: { 結果: "完了" }, effects: [] }) },
       },
     });
-    const 三段 = compose(見積もる, 無効を受ける);
+    const 三段 = compose("三段", 検証する, 価格を付ける, 無効を受ける);
 
     expect({
       result: 三段.result.variantTags,
-      answer: await perform(implementComposition(三段, 見積もり, 完了する), {
+      answer: await perform(implement(三段, { stages: [検証するの実装, 価格を付けるの実装, 無効を受けるの実装] }), {
         状態: "申込",
         数量: 0,
       }),
@@ -171,7 +170,7 @@ describe("the adequacy of a composition", () => {
 
   it("is measured over the composition's own cases, including one that departed early", async () => {
     const report = await check(
-      spec({ name: "見積", examples: 行, implementation: 見積もり }),
+      spec({ name: "見積", examples: 行, implementation: 見積もるの実装 }),
     );
 
     expect({
@@ -204,12 +203,57 @@ describe("a composition row whose answer is owed", () => {
         examples: examples(見積もる, {
           "3個": { given: { 状態: "申込", 数量: 3 }, expect: todo("未定") },
         }),
-        implementation: 見積もり,
+        implementation: 見積もるの実装,
       }),
     );
 
     expect(report.evidence.input).toStrictEqual([
       { case: "申込", specified: false, executed: true, verified: false },
     ]);
+  });
+});
+
+describe("composing a composition", () => {
+  it("takes a composition as a stage, implemented by its own implementation", async () => {
+    const 無効を受ける = behavior({
+      name: "無効を受ける",
+      input: variants("結果", { 見積: object({ 金額: int() }), 無効: object({ 理由: string("理由") }) }),
+      result: variants("結果", { 完了: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 無効を受けるの実装 = implement(無効を受ける, {
+      cases: {
+        見積: action("見積を完了", { run: () => ({ result: { 結果: "完了" as const }, effects: [] }) }),
+        無効: action("無効を完了", { run: () => ({ result: { 結果: "完了" as const }, effects: [] }) }),
+      },
+    });
+    const 入れ子 = compose("入れ子", 見積もる, 無効を受ける);
+
+    expect(
+      await perform(implement(入れ子, { stages: [見積もるの実装, 無効を受けるの実装] }), {
+        状態: "申込",
+        数量: 2,
+      }),
+    ).toStrictEqual({ result: { 結果: "完了" }, effects: [{ 種類: "通知", 金額: 200 }] });
+  });
+
+  it("refuses implementations that are not of its stages", () => {
+    expect(() =>
+      implement(見積もる, { stages: [価格を付けるの実装, 検証するの実装] as never }),
+    ).toThrow(new SpecificationError("The implementations do not implement the stages of 見積もる"));
+  });
+});
+
+describe("the stages an implementation is given", () => {
+  it("must be one implementation per stage, in order, at compile time", () => {
+    // @ts-expect-error 見積もる has two stages
+    expect(() => implement(見積もる, { stages: [検証するの実装] })).toThrow(SpecificationError);
+  });
+
+  it("belong only to a composition", () => {
+    // @ts-expect-error 検証する is not a composition
+    expect(() => implement(検証する, { stages: [検証するの実装] })).toThrow(
+      new SpecificationError("検証する is not a composition, so it has no stages"),
+    );
   });
 });

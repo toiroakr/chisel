@@ -423,7 +423,7 @@ export async function check(
         incompleteness.push({ kind: "row not run", subject: row.name, reason: unstoodOwed });
       } else if (
         implementation !== undefined &&
-        (implementation.stages !== undefined ||
+        (implementation.pipeline !== undefined ||
           (decision !== undefined && decision.kind !== "todo"))
       ) {
         try {
@@ -1118,7 +1118,7 @@ function measureRules(
   met: readonly WayTaken[],
   owed: readonly WayTaken[],
 ): RulesMeasure {
-  if (implementation === undefined || implementation.stages !== undefined) {
+  if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
   }
   const decisions = Object.values(implementation.cases);
@@ -1154,7 +1154,7 @@ function measureArms(
   met: readonly ArmTaken[],
   owed: readonly ArmTaken[],
 ): Measure {
-  if (implementation === undefined || implementation.stages !== undefined) {
+  if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
   }
   const decisions = Object.values(implementation.cases);
