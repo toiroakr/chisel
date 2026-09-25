@@ -23,21 +23,21 @@ The first version describes the domain vocabulary and the behavior boundary, not
 import * as c from "chisel";
 
 const Order = c.variants("state", {
-  unpaid: c.object({ orderId: c.string("OrderId") }),
+  unpaid: c.object({ orderId: c.string() }),
   paid: c.object({
-    orderId: c.string("OrderId"),
-    paymentId: c.string("PaymentId"),
+    orderId: c.string(),
+    paymentId: c.string(),
   }),
 });
 
 const CancelResult = c.variants("type", {
-  accepted: c.object({ orderId: c.string("OrderId") }),
-  rejected: c.object({ reason: c.string("Reason") }),
+  accepted: c.object({ orderId: c.string() }),
+  rejected: c.object({ reason: c.string() }),
 });
 
 const CancelEffect = c.variants("type", {
-  refund: c.object({ paymentId: c.string("PaymentId") }),
-  restock: c.object({ orderId: c.string("OrderId") }),
+  refund: c.object({ paymentId: c.string() }),
+  restock: c.object({ orderId: c.string() }),
 });
 
 export const cancelOrder = c.behavior("cancel-order", {
@@ -60,7 +60,7 @@ export const cancelOrderExamples = c.examples(cancelOrder, {
   "cancel-order: unpaid": {
     given: {
       state: "unpaid",
-      orderId: "<OrderId>",
+      orderId: "<orderId>",
     },
     expect: c.todo(
       "Expected result for unpaid must be decided by a human",
@@ -69,8 +69,8 @@ export const cancelOrderExamples = c.examples(cancelOrder, {
   "cancel-order: paid": {
     given: {
       state: "paid",
-      orderId: "<OrderId>",
-      paymentId: "<PaymentId>",
+      orderId: "<orderId>",
+      paymentId: "<paymentId>",
     },
     expect: c.todo(
       "Expected result for paid must be decided by a human",
@@ -227,7 +227,7 @@ A behavior can state what it ensures of its answer, and declare the outside worl
 ```ts
 const findMember = c.behavior("find-member", {
   input, result, effects,
-  requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string("MemberId"), c.boolean()) },
+  requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string(), c.boolean()) },
   ensures: clause => [
     clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
       asked.$id.gt(0).and(answer.$id.eq(asked.$id)),

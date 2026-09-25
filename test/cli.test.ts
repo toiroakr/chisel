@@ -176,7 +176,7 @@ describe("chisel generate", () => {
         '  "unreferenced: ready": {',
         "    given: {",
         '      state: "ready",',
-        '      id: "<Id>",',
+        '      id: "<id>",',
         "    },",
         '    expect: c.todo("readyの期待結果を人間が決める必要があります"),',
         "  },",

@@ -11,7 +11,7 @@ import {
 } from "../../src/index.js";
 
 const 並べる = behavior("並べる", {
-  input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+  input: variants("状態", { 入力済み: object({ 姓: string(), 名: string() }) }),
   result: object({}),
   effects: variants("種類", {}),
 });

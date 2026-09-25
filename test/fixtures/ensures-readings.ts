@@ -1,9 +1,9 @@
 import { behavior, int, object, string, variants } from "../../src/index.js";
 
 export const 見積もる = behavior("見積もる", {
-  input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string("商品ID") }) }),
+  input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string() }) }),
   result: variants("結果", {
-    見積: object({ 数量: int(), 商品ID: string("商品ID") }),
+    見積: object({ 数量: int(), 商品ID: string() }),
     保留: object({}),
   }),
   effects: variants("種類", {}),

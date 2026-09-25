@@ -29,7 +29,7 @@ const 検証する = behavior("検証する", {
   input: variants("状態", { 申込: object({ 数量: int() }) }),
   result: variants("結果", {
     有効: object({ 数量: int() }),
-    無効: object({ 理由: string("理由") }),
+    無効: object({ 理由: string() }),
   }),
   effects: variants("種類", {}),
 });
@@ -98,7 +98,7 @@ describe("compose", () => {
   it("refuses a case that would be both departed and answered by the second stage", () => {
     const 無効も返す = behavior("無効も返す", {
       input: variants("結果", { 有効: object({ 数量: int() }) }),
-      result: variants("結果", { 無効: object({ 理由: string("理由") }) }),
+      result: variants("結果", { 無効: object({ 理由: string() }) }),
       effects: variants("種類", {}),
     });
 
@@ -122,8 +122,8 @@ describe("compose", () => {
   });
 
   describe("refusing a field the second stage does not declare below the case", () => {
-    const 明細 = object({ 商品: string("商品"), 単価: int() });
-    const 単価を知らない = object({ 商品: string("商品") });
+    const 明細 = object({ 商品: string(), 単価: int() });
+    const 単価を知らない = object({ 商品: string() });
     const 明細を返す = external(
       behavior("明細を返す", {
         input: variants("状態", { 申込: object({}) }),
@@ -194,7 +194,7 @@ describe("compose", () => {
     const 支払方法を返す = behavior("支払方法を返す", {
       input: variants("状態", { 申込: object({}) }),
       result: variants("結果", {
-        有効: object({ 支払: variants("方法", { 現金: object({}), カード: object({ 番号: string("番号") }) }) }),
+        有効: object({ 支払: variants("方法", { 現金: object({}), カード: object({ 番号: string() }) }) }),
       }),
       effects: variants("種類", {}),
     });
@@ -253,8 +253,8 @@ describe("compose", () => {
         compose(
           "現金には番号なし",
           段(
-            { 支払: variants("方法", { 現金: object({}), カード: object({ 番号: string("番号") }) }) },
-            { 支払: object({ 方法: string("方法"), 番号: string("番号") }) },
+            { 支払: variants("方法", { 現金: object({}), カード: object({ 番号: string() }) }) },
+            { 支払: object({ 方法: string(), 番号: string() }) },
           ),
         ),
       ).toThrow(new SpecificationError("返す does not always answer @有効.支払@現金.番号, which 受け取る requires"));
@@ -289,7 +289,7 @@ describe("compose", () => {
       ] as const;
 
     it("refuses a leaf of another type", () => {
-      expect(() => compose("型違い", 段(array(int()), array(string("文字列"))))).toThrow(
+      expect(() => compose("型違い", 段(array(int()), array(string())))).toThrow(
         new SpecificationError("返す answers @有効.値[] as integer, which 受け取る takes as string"),
       );
     });
@@ -301,11 +301,11 @@ describe("compose", () => {
     });
 
     it("accepts a literal where the second stage takes its type", () => {
-      expect(() => compose("リテラルを文字列で", 段(literal("現金"), string("方法")))).not.toThrow();
+      expect(() => compose("リテラルを文字列で", 段(literal("現金"), string()))).not.toThrow();
     });
 
     it("refuses a string where the second stage takes one literal", () => {
-      expect(() => compose("文字列をリテラルで", 段(string("方法"), literal("現金")))).toThrow(
+      expect(() => compose("文字列をリテラルで", 段(string(), literal("現金")))).toThrow(
         new SpecificationError('返す answers @有効.値 as string, which 受け取る takes as literal "現金"'),
       );
     });
@@ -334,13 +334,13 @@ describe("compose", () => {
 
     it("accepts a sum where the second stage takes a record whose value every tag and field fits", () => {
       expect(() =>
-        compose("sum を表で", 段(variants("方法", { カード: object({ 番号: string("番号") }) }), record(string("値")))),
+        compose("sum を表で", 段(variants("方法", { カード: object({ 番号: string() }) }), record(string()))),
       ).not.toThrow();
     });
 
     it("refuses a sum where a case carries a field the record's value does not take", () => {
       expect(() =>
-        compose("sum を数値の表で", 段(variants("方法", { カード: object({ 回数: int() }) }), record(string("値")))),
+        compose("sum を数値の表で", 段(variants("方法", { カード: object({ 回数: int() }) }), record(string()))),
       ).toThrow(new SpecificationError("返す answers @有効.値@カード.回数 as integer, which 受け取る takes as string"));
     });
 
@@ -393,7 +393,7 @@ describe("compose", () => {
   it("compares the tag itself, not the type a first stage's case declares for its discriminant", () => {
     const 文字列で宣言する = behavior("文字列で宣言する", {
       input: variants("状態", { 申込: object({}) }),
-      result: variants("結果", { 有効: object({ 結果: string("結果"), 番号: int() }) }),
+      result: variants("結果", { 有効: object({ 結果: string(), 番号: int() }) }),
       effects: variants("種類", {}),
     });
     const リテラルで受け取る = behavior("リテラルで受け取る", {
@@ -427,7 +427,7 @@ describe("compose", () => {
   it("still refuses a nested field that only shares its name with the discriminant", () => {
     const 詳細を返す = behavior("詳細を返す", {
       input: variants("状態", { 申込: object({}) }),
-      result: variants("結果", { 有効: object({ 詳細: object({ 結果: string("結果") }) }) }),
+      result: variants("結果", { 有効: object({ 詳細: object({ 結果: string() }) }) }),
       effects: variants("種類", {}),
     });
     const 空の詳細で受け取る = behavior("空の詳細で受け取る", {
@@ -442,7 +442,7 @@ describe("compose", () => {
   });
 
   describe("a nested sum the second stage takes as a plain object", () => {
-    const 支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string("番号"), 暗証: string("暗証") }) });
+    const 支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string(), 暗証: string() }) });
     const 段 = (taken: AnySchema) =>
       [
         external(
@@ -465,13 +465,13 @@ describe("compose", () => {
 
     it("refuses when the object does not declare the sum's discriminant", () => {
       expect(() =>
-        compose("判別キーなし", 段(object({ 番号: string("番号").optional(), 暗証: string("暗証").optional() }))),
+        compose("判別キーなし", 段(object({ 番号: string().optional(), 暗証: string().optional() }))),
       ).toThrow(new SpecificationError("支払を返す answers @有効.支払.方法, which object で受け取る does not declare"));
     });
 
     it("refuses when the object does not declare a field one of the cases carries", () => {
       expect(() =>
-        compose("暗証なし", 段(object({ 方法: string("方法"), 番号: string("番号").optional() }))),
+        compose("暗証なし", 段(object({ 方法: string(), 番号: string().optional() }))),
       ).toThrow(new SpecificationError("支払を返す answers @有効.支払@カード.暗証, which object で受け取る does not declare"));
     });
 
@@ -479,14 +479,14 @@ describe("compose", () => {
       expect(() =>
         compose(
           "すべて宣言",
-          段(object({ 方法: string("方法"), 番号: string("番号").optional(), 暗証: string("暗証").optional() })),
+          段(object({ 方法: string(), 番号: string().optional(), 暗証: string().optional() })),
         ),
       ).not.toThrow();
     });
   });
 
   describe("a plain object the second stage takes as a nested sum", () => {
-    const 受け取る支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string("番号") }) });
+    const 受け取る支払 = variants("方法", { 現金: object({}), カード: object({ 番号: string() }) });
     const 段 = (answered: AnySchema) =>
       [
         external(
@@ -509,7 +509,7 @@ describe("compose", () => {
 
     it("compares the object with the case its literal discriminant names", () => {
       expect(() =>
-        compose("暗証つき", 段(object({ 方法: literal("カード"), 番号: string("番号"), 暗証: string("暗証") }))),
+        compose("暗証つき", 段(object({ 方法: literal("カード"), 番号: string(), 暗証: string() }))),
       ).toThrow(new SpecificationError("object で返す answers @有効.支払.暗証, which sum で受け取る does not declare"));
     });
 
@@ -520,13 +520,13 @@ describe("compose", () => {
     });
 
     it("refuses an object that does not answer the discriminant the sum needs", () => {
-      expect(() => compose("方法なし", 段(object({ 番号: string("番号") })))).toThrow(
+      expect(() => compose("方法なし", 段(object({ 番号: string() })))).toThrow(
         new SpecificationError("object で返す does not always answer @有効.支払.方法, which sum で受け取る requires"),
       );
     });
 
     it("refuses an object whose discriminant is a string, which may name no case", () => {
-      expect(() => compose("方法は文字列", 段(object({ 方法: string("方法"), 番号: string("番号") })))).toThrow(
+      expect(() => compose("方法は文字列", 段(object({ 方法: string(), 番号: string() })))).toThrow(
         new SpecificationError('object で返す answers @有効.支払.方法 as string, which sum で受け取る takes as "現金" | "カード"'),
       );
     });
@@ -589,7 +589,7 @@ describe("compose", () => {
     const 品目ごとに返す = behavior("品目ごとに返す", {
       input: variants("状態", { 申込: object({}) }),
       result: variants("結果", {
-        有効: object({ 価格: object({ りんご: object({ 金額: int(), 通貨: string("通貨") }) }) }),
+        有効: object({ 価格: object({ りんご: object({ 金額: int(), 通貨: string() }) }) }),
       }),
       effects: variants("種類", {}),
     });
@@ -610,8 +610,8 @@ describe("compose", () => {
   });
 
   describe("comparing through an optional on only one side of the join", () => {
-    const 明細 = object({ 商品: string("商品"), 単価: int() });
-    const 単価を知らない = object({ 商品: string("商品") });
+    const 明細 = object({ 商品: string(), 単価: int() });
+    const 単価を知らない = object({ 商品: string() });
     const 段 = (name: string, answered: AnySchema, taken: AnySchema) =>
       [
         external(
@@ -665,7 +665,7 @@ describe("running a composition", () => {
     const 無効を受ける = behavior("無効を受ける", {
       input: variants("結果", {
         見積: object({ 金額: int() }),
-        無効: object({ 理由: string("理由") }),
+        無効: object({ 理由: string() }),
       }),
       result: variants("結果", { 完了: object({}) }),
       effects: variants("種類", {}),
@@ -750,7 +750,7 @@ describe("a composition row whose answer is owed", () => {
 describe("composing a composition", () => {
   it("takes a composition as a stage, implemented by its own implementation", async () => {
     const 無効を受ける = behavior("無効を受ける", {
-      input: variants("結果", { 見積: object({ 金額: int() }), 無効: object({ 理由: string("理由") }) }),
+      input: variants("結果", { 見積: object({ 金額: int() }), 無効: object({ 理由: string() }) }),
       result: variants("結果", { 完了: object({}) }),
       effects: variants("種類", {}),
     });

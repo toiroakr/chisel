@@ -19,8 +19,8 @@ import {
 
 const Cart = variants("状態", {
   商品あり: object({
-    カートID: string("カートID"),
-    クーポン: string("クーポンコード").optional(),
+    カートID: string(),
+    クーポン: string().optional(),
   }),
 });
 
@@ -40,7 +40,7 @@ describe("generateExamples starts from what the rows already say", () => {
     });
 
     expect(generate(existing).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
+      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポン>" },
     ]);
   });
 
@@ -68,7 +68,7 @@ describe("generateExamples starts from what the rows already say", () => {
     });
 
     expect(generate(existing).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
+      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポン>" },
     ]);
   });
 });
@@ -85,7 +85,7 @@ describe("generateExamples for classes", () => {
     expect(generate(existing).rows).toStrictEqual([
       {
         name: "注文を確定する: @商品あり.クーポン = あり",
-        given: { 状態: "商品あり", カートID: "<カートID>", クーポン: "<クーポンコード>" },
+        given: { 状態: "商品あり", カートID: "<カートID>", クーポン: "<クーポン>" },
         reason: "@商品あり.クーポンがありの期待結果を人間が決める必要があります",
       },
     ]);
@@ -162,15 +162,15 @@ describe("generateExamples for border points", () => {
   it("writes a value of the length a point on a length border asks for", () => {
     const 登録する = behavior("登録する", {
       input: variants("状態", {
-        入力済み: object({ 商品ID: string("ID").refine(v => v.length().gte(4)) }),
+        入力済み: object({ ID: string().refine(v => v.length().gte(4)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
     });
 
     expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "入力済み", 商品ID: "<ID>" },
-      { 状態: "入力済み", 商品ID: "<ID>_" },
+      { 状態: "入力済み", ID: "<ID>" },
+      { 状態: "入力済み", ID: "<ID>_" },
     ]);
   });
 
@@ -213,7 +213,7 @@ describe("generateExamples and excluded classes", () => {
   it("offers rows on both sides of a border on a string value, which has no step", () => {
     const 並べる = behavior("並べる", {
       input: variants("状態", {
-        入力済み: object({ 見出し: string("見出し").refine(v => v.gte("m")) }),
+        入力済み: object({ 見出し: string().refine(v => v.gte("m")) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -243,7 +243,7 @@ describe("rows generate cannot make valid", () => {
 
 describe("generateExamples below a length of zero", () => {
   const 見出しを確かめる = behavior("見出しを確かめる", {
-    input: variants("状態", { 入力済み: object({ 見出し: string("見出し") }) }),
+    input: variants("状態", { 入力済み: object({ 見出し: string() }) }),
     result: variants("結果", { 受付: object({}), 空: object({}) }),
     effects: variants("種類", {}),
   });

@@ -17,7 +17,7 @@ const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", {
     商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
   }),
-  result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+  result: variants("結果", { 確定: object({}), 不可: object({ 理由: string() }) }),
   effects: variants("種類", {}),
 });
 

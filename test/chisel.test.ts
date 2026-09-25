@@ -20,17 +20,17 @@ import {
 } from "../src/index.js";
 
 const Input = variants("state", {
-  draft: object({ id: string("Id") }),
-  published: object({ id: string("Id") }),
+  draft: object({ id: string() }),
+  published: object({ id: string() }),
 });
 
 const Result = variants("type", {
-  accepted: object({ id: string("Id") }),
-  rejected: object({ reason: string("Reason") }),
+  accepted: object({ id: string() }),
+  rejected: object({ reason: string() }),
 });
 
 const Effect = variants("type", {
-  notify: object({ id: string("Id") }),
+  notify: object({ id: string() }),
 });
 
 function publishingBehavior() {
@@ -78,8 +78,8 @@ describe("chisel", () => {
     const generated = generate(definition).rows;
 
     expect(generated.map(row => row.given)).toStrictEqual([
-      { state: "draft", id: "<Id>" },
-      { state: "published", id: "<Id>" },
+      { state: "draft", id: "<id>" },
+      { state: "published", id: "<id>" },
     ]);
   });
 
@@ -419,7 +419,7 @@ describe("generateExamples", () => {
     const generated = generate(rows).rows;
 
     expect(generated.map(row => row.given)).toStrictEqual([
-      { state: "published", id: "<Id>" },
+      { state: "published", id: "<id>" },
     ]);
   });
 
@@ -435,7 +435,7 @@ describe("generateExamples", () => {
     const generated = generate(rows).rows;
 
     expect(generated.map(row => row.given)).toStrictEqual([
-      { state: "draft", id: "<Id>" },
+      { state: "draft", id: "<id>" },
     ]);
   });
 });
@@ -711,7 +711,7 @@ describe("coverage-driven adequacy vetoes", () => {
   it("treats a non-sum result schema as trivially fully covered", async () => {
     const definition = behavior("publish", {
       input: Input,
-      result: string("Message"),
+      result: string(),
       effects: Effect,
     });
     const implementation = implement(definition, {
@@ -820,8 +820,8 @@ describe("coverage-driven adequacy vetoes", () => {
 
   it("vetoes adequacy when an example never covers one of the effect variants", async () => {
     const EffectWithAudit = variants("type", {
-      notify: object({ id: string("Id") }),
-      audit: object({ id: string("Id") }),
+      notify: object({ id: string() }),
+      audit: object({ id: string() }),
     });
     const definition = behavior("publish", {
       input: Input,

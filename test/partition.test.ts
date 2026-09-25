@@ -22,7 +22,7 @@ function summary(position: Position) {
 describe("positionsOf", () => {
   it("divides an optional field into the classes なし and あり", () => {
     const Cart = variants("状態", {
-      商品あり: object({ クーポン: string("クーポンコード").optional() }),
+      商品あり: object({ クーポン: string().optional() }),
     });
 
     expect(positionsOf(Cart).map(summary)).toStrictEqual([
@@ -84,10 +84,10 @@ describe("positionsOf", () => {
   it("reports a field no rule draws a line through as not derivable", () => {
     const Cart = variants("状態", {
       商品あり: object({
-        カートID: string("カートID"),
+        カートID: string(),
         単価: number(),
         作成日時: instant(),
-        メモ: record(string("メモ")),
+        メモ: record(string()),
       }),
     });
 
@@ -138,7 +138,7 @@ describe("DividedPosition.classify", () => {
   const Cart = variants("状態", {
     空: object({}),
     商品あり: object({
-      クーポン: string("クーポンコード").optional(),
+      クーポン: string().optional(),
       明細: array(object({ 軽減税率: boolean() })),
     }),
   });
@@ -237,7 +237,7 @@ describe("borders an invariant draws", () => {
   });
 
   it("draws a border on the length of a string", () => {
-    expect(bordersAt(string("商品ID").refine(v => v.length().gte(3)))).toStrictEqual([
+    expect(bordersAt(string().refine(v => v.length().gte(3)))).toStrictEqual([
       {
         rule: "invariant length($) >= 3",
         points: [
@@ -265,7 +265,7 @@ describe("borders an invariant draws", () => {
 describe("a border with nothing past it", () => {
   it("excludes the IN point of an upper bound at the empty string, below which no string exists", () => {
     const [position] = positionsOf(
-      variants("状態", { 入力済み: object({ 見出し: string("見出し").refine(v => v.lte("")) }) }),
+      variants("状態", { 入力済み: object({ 見出し: string().refine(v => v.lte("")) }) }),
     );
 
     expect(position!.borders[0]!.points[2]).toMatchObject({ role: "IN", status: "excluded" });
@@ -355,7 +355,7 @@ describe("a length border stops at zero", () => {
   }
 
   it("names no OFF or OUT point below a lower bound of zero, since no length is negative", () => {
-    expect(pointsAt(string("見出し").refine(v => v.length().gte(0)))).toStrictEqual([
+    expect(pointsAt(string().refine(v => v.length().gte(0)))).toStrictEqual([
       { role: "ON", relation: "= 0", status: "owed" },
       { role: "OFF", relation: "none: a length is never negative", status: "no point" },
       { role: "IN", relation: "> 0", status: "owed" },
@@ -364,7 +364,7 @@ describe("a length border stops at zero", () => {
   });
 
   it("names no IN point below an upper bound of zero", () => {
-    expect(pointsAt(string("見出し").refine(v => v.length().lte(0)))).toStrictEqual([
+    expect(pointsAt(string().refine(v => v.length().lte(0)))).toStrictEqual([
       { role: "ON", relation: "= 0", status: "owed" },
       { role: "OFF", relation: "= 1", status: "excluded" },
       { role: "IN", relation: "none: a length is never negative", status: "no point" },
@@ -373,7 +373,7 @@ describe("a length border stops at zero", () => {
   });
 
   it("names no neighbour or run below a length the rule keeps", () => {
-    expect(pointsAt(string("見出し").refine(v => v.length().eq(0)))).toStrictEqual([
+    expect(pointsAt(string().refine(v => v.length().eq(0)))).toStrictEqual([
       { role: "ON", relation: "= 0", status: "owed" },
       { role: "OFF", relation: "none: a length is never negative", status: "no point" },
       { role: "OFF", relation: "= 1", status: "excluded" },

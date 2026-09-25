@@ -15,7 +15,7 @@ import {
 
 const 検証する = behavior("検証する", {
   input: variants("状態", { 申込: object({ 数量: int() }) }),
-  result: variants("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string("理由") }) }),
+  result: variants("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string() }) }),
   effects: variants("種類", {}),
 });
 

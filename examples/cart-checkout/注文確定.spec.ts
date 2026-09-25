@@ -1,8 +1,8 @@
 import * as c from "../../src/index.js";
 
-const カートID = c.string("カートID");
-const 商品ID = c.string("商品ID");
-const クーポンコード = c.string("クーポンコード");
+const カートID = c.string();
+const 商品ID = c.string();
+const クーポンコード = c.string();
 
 const 明細 = c.object({
   商品ID,
@@ -23,7 +23,7 @@ const カート = c.variants("状態", {
 
 const 確定結果 = c.variants("結果", {
   確定: c.object({ カートID, 合計金額: c.number() }),
-  不可: c.object({ 理由: c.string("確定不可理由") }),
+  不可: c.object({ 理由: c.string() }),
 });
 
 const 確定作用 = c.variants("種類", {

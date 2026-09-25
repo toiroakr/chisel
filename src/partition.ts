@@ -141,6 +141,10 @@ function fieldsOf(
   );
 }
 
+function fieldName(path: string): string | undefined {
+  return /\.([^.@[\]{}?]+)(?:\[\]|\?|\{\})*$/u.exec(path)?.[1];
+}
+
 function positionAt(
   schema: AnySchema,
   path: string,
@@ -160,7 +164,7 @@ function positionAt(
         ["なし", "あり"],
         focus,
         value => (value === undefined ? "なし" : "あり"),
-        className => (className === "なし" ? undefined : inner.placeholder()),
+        className => (className === "なし" ? undefined : inner.placeholder(fieldName(path))),
       ),
       ...positionAt(
         inner,
@@ -168,7 +172,7 @@ function positionAt(
         {
           reach: given => focus.reach(given).filter(value => value !== undefined),
           update: (given, change) =>
-            focus.update(given, value => change(value === undefined ? inner.placeholder() : value)),
+            focus.update(given, value => change(value === undefined ? inner.placeholder(fieldName(path)) : value)),
         },
         reading,
       ),
@@ -189,7 +193,7 @@ function positionAt(
       reach: given => focus.reach(given).flatMap(value => (Array.isArray(value) ? value : [])),
       update: (given, change) =>
         focus.update(given, value => {
-          const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder()];
+          const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder(fieldName(path))];
           return items.map((item, index) => (index === 0 ? change(item) : item));
         }),
     }, reading);
@@ -209,7 +213,7 @@ function positionAt(
           const present =
             entries.length > 0
               ? entries
-              : [["<key>", (schema as RecordSchema<unknown>).value.placeholder()] as const];
+              : [["<key>", (schema as RecordSchema<unknown>).value.placeholder(fieldName(path))] as const];
           return Object.fromEntries(present.map(([key, item]) => [key, change(item)]));
         }),
     }, reading);

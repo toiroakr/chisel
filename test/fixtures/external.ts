@@ -1,7 +1,7 @@
 import { behavior, examples, external, int, object, spec, string, variants } from "../../src/index.js";
 
 const 在庫を照会する = behavior("在庫を照会する", {
-  input: variants("種別", { 商品: object({ 商品ID: string("商品ID") }) }),
+  input: variants("種別", { 商品: object({ 商品ID: string() }) }),
   result: variants("結果", { 在庫: object({ 在庫数: int() }) }),
   effects: variants("種類", {}),
 });

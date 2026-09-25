@@ -1,8 +1,8 @@
 import * as c from "../src/index.js";
 
-const OrderId = c.string("OrderId");
-const PaymentId = c.string("PaymentId");
-const ShipmentId = c.string("ShipmentId");
+const OrderId = c.string();
+const PaymentId = c.string();
+const ShipmentId = c.string();
 
 const Order = c.variants("state", {
   unpaid: c.object({ orderId: OrderId }),
@@ -19,17 +19,17 @@ const CancelResult = c.variants("type", {
       orderId: OrderId,
     }),
   }),
-  rejected: c.object({ reason: c.string("CancelRejection") }),
+  rejected: c.object({ reason: c.string() }),
 });
 
 const CancelEffect = c.variants("type", {
   refund: c.object({
     paymentId: PaymentId,
-    idempotencyKey: c.string("IdempotencyKey"),
+    idempotencyKey: c.string(),
   }),
   restock: c.object({
     orderId: OrderId,
-    idempotencyKey: c.string("IdempotencyKey"),
+    idempotencyKey: c.string(),
   }),
 });
 

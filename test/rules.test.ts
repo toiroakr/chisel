@@ -24,13 +24,13 @@ import type { Implementation } from "../src/index.js";
 const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", {
     商品あり: object({
-      カートID: string("カートID"),
+      カートID: string(),
       明細: array(object({ 数量: int(), 在庫数: int() })),
     }),
   }),
   result: variants("結果", {
-    確定: object({ カートID: string("カートID") }),
-    不可: object({ 理由: string("理由") }),
+    確定: object({ カートID: string() }),
+    不可: object({ 理由: string() }),
   }),
   effects: variants("種類", {}),
 });
@@ -366,7 +366,7 @@ describe("match over a sum field", () => {
 describe("ways generate could not compose", () => {
   it("says which ways no row was composed for rather than leaving them out", () => {
     const 並べる = behavior("並べる", {
-      input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      input: variants("状態", { 入力済み: object({ 姓: string(), 名: string() }) }),
       result: object({}),
       effects: variants("種類", {}),
     });
@@ -389,7 +389,7 @@ describe("what match can branch on", () => {
   const 送る = behavior("送る", {
     input: variants("状態", {
       確定済み: object({
-        メモ: string("メモ"),
+        メモ: string(),
         配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }),
       }),
     }),

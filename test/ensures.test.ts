@@ -19,10 +19,10 @@ import {
 import type { Rule, TermOf } from "../src/index.js";
 
 const 注文を確定する = behavior("注文を確定する", {
-  input: variants("状態", { 商品あり: object({ カートID: string("カートID") }) }),
+  input: variants("状態", { 商品あり: object({ カートID: string() }) }),
   result: variants("結果", {
-    確定: object({ カートID: string("カートID") }),
-    不可: object({ 理由: string("理由") }),
+    確定: object({ カートID: string() }),
+    不可: object({ 理由: string() }),
   }),
   effects: variants("種類", {}),
   ensures: clause => [
@@ -93,8 +93,8 @@ describe("ensures", () => {
   it("refuses a clause that does not relate the input to the answer", () => {
     expect(() =>
       behavior("壊れた宣言", {
-        input: variants("状態", { 商品あり: object({ カートID: string("カートID") }) }),
-        result: variants("結果", { 確定: object({ カートID: string("カートID") }) }),
+        input: variants("状態", { 商品あり: object({ カートID: string() }) }),
+        result: variants("結果", { 確定: object({ カートID: string() }) }),
         effects: variants("種類", {}),
         ensures: clause => [clause.when("答えだけ", ["確定"], (_, 答え) => 答え.$カートID.eq("x"))],
       }),
@@ -229,10 +229,10 @@ describe("ensures clause names", () => {
 
 describe("how much of an ensures rule the check reads", () => {
   const 見積もる = behavior("見積もる", {
-    input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string("商品ID") }) }),
+    input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string() }) }),
     result: variants("結果", {
-      見積: object({ 数量: int(), 商品ID: string("商品ID"), 明細: array(int()) }),
-      不可: object({ 理由: string("理由") }),
+      見積: object({ 数量: int(), 商品ID: string(), 明細: array(int()) }),
+      不可: object({ 理由: string() }),
       保留: object({}),
     }),
     effects: variants("種類", {}),

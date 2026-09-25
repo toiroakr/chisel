@@ -15,7 +15,7 @@ export interface Schema<T> {
   readonly kind: string;
   readonly invariants: readonly Rule[];
   parse(value: unknown, path?: string): ValidationResult<T>;
-  placeholder(): unknown;
+  placeholder(name?: string): unknown;
   refine(rule: InvariantRule<T>): this;
   // Typed through `this` rather than T: naming T here would make Schema<T>
   // invariant in T, and StringSchema would stop being an AnySchema.
@@ -42,7 +42,6 @@ export type Infer<S> = S extends Schema<infer T> ? T : never;
 
 export interface StringSchema extends Schema<string>, LengthBounds {
   readonly kind: "string";
-  readonly name: string;
 }
 
 export interface NumberSchema extends Schema<number>, ValueBounds {
@@ -176,10 +175,10 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         ? result
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
-    placeholder() {
+    placeholder(name?: string) {
       return invariants
         .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder());
+        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
@@ -207,18 +206,17 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
   return schema as unknown as S;
 }
 
-export function string(name = "string"): StringSchema {
+export function string(): StringSchema {
   return refinable<StringSchema>({
     kind: "string",
-    name,
     parse,
-    placeholder: () => `<${name}>`,
+    placeholder: (name = "string") => `<${name}>`,
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<string> {
     return typeof value === "string"
       ? valid(value)
-      : invalid(path, `Expected ${name}`);
+      : invalid(path, "Expected a string");
   }
 }
 
@@ -342,7 +340,7 @@ export function object<const Shape extends ObjectShape>(
   function placeholder(): unknown {
     const output: Record<string, unknown> = {};
     for (const [key, field] of Object.entries(shape)) {
-      const value = field.placeholder();
+      const value = field.placeholder(key);
       if (value !== undefined) {
         output[key] = value;
       }
@@ -356,7 +354,7 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
     kind: "array",
     element,
     parse,
-    placeholder: () => [element.placeholder()],
+    placeholder: (name?: string) => [element.placeholder(name)],
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<readonly T[]> {

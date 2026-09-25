@@ -19,17 +19,17 @@ import {
 
 const Cart = variants("状態", {
   商品あり: object({
-    カートID: string("カートID"),
-    クーポン: string("クーポンコード").optional(),
+    カートID: string(),
+    クーポン: string().optional(),
   }),
 });
 
 const Outcome = variants("結果", {
-  確定: object({ カートID: string("カートID") }),
+  確定: object({ カートID: string() }),
 });
 
 const Effect = variants("種類", {
-  決済要求: object({ カートID: string("カートID") }),
+  決済要求: object({ カートID: string() }),
 });
 
 const 注文を確定する = behavior("注文を確定する", {
@@ -116,8 +116,8 @@ describe("equivalence partitions in the adequacy report", () => {
 
 describe("graded evidence in the adequacy report", () => {
   const Verdict = variants("結果", {
-    確定: object({ カートID: string("カートID") }),
-    不可: object({ 理由: string("理由") }),
+    確定: object({ カートID: string() }),
+    不可: object({ 理由: string() }),
   });
   const 判定する = behavior("判定する", {
     input: Cart,
@@ -393,7 +393,7 @@ describe("border points in the adequacy report", () => {
   it("reads the length of a value where the border is drawn on its length", async () => {
     const 登録する = behavior("登録する", {
       input: variants("状態", {
-        入力済み: object({ 商品ID: string("商品ID").refine(v => v.length().gte(3)) }),
+        入力済み: object({ 商品ID: string().refine(v => v.length().gte(3)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),

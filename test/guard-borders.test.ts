@@ -21,7 +21,7 @@ import type { Rule, TermOf } from "../src/index.js";
 
 const 注文を受け付ける = behavior("注文を受け付ける", {
   input: variants("状態", { 入力済み: object({ 合計: int().refine(v => v.gte(0)) }) }),
-  result: variants("結果", { 受付: object({}), 要承認: object({ 理由: string("理由") }) }),
+  result: variants("結果", { 受付: object({}), 要承認: object({ 理由: string() }) }),
   effects: variants("種類", {}),
 });
 
@@ -81,7 +81,7 @@ describe("a guard's border is met by reaching the comparison", () => {
     input: variants("状態", {
       申請済み: object({ 会員: int(), 合計: int() }),
     }),
-    result: variants("結果", { 受付: object({}), 却下: object({ 理由: string("理由") }) }),
+    result: variants("結果", { 受付: object({}), 却下: object({ 理由: string() }) }),
     effects: variants("種類", {}),
   });
   const 二段で審査する = implement(審査する, {
@@ -149,7 +149,7 @@ describe("a border between two positions", () => {
     input: variants("状態", {
       商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
     }),
-    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string() }) }),
     effects: variants("種類", {}),
   });
   const 在庫を確かめる = implement(注文を確定する, {
@@ -276,7 +276,7 @@ describe("elements a quantifier never reached", () => {
     input: variants("状態", {
       商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
     }),
-    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string() }) }),
     effects: variants("種類", {}),
   });
   const 在庫を確かめる = implement(注文を確定する, {
@@ -319,7 +319,7 @@ describe("generateExamples for guard borders", () => {
     input: variants("状態", {
       商品あり: object({ 明細: array(object({ 数量: int(), 在庫数: int() })) }),
     }),
-    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string("理由") }) }),
+    result: variants("結果", { 確定: object({}), 不可: object({ 理由: string() }) }),
     effects: variants("種類", {}),
   });
   const 在庫を確かめる = implement(注文を確定する, {
@@ -540,7 +540,7 @@ describe("comparisons Chisel could not read", () => {
 
   it("names a comparison it drew no border for and leaves the verdict undetermined", async () => {
     const 比べる = behavior("比べる", {
-      input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      input: variants("状態", { 入力済み: object({ 姓: string(), 名: string() }) }),
       result: object({}),
       effects: variants("種類", {}),
     });

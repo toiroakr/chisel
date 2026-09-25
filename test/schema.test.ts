@@ -17,7 +17,7 @@ import type { Infer, Tags, VariantOf } from "../src/index.js";
 
 describe("array", () => {
   it("accepts a list whose every item matches the element schema", () => {
-    const Tags = array(string("Tag"));
+    const Tags = array(string());
 
     const result = Tags.parse(["a", "b"]);
 
@@ -25,7 +25,7 @@ describe("array", () => {
   });
 
   it("rejects a value that is not an array", () => {
-    const Tags = array(string("Tag"));
+    const Tags = array(string());
 
     const result = Tags.parse("not-an-array");
 
@@ -33,7 +33,7 @@ describe("array", () => {
   });
 
   it("reports the index of the first invalid item in the path", () => {
-    const Tags = array(string("Tag"));
+    const Tags = array(string());
 
     const result = Tags.parse(["a", 1, "c"]);
 
@@ -42,15 +42,15 @@ describe("array", () => {
   });
 
   it("shows the shape of its element by holding one placeholder element", () => {
-    const Tags = array(string("Tag"));
+    const Tags = array(string());
 
-    expect(Tags.placeholder()).toStrictEqual(["<Tag>"]);
+    expect(Tags.placeholder()).toStrictEqual(["<string>"]);
   });
 });
 
 describe("optional", () => {
   it("accepts a value matching the wrapped schema", () => {
-    const Note = string("Note").optional();
+    const Note = string().optional();
 
     const result = Note.parse("hello");
 
@@ -58,7 +58,7 @@ describe("optional", () => {
   });
 
   it("accepts undefined even though the wrapped schema would reject it", () => {
-    const Note = string("Note").optional();
+    const Note = string().optional();
 
     const result = Note.parse(undefined);
 
@@ -66,7 +66,7 @@ describe("optional", () => {
   });
 
   it("still rejects a value of the wrong type", () => {
-    const Note = string("Note").optional();
+    const Note = string().optional();
 
     const result = Note.parse(42);
 
@@ -75,8 +75,8 @@ describe("optional", () => {
 
   it("lets an object omit an optional field entirely", () => {
     const Order = object({
-      id: string("OrderId"),
-      note: string("Note").optional(),
+      id: string(),
+      note: string().optional(),
     });
 
     const result = Order.parse({ id: "o-1" });
@@ -87,19 +87,19 @@ describe("optional", () => {
 
   it("omits optional fields from the generated placeholder", () => {
     const Order = object({
-      id: string("OrderId"),
-      note: string("Note").optional(),
+      id: string(),
+      note: string().optional(),
     });
 
     const placeholder = Order.placeholder();
 
-    expect(placeholder).toStrictEqual({ id: "<OrderId>" });
+    expect(placeholder).toStrictEqual({ id: "<id>" });
   });
 
   it("types an optional field as an omittable key, not a required T | undefined", () => {
     const Order = object({
-      id: string("OrderId"),
-      note: string("Note").optional(),
+      id: string(),
+      note: string().optional(),
     });
 
     // This would fail to compile (not just at runtime) if `note` were typed
@@ -147,11 +147,32 @@ describe("record", () => {
 
 describe("string", () => {
   it("rejects a non-string value", () => {
-    const Id = string("Id");
+    const Id = string();
 
     const result = Id.parse(42);
 
     expect(result.success).toBe(false);
+  });
+
+  it("reports a value that is not a string with the path that names the field", () => {
+    const Order = object({ orderId: string() });
+
+    expect(Order.parse({ orderId: 42 })).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.orderId", message: "Expected a string" }],
+    });
+  });
+
+  it("names its placeholder after the object field it fills", () => {
+    expect(object({ orderId: string() }).placeholder()).toStrictEqual({ orderId: "<orderId>" });
+  });
+
+  it("names an element's placeholder after the field holding the array", () => {
+    expect(object({ tags: array(string()) }).placeholder()).toStrictEqual({ tags: ["<tags>"] });
+  });
+
+  it("names its placeholder after its type where no field holds it", () => {
+    expect(string().placeholder()).toBe("<string>");
   });
 });
 
@@ -249,7 +270,7 @@ describe("literal", () => {
 
 describe("object", () => {
   it("rejects a non-object value", () => {
-    const Order = object({ id: string("Id") });
+    const Order = object({ id: string() });
 
     expect(Order.parse("not-an-object").success).toBe(false);
     expect(Order.parse(null).success).toBe(false);
@@ -257,7 +278,7 @@ describe("object", () => {
   });
 
   it("collects issues from every invalid field, not just the first", () => {
-    const Order = object({ id: string("Id"), quantity: number() });
+    const Order = object({ id: string(), quantity: number() });
 
     const result = Order.parse({ id: 42, quantity: "two" });
 
@@ -266,7 +287,7 @@ describe("object", () => {
   });
 
   it("rejects a key its shape does not declare, naming the key in the path", () => {
-    const Order = object({ id: string("Id") });
+    const Order = object({ id: string() });
 
     const result = Order.parse({ id: "a", secret: "leak" });
 
@@ -277,7 +298,7 @@ describe("object", () => {
   });
 
   it("rejects an undeclared key even when its value is undefined", () => {
-    const Order = object({ id: string("Id") });
+    const Order = object({ id: string() });
 
     const result = Order.parse({ id: "a", secret: undefined });
 
@@ -288,7 +309,7 @@ describe("object", () => {
   });
 
   it("rejects an undeclared key inside a nested object, naming its full path", () => {
-    const Order = object({ line: object({ sku: string("Sku") }) });
+    const Order = object({ line: object({ sku: string() }) });
 
     const result = Order.parse({ line: { sku: "a", secret: "leak" } });
 
@@ -299,7 +320,7 @@ describe("object", () => {
   });
 
   it("drops a declared optional field whose value is undefined instead of rejecting it", () => {
-    const Order = object({ id: string("OrderId"), note: string("Note").optional() });
+    const Order = object({ id: string(), note: string().optional() });
 
     const result = Order.parse({ id: "o-1", note: undefined });
 
@@ -309,8 +330,8 @@ describe("object", () => {
 
 describe("variants", () => {
   const Shape = variants("state", {
-    draft: object({ id: string("Id") }),
-    published: object({ id: string("Id"), publishedAt: instant() }),
+    draft: object({ id: string() }),
+    published: object({ id: string(), publishedAt: instant() }),
   });
 
   it("rejects a non-object value", () => {
@@ -342,7 +363,7 @@ describe("variants", () => {
   });
 
   it("accepts a variant whose object declares the discriminant itself", () => {
-    const Declared = variants("state", { draft: object({ state: literal("draft"), id: string("Id") }) });
+    const Declared = variants("state", { draft: object({ state: literal("draft"), id: string() }) });
 
     const result = Declared.parse({ state: "draft", id: "a" });
 
@@ -365,7 +386,7 @@ describe("variants", () => {
   });
 
   it("builds a placeholder for a given variant tag", () => {
-    expect(Shape.placeholderFor("draft")).toStrictEqual({ state: "draft", id: "<Id>" });
+    expect(Shape.placeholderFor("draft")).toStrictEqual({ state: "draft", id: "<id>" });
   });
 
   it("defaults its own placeholder to the first declared variant", () => {
@@ -379,21 +400,21 @@ describe("variants", () => {
 
 describe("isVariantsSchema", () => {
   it("is true for a schema built with variants()", () => {
-    const Shape = variants("state", { draft: object({ id: string("Id") }) });
+    const Shape = variants("state", { draft: object({ id: string() }) });
 
     expect(isVariantsSchema(Shape)).toBe(true);
   });
 
   it("is false for a non-sum schema", () => {
-    expect(isVariantsSchema(string("Id"))).toBe(false);
-    expect(isVariantsSchema(object({ id: string("Id") }))).toBe(false);
+    expect(isVariantsSchema(string())).toBe(false);
+    expect(isVariantsSchema(object({ id: string() }))).toBe(false);
   });
 });
 
 describe("tagOf", () => {
   const Shape = variants("state", {
-    draft: object({ id: string("Id") }),
-    published: object({ id: string("Id") }),
+    draft: object({ id: string() }),
+    published: object({ id: string() }),
   });
 
   it("returns the discriminant tag for a value belonging to a known variant", () => {
@@ -413,8 +434,8 @@ describe("tagOf", () => {
 
 describe("Tags and VariantOf", () => {
   const Shape = variants("state", {
-    draft: object({ id: string("Id") }),
-    published: object({ id: string("Id"), url: string("Url") }),
+    draft: object({ id: string() }),
+    published: object({ id: string(), url: string() }),
   });
 
   it("names the tags of a sum", () => {

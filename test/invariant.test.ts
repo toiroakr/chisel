@@ -51,7 +51,7 @@ describe("invariant", () => {
   });
 
   it("measures the length of a string", () => {
-    const 商品ID = string("商品ID").refine(v => v.length().gte(3));
+    const 商品ID = string().refine(v => v.length().gte(3));
 
     expect([商品ID.parse("A-1").success, 商品ID.parse("A1").success]).toStrictEqual([
       true,
@@ -99,7 +99,7 @@ describe("invariant", () => {
 
   it("does not let a comparison mix values of different types", () => {
     // @ts-expect-error a string length is a number and cannot be compared with a string
-    string("商品ID").refine(v => v.length().gte("3"));
+    string().refine(v => v.length().gte("3"));
   });
 });
 
@@ -117,13 +117,13 @@ describe("placeholder under an invariant", () => {
   });
 
   it("pads a string to the length its invariant asks for", () => {
-    expect(string("ID").refine(v => v.length().gte(6)).placeholder()).toBe("<ID>__");
+    expect(string().refine(v => v.length().gte(10)).placeholder()).toBe("<string>__");
   });
 
   it("repeats the placeholder element to the length its invariant asks for", () => {
-    expect(array(string("タグ")).refine(v => v.length().gte(2)).placeholder()).toStrictEqual([
-      "<タグ>",
-      "<タグ>",
+    expect(array(string()).refine(v => v.length().gte(2)).placeholder()).toStrictEqual([
+      "<string>",
+      "<string>",
     ]);
   });
 
