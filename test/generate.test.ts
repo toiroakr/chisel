@@ -3,20 +3,14 @@ import {
   todo,
   action,
   generate,
-  not,
   array,
   behavior,
   boolean,
-  eq,
   example,
-  gte,
-  gt,
   guard,
   implement,
-  lte,
   examples,
   int,
-  length,
   number,
   object,
   optional,
@@ -145,7 +139,7 @@ describe("generateExamples for classes", () => {
 describe("generateExamples for border points", () => {
   const 数量を確定する = behavior("数量を確定する", {
     input: variants("状態", {
-      入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
+      入力済み: object({ 数量: int().invariant(v => v.gte(1)) }),
     }),
     result: object({}),
     effects: variants("種類", {}),
@@ -169,7 +163,7 @@ describe("generateExamples for border points", () => {
   it("writes a value of the length a point on a length border asks for", () => {
     const 登録する = behavior("登録する", {
       input: variants("状態", {
-        入力済み: object({ 商品ID: string("ID").invariant(v => gte(length(v), 4)) }),
+        入力済み: object({ 商品ID: string("ID").invariant(v => v.length().gte(4)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -186,8 +180,8 @@ describe("generateExamples for border points", () => {
       input: variants("状態", {
         入力済み: object({
           割合: number()
-            .invariant(v => gte(v, 0))
-            .invariant(v => lte(v, 0.5)),
+            .invariant(v => v.gte(0))
+            .invariant(v => v.lte(0.5)),
         }),
       }),
       result: object({}),
@@ -206,7 +200,7 @@ describe("generateExamples and excluded classes", () => {
   it("offers no row for a class the rules refuse", () => {
     const 同意する = behavior("同意する", {
       input: variants("状態", {
-        入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
+        入力済み: object({ 同意: boolean().invariant(v => v.eq(true)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -220,7 +214,7 @@ describe("generateExamples and excluded classes", () => {
   it("offers rows on both sides of a border on a string value, which has no step", () => {
     const 並べる = behavior("並べる", {
       input: variants("状態", {
-        入力済み: object({ 見出し: string("見出し").invariant(v => gte(v, "m")) }),
+        入力済み: object({ 見出し: string("見出し").invariant(v => v.gte("m")) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -236,7 +230,7 @@ describe("generateExamples and excluded classes", () => {
 describe("rows generate cannot make valid", () => {
   it("names a row whose composed value the input schema refuses instead of offering it", () => {
     const 数える = behavior("数える", {
-      input: variants("状態", { 入力済み: object({ 個数: int().invariant(v => not(eq(v, 0))) }) }),
+      input: variants("状態", { 入力済み: object({ 個数: int().invariant(v => v.eq(0).not()) }) }),
       result: object({}),
       effects: variants("種類", {}),
     });
@@ -257,7 +251,7 @@ describe("generateExamples below a length of zero", () => {
   const 空を断る = implement(見出しを確かめる, {
     cases: {
       入力済み: action("空を断る", {
-        guards: 入力 => [guard(gt(length(入力.見出し), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        guards: 入力 => [guard(入力.$見出し.length().gt(0), () => ({ result: { 結果: "空" }, effects: [] }))],
         run: () => ({ result: { 結果: "受付" }, effects: [] }),
       }),
     },
@@ -287,7 +281,7 @@ describe("generateExamples for a guard on an array with no invariant", () => {
   const 空を断る = implement(明細を確かめる, {
     cases: {
       入力済み: action("空を断る", {
-        guards: 入力 => [guard(gt(length(入力.明細), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        guards: 入力 => [guard(入力.$明細.length().gt(0), () => ({ result: { 結果: "空" }, effects: [] }))],
         run: () => ({ result: { 結果: "受付" }, effects: [] }),
       }),
     },
@@ -318,7 +312,7 @@ describe("guard points generate cannot compose", () => {
     const 上限と比べる = implement(比べる, {
       cases: {
         入力済み: action("上限と比べる", {
-          guards: 入力 => [guard(lte(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
+          guards: 入力 => [guard(入力.$数量.lte(入力.$上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
           run: () => ({ result: { 結果: "受付" }, effects: [] }),
         }),
       },

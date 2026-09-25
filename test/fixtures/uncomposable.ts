@@ -3,7 +3,6 @@ import {
   behavior,
   guard,
   implement,
-  lt,
   object,
   string,
   variants,
@@ -20,7 +19,7 @@ const 並べる = behavior("並べる", {
 const 名前順 = implement(並べる, {
   cases: {
     入力済み: action("並び", {
-      guards: 入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+      guards: 入力 => [guard(入力.$姓.lt(入力.$名), () => ({ result: {}, effects: [] }))],
       run: () => ({ result: {}, effects: [] }),
     }),
   },

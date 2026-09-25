@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   action,
-  all,
   array,
   behavior,
   boolean,
   spec,
   dependency,
-  eq,
   check,
   example,
   examples,
@@ -15,8 +13,6 @@ import {
   generate,
   guard,
   implement,
-  lte,
-  lt,
   match,
   perform,
   int,
@@ -270,7 +266,7 @@ describe("generated rows and dependencies", () => {
     const 料金表で決める = implement(送料を決める, {
       cases: {
         確定済み: action("料金表で決める", {
-          run: match(注文 => 注文.配送.方法, {
+          run: match(注文 => 注文.$配送.$方法, {
             宅配: (_, 依存) => ({ result: { 送料: 依存.料金表("宅配") }, effects: [] }),
             店頭受取: (_, 依存) => ({ result: { 送料: 依存.料金表("店頭受取") }, effects: [] }),
           }),
@@ -305,7 +301,7 @@ describe("a value dependency read in a guard condition", () => {
     cases: {
       申込済み: action("過去を断る", {
         guards: (申込, 依存) => [
-          guard(lt(依存.現在時刻, 申込.希望日時), () => ({
+          guard(依存.$現在時刻.lt(申込.$希望日時), () => ({
             result: { 結果: "過去" },
             effects: [],
           })),
@@ -428,7 +424,7 @@ describe("a value dependency read inside all", () => {
       入力済み: action("上限で断る", {
         guards: (注文, 依存) => [
           guard(
-            all(注文.明細, (行) => lte(行.数量, 依存.上限)),
+            注文.$明細.all((行) => 行.$数量.lte(依存.$上限)),
             () => ({
               result: { 結果: "上限超過" },
               effects: [],
@@ -468,7 +464,7 @@ describe("a dependency declared as another behavior", () => {
     result: object({ 商品ID: string("商品ID"), 在庫数: int() }),
     effects: variants("種類", {}),
     ensures: clause => [
-      clause.always("照会した商品を答える", (問い, 答え) => eq(答え.商品ID, 問い.商品ID)),
+      clause.always("照会した商品を答える", (問い, 答え) => 答え.$商品ID.eq(問い.$商品ID)),
     ],
   });
   const 在庫照会の例 = examples(在庫を照会する, {

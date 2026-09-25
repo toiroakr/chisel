@@ -1,10 +1,8 @@
 import {
   action,
-  and,
   behavior,
   spec,
   examples,
-  gte,
   guard,
   implement,
   int,
@@ -22,7 +20,7 @@ const 二段 = implement(受け付ける, {
   cases: {
     入力済み: action("二段", {
       guards: 入力 => [
-        guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), () => ({
+        guard(入力.$数量.gte(10).and(入力.$数量.gte(5)), () => ({
           result: { 結果: "却下" },
           effects: [],
         })),

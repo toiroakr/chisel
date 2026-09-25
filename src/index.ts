@@ -35,8 +35,7 @@ export type {
   VariantOf,
 } from "./schema.js";
 
-export { all, and, any, eq, gte, gt, lte, length, lt, ne, not, or } from "./rule.js";
-export type { Comparable, InvariantRule, Operand, Operator, Rule, Term, TermOf } from "./rule.js";
+export type { Comparable, Condition, InvariantRule, Operand, Operator, Rule, Term, TermOf } from "./rule.js";
 
 export { formatTypeScriptValue } from "./codegen.js";
 

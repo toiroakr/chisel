@@ -7,16 +7,11 @@ import {
   spec,
   check,
   example,
-  eq,
   examples,
-  gte,
   generate,
   guard,
   implement,
   int,
-  lte,
-  length,
-  ne,
   object,
   optional,
   string,
@@ -346,7 +341,7 @@ describe("measures and verdict", () => {
 describe("border points in the adequacy report", () => {
   const 数量を確定する = behavior("数量を確定する", {
     input: variants("状態", {
-      入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
+      入力済み: object({ 数量: int().invariant(v => v.gte(1)) }),
     }),
     result: object({}),
     effects: variants("種類", {}),
@@ -399,7 +394,7 @@ describe("border points in the adequacy report", () => {
   it("reads the length of a value where the border is drawn on its length", async () => {
     const 登録する = behavior("登録する", {
       input: variants("状態", {
-        入力済み: object({ 商品ID: string("商品ID").invariant(v => gte(length(v), 3)) }),
+        入力済み: object({ 商品ID: string("商品ID").invariant(v => v.length().gte(3)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -428,7 +423,7 @@ describe("excluded classes in the adequacy report", () => {
   it("neither covers nor misses a class the rules refuse", async () => {
     const 同意する = behavior("同意する", {
       input: variants("状態", {
-        入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
+        入力済み: object({ 同意: boolean().invariant(v => v.eq(true)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -489,7 +484,7 @@ describe("pairs of classes", () => {
   it("pairs the classes a guard threshold draws with the classes of another position", async () => {
     const 注文を受け付ける = behavior("注文を受け付ける", {
       input: variants("状態", {
-        入力済み: object({ ギフト: boolean(), 合計: int().invariant(v => gte(v, 0)) }),
+        入力済み: object({ ギフト: boolean(), 合計: int().invariant(v => v.gte(0)) }),
       }),
       result: variants("結果", { 受付: object({}), 要承認: object({}) }),
       effects: variants("種類", {}),
@@ -497,7 +492,7 @@ describe("pairs of classes", () => {
     const 上限で分ける = implement(注文を受け付ける, {
       cases: {
         入力済み: action("上限で分ける", {
-          guards: 注文 => [guard(lte(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          guards: 注文 => [guard(注文.$合計.lte(100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
           run: () => ({ result: { 結果: "受付" }, effects: [] }),
         }),
       },
@@ -541,8 +536,8 @@ describe("a position the invariants leave empty", () => {
     input: variants("状態", {
       入力済み: object({
         数量: int()
-          .invariant(v => gte(v, 10))
-          .invariant(v => lte(v, 5)),
+          .invariant(v => v.gte(10))
+          .invariant(v => v.lte(5)),
       }),
     }),
     result: object({}),
@@ -574,8 +569,8 @@ describe("a guard threshold interval the invariants leave empty", () => {
       input: variants("状態", {
         入力済み: object({
           合計: int()
-            .invariant(v => gte(v, 0))
-            .invariant(v => lte(v, 50)),
+            .invariant(v => v.gte(0))
+            .invariant(v => v.lte(50)),
         }),
       }),
       result: variants("結果", { 受付: object({}), 要承認: object({}) }),
@@ -584,7 +579,7 @@ describe("a guard threshold interval the invariants leave empty", () => {
     const 上限で分ける = implement(受け付ける, {
       cases: {
         入力済み: action("上限で分ける", {
-          guards: 注文 => [guard(lte(注文.合計, 100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          guards: 注文 => [guard(注文.$合計.lte(100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
           run: () => ({ result: { 結果: "受付" }, effects: [] }),
         }),
       },
@@ -613,7 +608,7 @@ describe("an input case the invariants of the input sum refuse", () => {
     input: variants("状態", {
       入力済み: object({}),
       廃止: object({}),
-    }).invariant(v => ne(v.状態, "廃止")),
+    }).invariant(v => v.$状態.ne("廃止")),
     result: object({}),
     effects: variants("種類", {}),
   });

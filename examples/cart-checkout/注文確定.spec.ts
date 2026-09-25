@@ -6,16 +6,16 @@ const クーポンコード = c.string("クーポンコード");
 
 const 明細 = c.object({
   商品ID,
-  数量: c.int().invariant(v => c.gte(v, 1)),
-  単価: c.int().invariant(v => c.gte(v, 0)),
-  在庫数: c.int().invariant(v => c.gte(v, 0)),
+  数量: c.int().invariant(v => v.gte(1)),
+  単価: c.int().invariant(v => v.gte(0)),
+  在庫数: c.int().invariant(v => v.gte(0)),
 });
 
 const カート = c.variants("状態", {
   空: c.object({ カートID }),
   商品あり: c.object({
     カートID,
-    明細: c.array(明細).invariant(v => c.gte(c.length(v), 1)),
+    明細: c.array(明細).invariant(v => v.length().gte(1)),
     クーポン: c.optional(クーポンコード),
   }),
   確定済み: c.object({ カートID }),
@@ -94,7 +94,7 @@ const 実装 = c.implement(注文を確定する, {
     }),
     商品あり: c.action("在庫を確かめて確定する", {
       guards: カート => [
-        c.guard(c.all(カート.明細, 明細 => c.lte(明細.数量, 明細.在庫数)), () => ({
+        c.guard(カート.$明細.all(明細 => 明細.$数量.lte(明細.$在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),

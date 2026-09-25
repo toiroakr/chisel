@@ -1,6 +1,5 @@
 import {
   action,
-  all,
   array,
   behavior,
   spec,
@@ -9,7 +8,6 @@ import {
   guard,
   implement,
   int,
-  lte,
   object,
   string,
   variants,
@@ -27,7 +25,7 @@ const 在庫を確かめる = implement(注文を確定する, {
   cases: {
     商品あり: action("在庫を確かめる", {
       guards: カート => [
-        guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
+        guard(カート.$明細.all(明細 => 明細.$数量.lte(明細.$在庫数)), () => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
