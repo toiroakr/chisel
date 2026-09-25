@@ -17,7 +17,7 @@ declare data and behavior
 
 The examples import Chisel as a namespace, `import * as c from "chisel"`, the way zod and valibot are used as `z` and `v`; the names below are written without the prefix.
 
-The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type).
+The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type). An `object` holds exactly the fields it declares: a value carrying another key is refused, not trimmed, so a model answering with a stray field fails `check` instead of passing it.
 
 ```ts
 import * as c from "chisel";

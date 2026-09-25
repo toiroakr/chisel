@@ -287,6 +287,11 @@ export function object<const Shape extends ObjectShape>(
         issues.push(...result.issues);
       }
     }
+    for (const key of Object.keys(source)) {
+      if (!Object.hasOwn(shape, key)) {
+        issues.push({ path: `${path}.${key}`, message: "Unexpected key" });
+      }
+    }
 
     return issues.length > 0
       ? { success: false, issues }
@@ -422,7 +427,8 @@ export function variants<
       return invalid(`${path}.${discriminant}`, `Unknown variant ${tag}`);
     }
 
-    const result = variant.parse(value, path);
+    const { [discriminant]: _tag, ...fields } = source;
+    const result = variant.parse(fields, path);
     return result.success
       ? valid({ [discriminant]: tag, ...result.value } as VariantsValue<
           Discriminant,

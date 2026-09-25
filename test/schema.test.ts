@@ -265,6 +265,36 @@ describe("object", () => {
     expect(result.success).toBe(false);
     expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.id", "$.quantity"]);
   });
+
+  it("rejects a key its shape does not declare, naming the key in the path", () => {
+    const Order = object({ id: string("Id") });
+
+    const result = Order.parse({ id: "a", secret: "leak" });
+
+    expect(result).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.secret", message: "Unexpected key" }],
+    });
+  });
+
+  it("rejects an undeclared key inside a nested object, naming its full path", () => {
+    const Order = object({ line: object({ sku: string("Sku") }) });
+
+    const result = Order.parse({ line: { sku: "a", secret: "leak" } });
+
+    expect(result).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.line.secret", message: "Unexpected key" }],
+    });
+  });
+
+  it("drops a declared optional field whose value is undefined instead of rejecting it", () => {
+    const Order = object({ id: string("OrderId"), note: optional(string("Note")) });
+
+    const result = Order.parse({ id: "o-1", note: undefined });
+
+    expect(result).toStrictEqual({ success: true, value: { id: "o-1" } });
+  });
 });
 
 describe("variants", () => {
@@ -293,6 +323,21 @@ describe("variants", () => {
     const result = Shape.parse({ state: "draft", id: "a" });
 
     expect(result).toStrictEqual({ success: true, value: { state: "draft", id: "a" } });
+  });
+
+  it("does not count its own discriminant as a key the variant leaves undeclared", () => {
+    const result = Shape.parse({ state: "draft", id: "a" });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a key the matched variant does not declare", () => {
+    const result = Shape.parse({ state: "draft", id: "a", publishedAt: "never" });
+
+    expect(result).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.publishedAt", message: "Unexpected key" }],
+    });
   });
 
   it("propagates issues from the matched variant's own fields", () => {
