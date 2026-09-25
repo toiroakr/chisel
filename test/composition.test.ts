@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { AnySchema } from "../src/index.js";
 import {
+  array,
   generate,
   todo,
   action,
@@ -13,6 +15,8 @@ import {
   implement,
   int,
   object,
+  optional,
+  record,
   guard,
   gte,
   perform,
@@ -103,6 +107,71 @@ describe("compose", () => {
         "無効 departs 検証する and is answered by 無効も返す; a value cannot say which rail it is on",
       ),
     );
+  });
+
+  it("refuses a case the first stage answers with a field the second stage does not declare", () => {
+    const 数量だけ受け取る = behavior("数量だけ受け取る", {
+      input: variants("結果", { 有効: object({}) }),
+      result: variants("結果", { 見積: object({}) }),
+      effects: variants("種類", {}),
+    });
+
+    expect(() => compose("数量を落とす合成", [検証するの実装, external(数量だけ受け取る, "別のチーム")])).toThrow(
+      new SpecificationError("検証する answers @有効.数量, which 数量だけ受け取る does not declare"),
+    );
+  });
+
+  it("refuses a field the second stage does not declare inside a nested object, array element or optional", () => {
+    const 明細 = object({ 商品: string("商品"), 単価: int() });
+    const 明細を返す = behavior("明細を返す", {
+      input: variants("状態", { 申込: object({}) }),
+      result: variants("結果", {
+        有効: object({
+          主: 明細,
+          一覧: array(明細),
+          補足: optional(明細),
+          索引: record(明細),
+          支払: variants("方法", { 現金: object({ 金額: int() }) }),
+        }),
+      }),
+      effects: variants("種類", {}),
+    });
+    const 単価を知らない = object({ 商品: string("商品") });
+    const 受け取る = (shape: Record<string, AnySchema>) =>
+      external(
+        behavior("受け取る", {
+          input: variants("結果", {
+            有効: object({
+              主: 明細,
+              一覧: array(明細),
+              補足: optional(明細),
+              索引: record(明細),
+              支払: variants("方法", { 現金: object({ 金額: int() }) }),
+              ...shape,
+            }),
+          }),
+          result: variants("結果", { 見積: object({}) }),
+          effects: variants("種類", {}),
+        }),
+        "別のチーム",
+      );
+    const 明細を返すの実装 = external(明細を返す, "別のチーム");
+
+    expect(() => compose("主", [明細を返すの実装, 受け取る({ 主: 単価を知らない })])).toThrow(
+      new SpecificationError("明細を返す answers @有効.主.単価, which 受け取る does not declare"),
+    );
+    expect(() => compose("一覧", [明細を返すの実装, 受け取る({ 一覧: array(単価を知らない) })])).toThrow(
+      new SpecificationError("明細を返す answers @有効.一覧[].単価, which 受け取る does not declare"),
+    );
+    expect(() => compose("補足", [明細を返すの実装, 受け取る({ 補足: optional(単価を知らない) })])).toThrow(
+      new SpecificationError("明細を返す answers @有効.補足?.単価, which 受け取る does not declare"),
+    );
+    expect(() => compose("索引", [明細を返すの実装, 受け取る({ 索引: record(単価を知らない) })])).toThrow(
+      new SpecificationError("明細を返す answers @有効.索引{}.単価, which 受け取る does not declare"),
+    );
+    expect(() =>
+      compose("支払", [明細を返すの実装, 受け取る({ 支払: variants("方法", { 現金: object({}) }) })]),
+    ).toThrow(new SpecificationError("明細を返す answers @有効.支払@現金.金額, which 受け取る does not declare"));
   });
 });
 

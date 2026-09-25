@@ -1,7 +1,17 @@
 import type { AnyBehavior, AnyImplementation, Behavior, Implementation } from "./behavior.js";
 import { SpecificationError } from "./behavior.js";
 import type { Requirements } from "./dependency.js";
-import type { AnyVariantsSchema, VariantsSchema, VariantTable } from "./schema.js";
+import type {
+  AnySchema,
+  AnyVariantsSchema,
+  ArraySchema,
+  ObjectSchema,
+  ObjectShape,
+  OptionalSchema,
+  RecordSchema,
+  VariantsSchema,
+  VariantTable,
+} from "./schema.js";
 import { isVariantsSchema, variants } from "./schema.js";
 
 type Stages = readonly [AnyBehavior, AnyBehavior, ...AnyBehavior[]];
@@ -125,6 +135,14 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
   if (flowing.length === 0) {
     throw new SpecificationError(`${second.name} receives none of the cases ${first.name} answers`);
   }
+  for (const tag of flowing) {
+    const undeclared = undeclaredPath(firstResult.variants[tag]!, second.input.variants[tag]!, `@${tag}`);
+    if (undeclared !== undefined) {
+      throw new SpecificationError(
+        `${first.name} answers ${undeclared}, which ${second.name} does not declare`,
+      );
+    }
+  }
   const departing = firstResult.variantTags.filter(tag => !flowing.includes(tag));
   const colliding = departing.find(tag => secondResult.variantTags.includes(tag));
   if (colliding !== undefined) {
@@ -146,6 +164,51 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
     pair: [first, second],
     departed: [...departing, ...departedOf(second)],
   };
+}
+
+function undeclaredPath(answered: AnySchema, taken: AnySchema, path: string): string | undefined {
+  if (answered.kind === "object" && taken.kind === "object") {
+    const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
+    for (const [key, field] of Object.entries((answered as ObjectSchema<ObjectShape>).shape)) {
+      const found = Object.hasOwn(takenShape, key)
+        ? undeclaredPath(field, takenShape[key]!, `${path}.${key}`)
+        : `${path}.${key}`;
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+  if (answered.kind === "array" && taken.kind === "array") {
+    return undeclaredPath(
+      (answered as ArraySchema<unknown>).element as AnySchema,
+      (taken as ArraySchema<unknown>).element as AnySchema,
+      `${path}[]`,
+    );
+  }
+  if (answered.kind === "optional" && taken.kind === "optional") {
+    return undeclaredPath(
+      (answered as OptionalSchema<unknown>).schema as AnySchema,
+      (taken as OptionalSchema<unknown>).schema as AnySchema,
+      `${path}?`,
+    );
+  }
+  if (answered.kind === "record" && taken.kind === "record") {
+    return undeclaredPath(
+      (answered as RecordSchema<unknown>).value as AnySchema,
+      (taken as RecordSchema<unknown>).value as AnySchema,
+      `${path}{}`,
+    );
+  }
+  if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
+    for (const tag of answered.variantTags.filter(tag => taken.variantTags.includes(tag))) {
+      const found = undeclaredPath(answered.variants[tag], taken.variants[tag], `${path}@${tag}`);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+  }
+  return undefined;
 }
 
 function departedOf(definition: AnyBehavior): readonly string[] {
