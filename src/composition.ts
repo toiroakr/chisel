@@ -137,15 +137,15 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
     throw new SpecificationError(`${second.name} receives none of the cases ${first.name} answers`);
   }
   for (const tag of flowing) {
-    const undeclared = undeclaredPath(
+    const mismatch = mismatchOf(
       firstResult.variants[tag]!,
       second.input.variants[tag]!,
       `@${tag}`,
       firstResult.discriminant,
     );
-    if (undeclared !== undefined) {
+    if (mismatch !== undefined) {
       throw new SpecificationError(
-        `${first.name} answers ${undeclared}, which ${second.name} does not declare`,
+        `${first.name} answers ${mismatch.path}, which ${second.name} does not declare`,
       );
     }
   }
@@ -172,43 +172,52 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
   };
 }
 
-function undeclaredPath(
+interface Mismatch {
+  readonly path: string;
+  readonly reason: "undeclared";
+}
+
+function undeclared(path: string): Mismatch {
+  return { path, reason: "undeclared" };
+}
+
+function mismatchOf(
   answered: AnySchema,
   taken: AnySchema,
   path: string,
   discriminant?: string,
-): string | undefined {
+): Mismatch | undefined {
   if (answered.kind === "optional") {
-    return undeclaredPath((answered as OptionalSchema<unknown>).schema as AnySchema, taken, `${path}?`);
+    return mismatchOf((answered as OptionalSchema<unknown>).schema as AnySchema, taken, `${path}?`);
   }
   if (taken.kind === "optional") {
-    return undeclaredPath(answered, (taken as OptionalSchema<unknown>).schema as AnySchema, path);
+    return mismatchOf(answered, (taken as OptionalSchema<unknown>).schema as AnySchema, path);
   }
   if (answered.kind === "object" && taken.kind === "object") {
     const takenShape = (taken as ObjectSchema<ObjectShape>).shape;
     return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
       Object.hasOwn(takenShape, key)
-        ? undeclaredPath(field, takenShape[key]!, `${path}.${key}`)
+        ? mismatchOf(field, takenShape[key]!, `${path}.${key}`)
         : key === discriminant
           ? undefined
-          : `${path}.${key}`,
+          : undeclared(`${path}.${key}`),
     );
   }
   if (answered.kind === "object" && taken.kind === "record") {
     const value = (taken as RecordSchema<unknown>).value as AnySchema;
     return firstFound(Object.entries((answered as ObjectSchema<ObjectShape>).shape), ([key, field]) =>
-      undeclaredPath(field, value, `${path}.${key}`),
+      mismatchOf(field, value, `${path}.${key}`),
     );
   }
   if (answered.kind === "array" && taken.kind === "array") {
-    return undeclaredPath(
+    return mismatchOf(
       (answered as ArraySchema<unknown>).element as AnySchema,
       (taken as ArraySchema<unknown>).element as AnySchema,
       `${path}[]`,
     );
   }
   if (answered.kind === "record" && taken.kind === "record") {
-    return undeclaredPath(
+    return mismatchOf(
       (answered as RecordSchema<unknown>).value as AnySchema,
       (taken as RecordSchema<unknown>).value as AnySchema,
       `${path}{}`,
@@ -221,28 +230,28 @@ function undeclaredPath(
     }
     const tag = String((named as LiteralSchema<string>).value);
     return taken.variantTags.includes(tag)
-      ? undeclaredPath(answered, taken.variants[tag], path, taken.discriminant)
-      : `${path}@${tag}`;
+      ? mismatchOf(answered, taken.variants[tag], path, taken.discriminant)
+      : undeclared(`${path}@${tag}`);
   }
   if (isVariantsSchema(answered) && taken.kind === "object") {
     return Object.hasOwn((taken as ObjectSchema<ObjectShape>).shape, answered.discriminant)
-      ? firstFound(answered.variantTags, tag => undeclaredPath(answered.variants[tag], taken, `${path}@${tag}`))
-      : `${path}.${answered.discriminant}`;
+      ? firstFound(answered.variantTags, tag => mismatchOf(answered.variants[tag], taken, `${path}@${tag}`))
+      : undeclared(`${path}.${answered.discriminant}`);
   }
   if (isVariantsSchema(answered) && isVariantsSchema(taken)) {
     if (answered.discriminant !== taken.discriminant) {
-      return `${path}.${answered.discriminant}`;
+      return undeclared(`${path}.${answered.discriminant}`);
     }
     return firstFound(answered.variantTags, tag =>
       taken.variantTags.includes(tag)
-        ? undeclaredPath(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, answered.discriminant)
-        : `${path}@${tag}`,
+        ? mismatchOf(answered.variants[tag], taken.variants[tag], `${path}@${tag}`, answered.discriminant)
+        : undeclared(`${path}@${tag}`),
     );
   }
   return undefined;
 }
 
-function firstFound<T>(items: readonly T[], find: (item: T) => string | undefined): string | undefined {
+function firstFound<T, R>(items: readonly T[], find: (item: T) => R | undefined): R | undefined {
   for (const item of items) {
     const found = find(item);
     if (found !== undefined) {
