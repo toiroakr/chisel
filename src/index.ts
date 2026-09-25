@@ -9,7 +9,6 @@ export {
   isVariantsSchema,
   number,
   object,
-  optional,
   record,
   string,
   variants,

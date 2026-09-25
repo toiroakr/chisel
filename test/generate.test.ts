@@ -13,7 +13,6 @@ import {
   int,
   number,
   object,
-  optional,
   string,
   variants,
 } from "../src/index.js";
@@ -21,7 +20,7 @@ import {
 const Cart = variants("状態", {
   商品あり: object({
     カートID: string("カートID"),
-    クーポン: optional(string("クーポンコード")),
+    クーポン: string("クーポンコード").optional(),
   }),
 });
 
@@ -305,7 +304,7 @@ describe("generateExamples for a guard on an array with no invariant", () => {
 describe("guard points generate cannot compose", () => {
   it("names each point it could not compose instead of leaving it out", () => {
     const 比べる = behavior("比べる", {
-      input: variants("状態", { 入力済み: object({ 数量: int(), 上限: optional(int()) }) }),
+      input: variants("状態", { 入力済み: object({ 数量: int(), 上限: int().optional() }) }),
       result: variants("結果", { 受付: object({}), 却下: object({}) }),
       effects: variants("種類", {}),
     });

@@ -16,7 +16,7 @@ const カート = c.variants("状態", {
   商品あり: c.object({
     カートID,
     明細: c.array(明細).min(1),
-    クーポン: c.optional(クーポンコード),
+    クーポン: クーポンコード.optional(),
   }),
   確定済み: c.object({ カートID }),
 });

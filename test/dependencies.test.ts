@@ -18,7 +18,6 @@ import {
   int,
   instant,
   object,
-  optional,
   string,
   variants,
 } from "../src/index.js";
@@ -234,7 +233,7 @@ describe("a function dependency", () => {
 describe("generated rows and dependencies", () => {
   it("carries the values the answered row it was composed from stands in with", () => {
     const 受付する2 = behavior("受付する2", {
-      input: variants("状態", { 申込済み: object({ 紹介コード: optional(string("紹介コード")) }) }),
+      input: variants("状態", { 申込済み: object({ 紹介コード: string("紹介コード").optional() }) }),
       result: object({ 受付日時: instant() }),
       effects: variants("種類", {}),
       requires: { 現在時刻: dependency(instant()) },

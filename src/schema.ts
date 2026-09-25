@@ -17,6 +17,9 @@ export interface Schema<T> {
   parse(value: unknown, path?: string): ValidationResult<T>;
   placeholder(): unknown;
   refine(rule: InvariantRule<T>): this;
+  // Typed through `this` rather than T: naming T here would make Schema<T>
+  // invariant in T, and StringSchema would stop being an AnySchema.
+  optional<Self extends AnySchema>(this: Self): OptionalSchema<Infer<Self>>;
 }
 
 // Shorthands for the bounds a rule most often states; each one desugars to the
@@ -154,7 +157,10 @@ function invalid(path: string, message: string): ValidationResult<never> {
   return { success: false, issues: [{ path, message }] };
 }
 
-type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "refine" | "min" | "max" | "gt" | "lt" | "length">;
+type SchemaCore<S extends AnySchema> = Omit<
+  S,
+  "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
+>;
 
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
   const schema = {
@@ -177,6 +183,9 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
+    },
+    optional() {
+      return optional(schema as unknown as S);
     },
   };
   const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
@@ -371,7 +380,7 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
   }
 }
 
-export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
+function optional<T>(schema: Schema<T>): OptionalSchema<T> {
   return refinable<OptionalSchema<T>>({
     kind: "optional",
     schema,

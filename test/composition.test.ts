@@ -17,7 +17,6 @@ import {
   literal,
   number,
   object,
-  optional,
   record,
   guard,
   perform,
@@ -132,7 +131,7 @@ describe("compose", () => {
           有効: object({
             主: 明細,
             一覧: array(明細),
-            補足: optional(明細),
+            補足: 明細.optional(),
             索引: record(明細),
             支払: variants("方法", { 現金: object({ 金額: int() }) }),
           }),
@@ -148,7 +147,7 @@ describe("compose", () => {
             有効: object({
               主: 明細,
               一覧: array(明細),
-              補足: optional(明細),
+              補足: 明細.optional(),
               索引: record(明細),
               支払: variants("方法", { 現金: object({ 金額: int() }) }),
               ...shape,
@@ -173,7 +172,7 @@ describe("compose", () => {
     });
 
     it("refuses one inside what an optional holds", () => {
-      expect(() => compose("補足", [明細を返す, 受け取る({ 補足: optional(単価を知らない) })])).toThrow(
+      expect(() => compose("補足", [明細を返す, 受け取る({ 補足: 単価を知らない.optional() })])).toThrow(
         new SpecificationError("明細を返す answers @有効.補足?.単価, which 受け取る does not declare"),
       );
     });
@@ -238,7 +237,7 @@ describe("compose", () => {
     });
 
     it("refuses a required field the first stage answers only as optional", () => {
-      expect(() => compose("価格は任意", 段({ 価格: optional(int()) }, { 価格: int() }))).toThrow(
+      expect(() => compose("価格は任意", 段({ 価格: int().optional() }, { 価格: int() }))).toThrow(
         new SpecificationError("返す does not always answer @有効.価格, which 受け取る requires"),
       );
     });
@@ -263,7 +262,7 @@ describe("compose", () => {
 
     it("accepts an optional field answered into a record, which requires no key", () => {
       expect(() =>
-        compose("表で受け取る", 段({ 価格: object({ りんご: optional(int()) }) }, { 価格: record(int()) })),
+        compose("表で受け取る", 段({ 価格: object({ りんご: int().optional() }) }, { 価格: record(int()) })),
       ).not.toThrow();
     });
   });
@@ -346,7 +345,7 @@ describe("compose", () => {
     });
 
     it("refuses a record where the second stage takes an object, since a record may carry any key", () => {
-      expect(() => compose("表を object で", 段(record(int()), object({ 数量: optional(int()) })))).toThrow(
+      expect(() => compose("表を object で", 段(record(int()), object({ 数量: int().optional() })))).toThrow(
         new SpecificationError("返す answers @有効.値 as record, which 受け取る takes as object"),
       );
     });
@@ -466,13 +465,13 @@ describe("compose", () => {
 
     it("refuses when the object does not declare the sum's discriminant", () => {
       expect(() =>
-        compose("判別キーなし", 段(object({ 番号: optional(string("番号")), 暗証: optional(string("暗証")) }))),
+        compose("判別キーなし", 段(object({ 番号: string("番号").optional(), 暗証: string("暗証").optional() }))),
       ).toThrow(new SpecificationError("支払を返す answers @有効.支払.方法, which object で受け取る does not declare"));
     });
 
     it("refuses when the object does not declare a field one of the cases carries", () => {
       expect(() =>
-        compose("暗証なし", 段(object({ 方法: string("方法"), 番号: optional(string("番号")) }))),
+        compose("暗証なし", 段(object({ 方法: string("方法"), 番号: string("番号").optional() }))),
       ).toThrow(new SpecificationError("支払を返す answers @有効.支払@カード.暗証, which object で受け取る does not declare"));
     });
 
@@ -480,7 +479,7 @@ describe("compose", () => {
       expect(() =>
         compose(
           "すべて宣言",
-          段(object({ 方法: string("方法"), 番号: optional(string("番号")), 暗証: optional(string("暗証")) })),
+          段(object({ 方法: string("方法"), 番号: string("番号").optional(), 暗証: string("暗証").optional() })),
         ),
       ).not.toThrow();
     });
@@ -634,13 +633,13 @@ describe("compose", () => {
       ] as const;
 
     it("compares an answered field with what the optional the second stage takes holds", () => {
-      expect(() => compose("任意で受け取る", 段("必須", 明細, optional(単価を知らない)))).toThrow(
+      expect(() => compose("任意で受け取る", 段("必須", 明細, 単価を知らない.optional()))).toThrow(
         new SpecificationError("必須を返す answers @有効.主.単価, which 必須を受け取る does not declare"),
       );
     });
 
     it("compares what an answered optional holds with the field the second stage takes", () => {
-      expect(() => compose("任意で返す", 段("任意", optional(明細), 単価を知らない))).toThrow(
+      expect(() => compose("任意で返す", 段("任意", 明細.optional(), 単価を知らない))).toThrow(
         new SpecificationError("任意を返す answers @有効.主?.単価, which 任意を受け取る does not declare"),
       );
     });

@@ -8,7 +8,6 @@ import {
   literal,
   number,
   object,
-  optional,
   record,
   string,
   variants,
@@ -51,7 +50,7 @@ describe("array", () => {
 
 describe("optional", () => {
   it("accepts a value matching the wrapped schema", () => {
-    const Note = optional(string("Note"));
+    const Note = string("Note").optional();
 
     const result = Note.parse("hello");
 
@@ -59,7 +58,7 @@ describe("optional", () => {
   });
 
   it("accepts undefined even though the wrapped schema would reject it", () => {
-    const Note = optional(string("Note"));
+    const Note = string("Note").optional();
 
     const result = Note.parse(undefined);
 
@@ -67,7 +66,7 @@ describe("optional", () => {
   });
 
   it("still rejects a value of the wrong type", () => {
-    const Note = optional(string("Note"));
+    const Note = string("Note").optional();
 
     const result = Note.parse(42);
 
@@ -77,7 +76,7 @@ describe("optional", () => {
   it("lets an object omit an optional field entirely", () => {
     const Order = object({
       id: string("OrderId"),
-      note: optional(string("Note")),
+      note: string("Note").optional(),
     });
 
     const result = Order.parse({ id: "o-1" });
@@ -89,7 +88,7 @@ describe("optional", () => {
   it("omits optional fields from the generated placeholder", () => {
     const Order = object({
       id: string("OrderId"),
-      note: optional(string("Note")),
+      note: string("Note").optional(),
     });
 
     const placeholder = Order.placeholder();
@@ -100,7 +99,7 @@ describe("optional", () => {
   it("types an optional field as an omittable key, not a required T | undefined", () => {
     const Order = object({
       id: string("OrderId"),
-      note: optional(string("Note")),
+      note: string("Note").optional(),
     });
 
     // This would fail to compile (not just at runtime) if `note` were typed
@@ -300,7 +299,7 @@ describe("object", () => {
   });
 
   it("drops a declared optional field whose value is undefined instead of rejecting it", () => {
-    const Order = object({ id: string("OrderId"), note: optional(string("Note")) });
+    const Order = object({ id: string("OrderId"), note: string("Note").optional() });
 
     const result = Order.parse({ id: "o-1", note: undefined });
 

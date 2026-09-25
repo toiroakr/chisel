@@ -6,7 +6,6 @@ import {
   instant,
   number,
   object,
-  optional,
   positionsOf,
   record,
   string,
@@ -23,7 +22,7 @@ function summary(position: Position) {
 describe("positionsOf", () => {
   it("divides an optional field into the classes なし and あり", () => {
     const Cart = variants("状態", {
-      商品あり: object({ クーポン: optional(string("クーポンコード")) }),
+      商品あり: object({ クーポン: string("クーポンコード").optional() }),
     });
 
     expect(positionsOf(Cart).map(summary)).toStrictEqual([
@@ -125,7 +124,7 @@ describe("positionsOf", () => {
 
   it("takes what an optional holds apart under あり", () => {
     const Cart = variants("状態", {
-      商品あり: object({ クーポン: optional(object({ 自動適用: boolean() })) }),
+      商品あり: object({ クーポン: object({ 自動適用: boolean() }).optional() }),
     });
 
     expect(positionsOf(Cart).map(summary)).toStrictEqual([
@@ -139,7 +138,7 @@ describe("DividedPosition.classify", () => {
   const Cart = variants("状態", {
     空: object({}),
     商品あり: object({
-      クーポン: optional(string("クーポンコード")),
+      クーポン: string("クーポンコード").optional(),
       明細: array(object({ 軽減税率: boolean() })),
     }),
   });

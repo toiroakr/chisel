@@ -13,7 +13,6 @@ import {
   implement,
   int,
   object,
-  optional,
   string,
   variants,
 } from "../src/index.js";
@@ -21,7 +20,7 @@ import {
 const Cart = variants("状態", {
   商品あり: object({
     カートID: string("カートID"),
-    クーポン: optional(string("クーポンコード")),
+    クーポン: string("クーポンコード").optional(),
   }),
 });
 

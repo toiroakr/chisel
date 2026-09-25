@@ -9,7 +9,6 @@ import {
   int,
   object,
   number,
-  optional,
   record,
   spec,
   string,
@@ -93,7 +92,7 @@ describe("invariant", () => {
   });
 
   it("holds of an absent optional field, which has no value to compare", () => {
-    const 注文 = object({ 割引額: optional(int()) }).refine(v => v.$割引額.gte(1));
+    const 注文 = object({ 割引額: int().optional() }).refine(v => v.$割引額.gte(1));
 
     expect(注文.parse({}).success).toBe(true);
   });
