@@ -3,9 +3,9 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { arg, defineCommand, runMain } from "@politty/valibot";
+import { arg, defineCommand, runMain } from "@politty/zod";
 import { tsImport } from "tsx/esm/api";
-import * as v from "valibot";
+import { z } from "zod";
 import { isBehavior } from "./behavior.js";
 import type { AnyBehavior } from "./behavior.js";
 import { formatKey, formatTypeScriptValue } from "./codegen.js";
@@ -36,7 +36,7 @@ interface LoadedTarget {
   readonly synthesized: boolean;
 }
 
-const fileArg = arg(v.string(), {
+const fileArg = arg(z.string({ error: "Missing required argument <file>" }), {
   positional: true,
   description: "behaviorまたはspecificationをexportしたspecファイル",
 });
@@ -44,12 +44,12 @@ const fileArg = arg(v.string(), {
 const checkCommand = defineCommand({
   name: "check",
   description: "specificationの充足度を報告する",
-  args: v.object({
+  args: z.object({
     file: fileArg,
-    strict: arg(v.optional(v.boolean(), false), {
+    strict: arg(z.boolean().default(false), {
       description: "充足度が不完全なら終了コード1で失敗する",
     }),
-    json: arg(v.optional(v.boolean(), false), {
+    json: arg(z.boolean().default(false), {
       description: "レポートをJSONで出力する",
     }),
   }),
@@ -75,7 +75,7 @@ const checkCommand = defineCommand({
 const generateCommand = defineCommand({
   name: "generate",
   description: "未網羅の入力variantに対するexampleの雛形を出力する",
-  args: v.object({ file: fileArg }),
+  args: z.object({ file: fileArg }),
   run: async args => {
     const targets = await loadTargets(args.file);
     if (targets.some(target => target.synthesized)) {

@@ -15,23 +15,40 @@ export interface Schema<T> {
   readonly kind: string;
   readonly invariants: readonly Rule[];
   parse(value: unknown, path?: string): ValidationResult<T>;
-  placeholder(): unknown;
-  invariant(rule: InvariantRule<T>): this;
+  placeholder(name?: string): unknown;
+  refine(rule: InvariantRule<T>): this;
+  // Typed through `this` rather than T: naming T here would make Schema<T>
+  // invariant in T, and StringSchema would stop being an AnySchema.
+  optional<Self extends AnySchema>(this: Self): OptionalSchema<Infer<Self>>;
+}
+
+// Shorthands for the bounds a rule most often states; each one desugars to the
+// same rule refine() would take, so the analysis reads them alike.
+interface ValueBounds {
+  min(bound: number): this;
+  max(bound: number): this;
+  gt(bound: number): this;
+  lt(bound: number): this;
+}
+
+interface LengthBounds {
+  min(length: number): this;
+  max(length: number): this;
+  length(length: number): this;
 }
 
 export type AnySchema = Schema<unknown>;
 export type Infer<S> = S extends Schema<infer T> ? T : never;
 
-export interface StringSchema extends Schema<string> {
+export interface StringSchema extends Schema<string>, LengthBounds {
   readonly kind: "string";
-  readonly name: string;
 }
 
-export interface NumberSchema extends Schema<number> {
+export interface NumberSchema extends Schema<number>, ValueBounds {
   readonly kind: "number";
 }
 
-export interface IntSchema extends Schema<number> {
+export interface IntSchema extends Schema<number>, ValueBounds {
   readonly kind: "integer";
 }
 
@@ -49,7 +66,7 @@ export interface LiteralSchema<T extends string | number | boolean | null>
   readonly value: T;
 }
 
-export interface ArraySchema<T> extends Schema<readonly T[]> {
+export interface ArraySchema<T> extends Schema<readonly T[]>, LengthBounds {
   readonly kind: "array";
   readonly element: Schema<T>;
 }
@@ -59,7 +76,7 @@ export interface OptionalSchema<T> extends Schema<T | undefined> {
   readonly schema: Schema<T>;
 }
 
-export interface RecordSchema<T> extends Schema<Readonly<Record<string, T>>> {
+export interface RecordSchema<T> extends Schema<Readonly<Record<string, T>>>, LengthBounds {
   readonly kind: "record";
   readonly value: Schema<T>;
 }
@@ -139,10 +156,13 @@ function invalid(path: string, message: string): ValidationResult<never> {
   return { success: false, issues: [{ path, message }] };
 }
 
-type SchemaCore<S extends AnySchema> = Omit<S, "invariants" | "invariant">;
+type SchemaCore<S extends AnySchema> = Omit<
+  S,
+  "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
+>;
 
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
-  return {
+  const schema = {
     ...core,
     invariants,
     parse(value: unknown, path = "$") {
@@ -155,29 +175,48 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         ? result
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
-    placeholder() {
+    placeholder(name?: string) {
       return invariants
         .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder());
+        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
     },
-    invariant(rule: (self: TermOf<unknown>) => Rule) {
+    refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
     },
-  } as unknown as S;
+    optional() {
+      return optional(schema as unknown as S);
+    },
+  };
+  const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
+  if (core.kind === "number" || core.kind === "integer") {
+    Object.assign(schema, {
+      min: (bound: number) => refine(v => v.$gte(bound)),
+      max: (bound: number) => refine(v => v.$lte(bound)),
+      gt: (bound: number) => refine(v => v.$gt(bound)),
+      lt: (bound: number) => refine(v => v.$lt(bound)),
+    });
+  }
+  if (core.kind === "string" || core.kind === "array" || core.kind === "record") {
+    Object.assign(schema, {
+      min: (length: number) => refine(v => v.$length().$gte(length)),
+      max: (length: number) => refine(v => v.$length().$lte(length)),
+      length: (length: number) => refine(v => v.$length().$eq(length)),
+    });
+  }
+  return schema as unknown as S;
 }
 
-export function string(name = "string"): StringSchema {
+export function string(): StringSchema {
   return refinable<StringSchema>({
     kind: "string",
-    name,
     parse,
-    placeholder: () => `<${name}>`,
+    placeholder: (name = "string") => `<${name}>`,
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<string> {
     return typeof value === "string"
       ? valid(value)
-      : invalid(path, `Expected ${name}`);
+      : invalid(path, "Expected a string");
   }
 }
 
@@ -301,7 +340,7 @@ export function object<const Shape extends ObjectShape>(
   function placeholder(): unknown {
     const output: Record<string, unknown> = {};
     for (const [key, field] of Object.entries(shape)) {
-      const value = field.placeholder();
+      const value = field.placeholder(key);
       if (value !== undefined) {
         output[key] = value;
       }
@@ -315,7 +354,7 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
     kind: "array",
     element,
     parse,
-    placeholder: () => [element.placeholder()],
+    placeholder: (name?: string) => [element.placeholder(name)],
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<readonly T[]> {
@@ -339,7 +378,7 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
   }
 }
 
-export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
+function optional<T>(schema: Schema<T>): OptionalSchema<T> {
   return refinable<OptionalSchema<T>>({
     kind: "optional",
     schema,
@@ -357,7 +396,7 @@ export function record<T>(value: Schema<T>): RecordSchema<T> {
     kind: "record",
     value,
     parse,
-    placeholder: () => ({}),
+    placeholder: (name?: string) => ({ "<key>": value.placeholder(name) }),
   });
 
   function parse(

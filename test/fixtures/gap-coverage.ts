@@ -11,11 +11,11 @@ import {
 } from "../../src/index.js";
 
 const Input = variants("state", {
-  ready: object({ id: string("Id") }),
-  archived: object({ id: string("Id") }),
+  ready: object({ id: string() }),
+  archived: object({ id: string() }),
 });
 const Result = variants("type", {
-  ok: object({ id: string("Id") }),
+  ok: object({ id: string() }),
 });
 const Effect = variants("type", {
   none: object({}),

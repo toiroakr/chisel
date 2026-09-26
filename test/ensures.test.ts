@@ -1,19 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   action,
-  all,
   array,
   behavior,
   spec,
-  eq,
   check,
   example,
   examples,
-  and,
-  gte,
-  gt,
-  lte,
-  or,
   implement,
   int,
   object,
@@ -23,17 +16,18 @@ import {
   variants,
   test,
 } from "../src/index.js";
+import type { Rule, TermOf } from "../src/index.js";
 
 const 注文を確定する = behavior("注文を確定する", {
-  input: variants("状態", { 商品あり: object({ カートID: string("カートID") }) }),
+  input: variants("状態", { 商品あり: object({ カートID: string() }) }),
   result: variants("結果", {
-    確定: object({ カートID: string("カートID") }),
-    不可: object({ 理由: string("理由") }),
+    確定: object({ カートID: string() }),
+    不可: object({ 理由: string() }),
   }),
   effects: variants("種類", {}),
   ensures: clause => [
     clause.when("確定したカートは入力のカート", ["確定"], (カート, 答え) =>
-      eq(答え.カートID, カート.カートID),
+      答え.カートID.$eq(カート.カートID),
     ),
   ],
 });
@@ -99,10 +93,10 @@ describe("ensures", () => {
   it("refuses a clause that does not relate the input to the answer", () => {
     expect(() =>
       behavior("壊れた宣言", {
-        input: variants("状態", { 商品あり: object({ カートID: string("カートID") }) }),
-        result: variants("結果", { 確定: object({ カートID: string("カートID") }) }),
+        input: variants("状態", { 商品あり: object({ カートID: string() }) }),
+        result: variants("結果", { 確定: object({ カートID: string() }) }),
         effects: variants("種類", {}),
-        ensures: clause => [clause.when("答えだけ", ["確定"], (_, 答え) => eq(答え.カートID, "x"))],
+        ensures: clause => [clause.when("答えだけ", ["確定"], (_, 答え) => 答え.カートID.$eq("x"))],
       }),
     ).toThrow(new SpecificationError("Ensures 答えだけ must relate the input to the answer"));
   });
@@ -118,7 +112,7 @@ describe("borders an ensures clause draws", () => {
     effects: variants("種類", {}),
     ensures: clause => [
       clause.when("見つかる会員は番号が正で入力と同じ", ["見つかった"], (照会, 答え) =>
-        and(gt(照会.会員番号, 0), eq(答え.会員番号, 照会.会員番号)),
+        照会.会員番号.$gt(0).$and(答え.会員番号.$eq(照会.会員番号)),
       ),
     ],
   });
@@ -156,7 +150,7 @@ describe("borders an ensures clause draws", () => {
       effects: variants("種類", {}),
       ensures: clause => [
         clause.when("番号が正か仮登録", ["見つかった"], (照会, 答え) =>
-          and(or(gt(照会.会員番号, 0), gt(照会.仮登録, 0)), eq(答え.会員番号, 照会.会員番号)),
+          照会.会員番号.$gt(0).$or(照会.仮登録.$gt(0)).$and(答え.会員番号.$eq(照会.会員番号)),
         ),
       ],
     });
@@ -169,12 +163,12 @@ describe("borders an ensures clause draws", () => {
 });
 
 describe("an ensures clause over every element of the answer", () => {
-  const 明細を返す = (rule: Parameters<typeof all>[1]) =>
+  const 明細を返す = (rule: (行: TermOf<number>) => Rule) =>
     behavior("明細を返す", {
       input: variants("状態", { 入力済み: object({ 数量: int() }) }),
       result: object({ 明細: array(int()) }),
       effects: variants("種類", {}),
-      ensures: clause => [clause.always("明細", (_, 答え) => all(答え.明細, rule))],
+      ensures: clause => [clause.always("明細", (_, 答え) => 答え.明細.$all(rule))],
     });
 
   it("relates the input to the answer when it reads the input inside all", () => {
@@ -184,7 +178,7 @@ describe("an ensures clause over every element of the answer", () => {
         result: object({ 明細: array(int()) }),
         effects: variants("種類", {}),
         ensures: clause => [
-          clause.always("明細は数量以下", (入力, 答え) => all(答え.明細, 行 => lte(行, 入力.数量))),
+          clause.always("明細は数量以下", (入力, 答え) => 答え.明細.$all(行 => 行.$lte(入力.数量))),
         ],
       }),
     ).not.toThrow();
@@ -196,7 +190,7 @@ describe("an ensures clause over every element of the answer", () => {
       result: object({ 明細: array(int()) }),
       effects: variants("種類", {}),
       ensures: clause => [
-        clause.always("明細は数量以下", (入力, 答え) => all(答え.明細, 行 => lte(行, 入力.数量))),
+        clause.always("明細は数量以下", (入力, 答え) => 答え.明細.$all(行 => 行.$lte(入力.数量))),
       ],
     });
     const 多すぎる = implement(明細を返す, {
@@ -211,7 +205,7 @@ describe("an ensures clause over every element of the answer", () => {
   });
 
   it("is still refused when all reads only the element", () => {
-    expect(() => 明細を返す(行 => lte(行 as never, 3))).toThrow(
+    expect(() => 明細を返す(行 => 行.$lte(3))).toThrow(
       new SpecificationError("Ensures 明細 must relate the input to the answer"),
     );
   });
@@ -225,8 +219,8 @@ describe("ensures clause names", () => {
         result: object({ 数量: int() }),
         effects: variants("種類", {}),
         ensures: clause => [
-          clause.always("数量を保つ", (入力, 答え) => eq(答え.数量, 入力.数量)),
-          clause.always("数量を保つ", (入力, 答え) => gt(答え.数量, 入力.数量)),
+          clause.always("数量を保つ", (入力, 答え) => 答え.数量.$eq(入力.数量)),
+          clause.always("数量を保つ", (入力, 答え) => 答え.数量.$gt(入力.数量)),
         ],
       }),
     ).toThrow(new SpecificationError("Ensures 数量を保つ is declared more than once"));
@@ -235,21 +229,21 @@ describe("ensures clause names", () => {
 
 describe("how much of an ensures rule the check reads", () => {
   const 見積もる = behavior("見積もる", {
-    input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string("商品ID") }) }),
+    input: variants("状態", { 入力済み: object({ 数量: int(), 商品ID: string() }) }),
     result: variants("結果", {
-      見積: object({ 数量: int(), 商品ID: string("商品ID"), 明細: array(int()) }),
-      不可: object({ 理由: string("理由") }),
+      見積: object({ 数量: int(), 商品ID: string(), 明細: array(int()) }),
+      不可: object({ 理由: string() }),
       保留: object({}),
     }),
     effects: variants("種類", {}),
     ensures: clause => [
       clause.when("入力を写す", ["見積"], (入力, 答え) =>
-        and(gte(答え.数量, 入力.数量), eq(答え.商品ID, 入力.商品ID)),
+        答え.数量.$gte(入力.数量).$and(答え.商品ID.$eq(入力.商品ID)),
       ),
       clause.when("明細は数量以下", ["見積"], (入力, 答え) =>
-        all(答え.明細, 行 => lte(行, 入力.数量)),
+        答え.明細.$all(行 => 行.$lte(入力.数量)),
       ),
-      clause.when("自明", ["不可"], (入力, 答え) => and(eq(答え.理由, 答え.理由), gt(入力.数量, -1))),
+      clause.when("自明", ["不可"], (入力, 答え) => 答え.理由.$eq(答え.理由).$and(入力.数量.$gt(-1))),
     ],
   });
 

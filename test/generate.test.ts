@@ -3,31 +3,24 @@ import {
   todo,
   action,
   generate,
-  not,
   array,
   behavior,
   boolean,
-  eq,
   example,
-  gte,
-  gt,
-  guard,
   implement,
-  lte,
   examples,
   int,
-  length,
   number,
   object,
-  optional,
+  record,
   string,
   variants,
 } from "../src/index.js";
 
 const Cart = variants("状態", {
   商品あり: object({
-    カートID: string("カートID"),
-    クーポン: optional(string("クーポンコード")),
+    カートID: string(),
+    クーポン: string().optional(),
   }),
 });
 
@@ -47,7 +40,7 @@ describe("generateExamples starts from what the rows already say", () => {
     });
 
     expect(generate(existing).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
+      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポン>" },
     ]);
   });
 
@@ -75,7 +68,7 @@ describe("generateExamples starts from what the rows already say", () => {
     });
 
     expect(generate(existing).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポンコード>" },
+      { 状態: "商品あり", カートID: "カート-7", クーポン: "<クーポン>" },
     ]);
   });
 });
@@ -92,7 +85,7 @@ describe("generateExamples for classes", () => {
     expect(generate(existing).rows).toStrictEqual([
       {
         name: "注文を確定する: @商品あり.クーポン = あり",
-        given: { 状態: "商品あり", カートID: "<カートID>", クーポン: "<クーポンコード>" },
+        given: { 状態: "商品あり", カートID: "<カートID>", クーポン: "<クーポン>" },
         reason: "@商品あり.クーポンがありの期待結果を人間が決める必要があります",
       },
     ]);
@@ -145,7 +138,7 @@ describe("generateExamples for classes", () => {
 describe("generateExamples for border points", () => {
   const 数量を確定する = behavior("数量を確定する", {
     input: variants("状態", {
-      入力済み: object({ 数量: int().invariant(v => gte(v, 1)) }),
+      入力済み: object({ 数量: int().refine(v => v.$gte(1)) }),
     }),
     result: object({}),
     effects: variants("種類", {}),
@@ -169,15 +162,45 @@ describe("generateExamples for border points", () => {
   it("writes a value of the length a point on a length border asks for", () => {
     const 登録する = behavior("登録する", {
       input: variants("状態", {
-        入力済み: object({ 商品ID: string("ID").invariant(v => gte(length(v), 4)) }),
+        入力済み: object({ ID: string().refine(v => v.$length().$gte(4)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
     });
 
     expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "入力済み", 商品ID: "<ID>" },
-      { 状態: "入力済み", 商品ID: "<ID>_" },
+      { 状態: "入力済み", ID: "<ID>" },
+      { 状態: "入力済み", ID: "<ID>_" },
+    ]);
+  });
+
+  it("writes a record with as many entries as a point on its length border asks for", () => {
+    const 登録する = behavior("登録する", {
+      input: variants("状態", {
+        入力済み: object({ 在庫: record(string()).min(1) }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+
+    expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 在庫: { "<key>": "<在庫>" } },
+      { 状態: "入力済み", 在庫: { "<key>": "<在庫>", "<key2>": "<在庫>" } },
+    ]);
+  });
+
+  it("names a placeholder after its field's whole key, even one holding a path delimiter", () => {
+    const 登録する = behavior("登録する", {
+      input: variants("状態", {
+        入力済み: object({ "注文.メモ": string().optional() }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+
+    expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み" },
+      { 状態: "入力済み", "注文.メモ": "<注文.メモ>" },
     ]);
   });
 
@@ -186,8 +209,8 @@ describe("generateExamples for border points", () => {
       input: variants("状態", {
         入力済み: object({
           割合: number()
-            .invariant(v => gte(v, 0))
-            .invariant(v => lte(v, 0.5)),
+            .refine(v => v.$gte(0))
+            .refine(v => v.$lte(0.5)),
         }),
       }),
       result: object({}),
@@ -206,7 +229,7 @@ describe("generateExamples and excluded classes", () => {
   it("offers no row for a class the rules refuse", () => {
     const 同意する = behavior("同意する", {
       input: variants("状態", {
-        入力済み: object({ 同意: boolean().invariant(v => eq(v, true)) }),
+        入力済み: object({ 同意: boolean().refine(v => v.$eq(true)) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -220,7 +243,7 @@ describe("generateExamples and excluded classes", () => {
   it("offers rows on both sides of a border on a string value, which has no step", () => {
     const 並べる = behavior("並べる", {
       input: variants("状態", {
-        入力済み: object({ 見出し: string("見出し").invariant(v => gte(v, "m")) }),
+        入力済み: object({ 見出し: string().refine(v => v.$gte("m")) }),
       }),
       result: object({}),
       effects: variants("種類", {}),
@@ -236,7 +259,7 @@ describe("generateExamples and excluded classes", () => {
 describe("rows generate cannot make valid", () => {
   it("names a row whose composed value the input schema refuses instead of offering it", () => {
     const 数える = behavior("数える", {
-      input: variants("状態", { 入力済み: object({ 個数: int().invariant(v => not(eq(v, 0))) }) }),
+      input: variants("状態", { 入力済み: object({ 個数: int().refine(v => v.$eq(0).$not()) }) }),
       result: object({}),
       effects: variants("種類", {}),
     });
@@ -250,14 +273,14 @@ describe("rows generate cannot make valid", () => {
 
 describe("generateExamples below a length of zero", () => {
   const 見出しを確かめる = behavior("見出しを確かめる", {
-    input: variants("状態", { 入力済み: object({ 見出し: string("見出し") }) }),
+    input: variants("状態", { 入力済み: object({ 見出し: string() }) }),
     result: variants("結果", { 受付: object({}), 空: object({}) }),
     effects: variants("種類", {}),
   });
   const 空を断る = implement(見出しを確かめる, {
     cases: {
       入力済み: action("空を断る", {
-        guards: 入力 => [guard(gt(length(入力.見出し), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        guards: 入力 => [入力.見出し.$length().$gt(0).$else(() => ({ result: { 結果: "空" }, effects: [] }))],
         run: () => ({ result: { 結果: "受付" }, effects: [] }),
       }),
     },
@@ -287,7 +310,7 @@ describe("generateExamples for a guard on an array with no invariant", () => {
   const 空を断る = implement(明細を確かめる, {
     cases: {
       入力済み: action("空を断る", {
-        guards: 入力 => [guard(gt(length(入力.明細), 0), () => ({ result: { 結果: "空" }, effects: [] }))],
+        guards: 入力 => [入力.明細.$length().$gt(0).$else(() => ({ result: { 結果: "空" }, effects: [] }))],
         run: () => ({ result: { 結果: "受付" }, effects: [] }),
       }),
     },
@@ -311,14 +334,14 @@ describe("generateExamples for a guard on an array with no invariant", () => {
 describe("guard points generate cannot compose", () => {
   it("names each point it could not compose instead of leaving it out", () => {
     const 比べる = behavior("比べる", {
-      input: variants("状態", { 入力済み: object({ 数量: int(), 上限: optional(int()) }) }),
+      input: variants("状態", { 入力済み: object({ 数量: int(), 上限: int().optional() }) }),
       result: variants("結果", { 受付: object({}), 却下: object({}) }),
       effects: variants("種類", {}),
     });
     const 上限と比べる = implement(比べる, {
       cases: {
         入力済み: action("上限と比べる", {
-          guards: 入力 => [guard(lte(入力.数量, 入力.上限), () => ({ result: { 結果: "却下" }, effects: [] }))],
+          guards: 入力 => [入力.数量.$lte(入力.上限).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
           run: () => ({ result: { 結果: "受付" }, effects: [] }),
         }),
       },

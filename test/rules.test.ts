@@ -2,26 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   todo,
   action,
-  all,
-  and,
   array,
   behavior,
   spec,
-  eq,
   check,
   example,
   examples,
   generate,
-  guard,
   implement,
   int,
-  gte,
-  lte,
-  length,
-  lt,
   match,
   object,
-  or,
   perform,
   SpecificationError,
   string,
@@ -32,13 +23,13 @@ import type { Implementation } from "../src/index.js";
 const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", {
     商品あり: object({
-      カートID: string("カートID"),
+      カートID: string(),
       明細: array(object({ 数量: int(), 在庫数: int() })),
     }),
   }),
   result: variants("結果", {
-    確定: object({ カートID: string("カートID") }),
-    不可: object({ 理由: string("理由") }),
+    確定: object({ カートID: string() }),
+    不可: object({ 理由: string() }),
   }),
   effects: variants("種類", {}),
 });
@@ -47,7 +38,7 @@ const 在庫を確かめて確定する = implement(注文を確定する, {
   cases: {
     商品あり: action("在庫を確かめて確定する", {
       guards: カート => [
-        guard(all(カート.明細, 明細 => lte(明細.数量, 明細.在庫数)), () => ({
+        カート.明細.$all(明細 => 明細.数量.$lte(明細.在庫数)).$else(() => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
@@ -190,7 +181,7 @@ describe("verdict over a rules decision", () => {
     const 混在 = implement(二つの状態, {
       cases: {
         商品あり: action("数量を確かめる", {
-          guards: 入力 => [guard(lte(入力.数量, 10), () => ({ result: {}, effects: [] }))],
+          guards: 入力 => [入力.数量.$lte(10).$else(() => ({ result: {}, effects: [] }))],
           run: () => ({ result: {}, effects: [] }),
         }),
         確定済み: { kind: "decision", id: "何もしない", run: () => ({ result: {}, effects: [] }) },
@@ -214,7 +205,7 @@ describe("rules of a decision", () => {
     cases: {
       入力済み: action("会員歴か購入額", {
         guards: 入力 => [
-          guard(or(gte(入力.会員歴, 3), gte(入力.購入額, 10000)), () => ({
+          入力.会員歴.$gte(3).$or(入力.購入額.$gte(10000)).$else(() => ({
             result: { 結果: "定価" },
             effects: [],
           })),
@@ -344,7 +335,7 @@ describe("match over a sum field", () => {
     const 重さと方法 = implement(重さで決める, {
       cases: {
         確定済み: action("重さと方法", {
-          guards: 注文 => [guard(gte(注文.重さ, 1), () => ({ result: { 送料: 0 }, effects: [] }))],
+          guards: 注文 => [注文.重さ.$gte(1).$else(() => ({ result: { 送料: 0 }, effects: [] }))],
           run: match(注文 => 注文.配送.方法, {
             宅配: () => ({ result: { 送料: 500 }, effects: [] }),
             店頭受取: () => ({ result: { 送料: 0 }, effects: [] }),
@@ -374,14 +365,14 @@ describe("match over a sum field", () => {
 describe("ways generate could not compose", () => {
   it("says which ways no row was composed for rather than leaving them out", () => {
     const 並べる = behavior("並べる", {
-      input: variants("状態", { 入力済み: object({ 姓: string("姓"), 名: string("名") }) }),
+      input: variants("状態", { 入力済み: object({ 姓: string(), 名: string() }) }),
       result: object({}),
       effects: variants("種類", {}),
     });
     const 並び = implement(並べる, {
       cases: {
         入力済み: action("並び", {
-          guards: 入力 => [guard(lt(入力.姓, 入力.名), () => ({ result: {}, effects: [] }))],
+          guards: 入力 => [入力.姓.$lt(入力.名).$else(() => ({ result: {}, effects: [] }))],
           run: () => ({ result: {}, effects: [] }),
         }),
       },
@@ -397,7 +388,7 @@ describe("what match can branch on", () => {
   const 送る = behavior("送る", {
     input: variants("状態", {
       確定済み: object({
-        メモ: string("メモ"),
+        メモ: string(),
         配送: variants("方法", { 宅配: object({}), 店頭受取: object({}) }),
       }),
     }),
@@ -468,7 +459,7 @@ describe("rules written inline in spec", () => {
         implementation: implement(受け付ける, {
           cases: {
             入力済み: action("上限", {
-              guards: 入力 => [guard(lte(入力.合計, 100), () => ({ result: { 結果: "審査" }, effects: [] }))],
+              guards: 入力 => [入力.合計.$lte(100).$else(() => ({ result: { 結果: "審査" }, effects: [] }))],
               run: () => ({ result: { 結果: "受付" }, effects: [] }),
             }),
           },
@@ -496,9 +487,9 @@ describe("ways no row can take", () => {
   const 受け付ける = behavior("受け付ける", {
     input: variants("状態", {
       入力済み: object({
-        数量: int().invariant(v => gte(v, 0)),
+        数量: int().refine(v => v.$gte(0)),
         上限: int(),
-        最低: int().invariant(v => gte(v, 10)),
+        最低: int().refine(v => v.$gte(10)),
         明細: array(int()),
       }),
     }),
@@ -531,7 +522,7 @@ describe("ways no row can take", () => {
     const 二段 = implement(受け付ける, {
       cases: {
         入力済み: action("二段", {
-          guards: 入力 => [guard(and(gte(入力.数量, 10), gte(入力.数量, 5)), 却下)],
+          guards: 入力 => [入力.数量.$gte(10).$and(入力.数量.$gte(5)).$else(却下)],
           run: 受付,
         }),
       },
@@ -546,7 +537,7 @@ describe("ways no row can take", () => {
 
   it("owes no row at a way or an arm the invariants of the position leave nothing at", async () => {
     const 非負 = implement(受け付ける, {
-      cases: { 入力済み: action("非負", { guards: 入力 => [guard(gte(入力.数量, 0), 却下)], run: 受付 }) },
+      cases: { 入力済み: action("非負", { guards: 入力 => [入力.数量.$gte(0).$else(却下)], run: 受付 }) },
     });
 
     expect(await statuses(非負)).toStrictEqual({
@@ -559,7 +550,7 @@ describe("ways no row can take", () => {
     const 最低と比べる = implement(受け付ける, {
       cases: {
         入力済み: action("最低と比べる", {
-          guards: 入力 => [guard(and(lte(入力.数量, 5), gte(入力.数量, 入力.最低)), 却下)],
+          guards: 入力 => [入力.数量.$lte(5).$and(入力.数量.$gte(入力.最低)).$else(却下)],
           run: 受付,
         }),
       },
@@ -576,7 +567,7 @@ describe("ways no row can take", () => {
     const 明細を見る = implement(受け付ける, {
       cases: {
         入力済み: action("明細を見る", {
-          guards: 入力 => [guard(and(all(入力.明細, 行 => gte(行, 1)), gte(length(入力.明細), 1)), 却下)],
+          guards: 入力 => [入力.明細.$all(行 => 行.$gte(1)).$and(入力.明細.$length().$gte(1)).$else(却下)],
           run: 受付,
         }),
       },
@@ -602,7 +593,7 @@ describe("a term from outside all read inside each", () => {
     cases: {
       入力済み: action("上限で断る", {
         guards: 注文 => [
-          guard(all(注文.明細, 行 => lte(行.数量, 注文.上限)), () => ({
+          注文.明細.$all(行 => 行.数量.$lte(注文.上限)).$else(() => ({
             result: { 結果: "超過" },
             effects: [],
           })),
@@ -641,8 +632,8 @@ describe("a term from outside all read inside each", () => {
   });
 
   it("is enforced in an invariant", () => {
-    const 注文 = object({ 上限: int(), 明細: array(int()) }).invariant(v =>
-      all(v.明細, 行 => lte(行, v.上限)),
+    const 注文 = object({ 上限: int(), 明細: array(int()) }).refine(v =>
+      v.明細.$all(行 => 行.$lte(v.上限)),
     );
 
     expect(注文.parse({ 上限: 1, 明細: [5] }).success).toBe(false);
@@ -660,7 +651,7 @@ describe("action", () => {
   const 実装 = implement(受け付ける, {
     cases: {
       入力済み: action("数量を確かめる", {
-        guards: 入力 => [guard(gte(入力.数量, 1), 却下)],
+        guards: 入力 => [入力.数量.$gte(1).$else(却下)],
         run: 受付,
       }),
       取消済み: action("取消済みは断る", { run: 却下 }),

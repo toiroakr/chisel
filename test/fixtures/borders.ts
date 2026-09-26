@@ -2,10 +2,8 @@ import {
   behavior,
   boolean,
   spec,
-  eq,
   example,
   examples,
-  gte,
   int,
   object,
   variants,
@@ -14,8 +12,8 @@ import {
 const 数量を確定する = behavior("数量を確定する", {
   input: variants("状態", {
     入力済み: object({
-      数量: int().invariant(v => gte(v, 1)),
-      同意: boolean().invariant(v => eq(v, true)),
+      数量: int().refine(v => v.$gte(1)),
+      同意: boolean().refine(v => v.$eq(true)),
     }),
   }),
   result: object({}),

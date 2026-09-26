@@ -5,8 +5,6 @@ import {
   spec,
   example,
   examples,
-  gte,
-  guard,
   implement,
   int,
   object,
@@ -16,7 +14,7 @@ import {
 
 const 検証する = behavior("検証する", {
   input: variants("状態", { 申込: object({ 数量: int() }) }),
-  result: variants("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string("理由") }) }),
+  result: variants("結果", { 有効: object({ 数量: int() }), 無効: object({ 理由: string() }) }),
   effects: variants("種類", {}),
 });
 
@@ -30,7 +28,7 @@ const 検証するの実装 = implement(検証する, {
   cases: {
     申込: action("数量を確かめる", {
       guards: 申込 => [
-        guard(gte(申込.数量, 1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
+        申込.数量.$gte(1).$else(() => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
       ],
       run: 申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
     }),

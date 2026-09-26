@@ -5,7 +5,6 @@ import {
   examples,
   implement,
   object,
-  optional,
   string,
   variants,
 } from "../../src/index.js";
@@ -13,12 +12,12 @@ import {
 const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", {
     商品あり: object({
-      カートID: string("カートID"),
-      クーポン: optional(string("クーポンコード")),
+      カートID: string(),
+      クーポン: string().optional(),
     }),
   }),
-  result: variants("結果", { 確定: object({ カートID: string("カートID") }) }),
-  effects: variants("種類", { 決済要求: object({ カートID: string("カートID") }) }),
+  result: variants("結果", { 確定: object({ カートID: string() }) }),
+  effects: variants("種類", { 決済要求: object({ カートID: string() }) }),
 });
 
 export const 注文確定 = spec("注文確定", {

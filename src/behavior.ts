@@ -170,13 +170,6 @@ export class TodoDecision extends SpecificationError {
   }
 }
 
-export function guard<Input, Result, Effect, Deps = unknown>(
-  condition: Rule,
-  orElse: (input: Input, deps: Deps) => Execution<Result, Effect>,
-): Guard<Input, Result, Effect, Deps> {
-  return { kind: "guard", condition, orElse };
-}
-
 export function match<Input, Result, Effect, Deps = unknown, Tag extends string = string>(
   select: (input: TermOf<Input>) => Term<Tag>,
   cases: {

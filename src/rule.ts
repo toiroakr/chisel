@@ -1,4 +1,5 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
+import type { Execution, Guard } from "./behavior.js";
 
 export type Comparable = number | string | TemporalTypes.Instant;
 
@@ -18,14 +19,64 @@ export type Term<T> = {
 
 export type Operand<T> = Term<T> | T;
 
+export interface Condition {
+  $and(other: Rule): Rule & Condition;
+  $or(other: Rule): Rule & Condition;
+  $not(): Rule & Condition;
+  $else<Input, Result, Effect, Deps = unknown>(
+    orElse: (input: Input, deps: Deps) => Execution<Result, Effect>,
+  ): Guard<Input, Result, Effect, Deps>;
+}
+
+interface Ordered<T> {
+  $lt(other: Operand<T>): Rule & Condition;
+  $lte(other: Operand<T>): Rule & Condition;
+  $gt(other: Operand<T>): Rule & Condition;
+  $gte(other: Operand<T>): Rule & Condition;
+  $eq(other: Operand<T>): Rule & Condition;
+  $ne(other: Operand<T>): Rule & Condition;
+}
+
+interface Equatable<T> {
+  $eq(other: Operand<T>): Rule & Condition;
+  $ne(other: Operand<T>): Rule & Condition;
+}
+
+interface Measured {
+  $length(): TermOf<number>;
+}
+
+interface Quantified<E> {
+  $all(each: (element: TermOf<E>) => Rule): Rule & Condition;
+  $any(each: (element: TermOf<E>) => Rule): Rule & Condition;
+}
+
+// Operators carry the `$` prefix rather than fields, so a field reads as it does
+// on the value `run` receives, and a field named `length` or `all` stays ordinary.
+type TermOperator = "$lt" | "$lte" | "$gt" | "$gte" | "$eq" | "$ne" | "$length" | "$all" | "$any";
+
+type Fields<T> = {
+  readonly [K in Exclude<keyof T & string, TermOperator>]-?: TermOf<Exclude<T[K], undefined>>;
+};
+
 export type TermOf<T> = Term<T> &
-  (T extends Comparable | boolean | readonly unknown[]
-    ? unknown
-    : T extends object
-      ? string extends keyof T
-        ? { readonly [key: string]: any }
-        : { readonly [K in keyof T]-?: TermOf<Exclude<T[K], undefined>> }
-      : unknown);
+  (0 extends 1 & T
+    ? { readonly [key: string]: any }
+    : [T] extends [boolean]
+    ? Equatable<T>
+    : [T] extends [number | TemporalTypes.Instant]
+      ? Ordered<T>
+      : [T] extends [string]
+        ? Ordered<T> & Measured
+        : [T] extends [readonly (infer E)[]]
+          ? Measured & Quantified<E>
+          : [T] extends [object]
+            ? string extends keyof T
+              ? unknown extends T[string & keyof T]
+                ? { readonly [key: string]: any }
+                : Measured & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
+              : Fields<T>
+            : unknown);
 
 export type InvariantRule<T> = { bivariant(self: TermOf<T>): Rule }["bivariant"];
 
@@ -75,90 +126,40 @@ export function conjuncts(rule: Rule): readonly Rule[] {
   return rule.kind === "and" ? rule.rules.flatMap(conjuncts) : [rule];
 }
 
-export function any<E>(
-  of: Term<readonly E[]>,
-  each: (element: TermOf<E>) => Rule,
-): Rule {
-  return quantified("any", of, each);
-}
-
 let quantifiedDepth = 0;
 
 // The element is named by nesting depth, not by a fresh symbol: a term from an
 // enclosing all/any must keep a path the analysis can resolve to that
 // enclosing element, and a depth reads the same in every module graph.
-function quantified<E>(
+function quantified(
   kind: "all" | "any",
-  of: Term<readonly E[]>,
-  each: (element: TermOf<E>) => Rule,
-): Rule {
+  of: Term<unknown>,
+  each: (element: TermOf<unknown>) => Rule,
+): Rule & Condition {
   const element = `#each${quantifiedDepth}`;
   quantifiedDepth += 1;
   try {
-    return {
+    return condition({
       kind,
       of: of as Term<readonly unknown[]>,
       element,
-      each: each(termAt([element], "value") as TermOf<E>),
-    };
+      each: each(termAt([element], "value") as TermOf<unknown>),
+    });
   } finally {
     quantifiedDepth -= 1;
   }
 }
 
-export function and(...rules: readonly Rule[]): Rule {
-  return { kind: "and", rules };
-}
-
-export function or(...rules: readonly Rule[]): Rule {
-  return { kind: "or", rules };
-}
-
-export function not(rule: Rule): Rule {
-  return { kind: "not", rule };
-}
-
-export function all<E>(
-  of: Term<readonly E[]>,
-  each: (element: TermOf<E>) => Rule,
-): Rule {
-  return quantified("all", of, each);
-}
-
-export function lt<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
-  return compare("<", left, right);
-}
-
-export function lte<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
-  return compare("<=", left, right);
-}
-
-export function gt<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
-  return compare(">", left, right);
-}
-
-export function gte<T extends Comparable>(left: Operand<T>, right: Operand<T>): Rule {
-  return compare(">=", left, right);
-}
-
-export function eq<T extends Comparable | boolean>(
-  left: Operand<T>,
-  right: Operand<T>,
-): Rule {
-  return compare("==", left, right);
-}
-
-export function ne<T extends Comparable | boolean>(
-  left: Operand<T>,
-  right: Operand<T>,
-): Rule {
-  return compare("!=", left, right);
-}
-
-export function length(
-  of: Term<string | readonly unknown[] | Readonly<Record<string, unknown>>>,
-): Term<number> {
-  return termAt(of[TERM].path, "length");
+// The combinators are not enumerable, so a rule still compares, prints and
+// serialises as the plain data the analysis reads.
+function condition(rule: Rule): Rule & Condition {
+  Object.defineProperties(rule, {
+    $and: { value: (other: Rule) => condition({ kind: "and", rules: [rule, other] }) },
+    $or: { value: (other: Rule) => condition({ kind: "or", rules: [rule, other] }) },
+    $not: { value: () => condition({ kind: "not", rule }) },
+    $else: { value: (orElse: Guard<unknown, unknown, unknown>["orElse"]) => ({ kind: "guard", condition: rule, orElse }) },
+  });
+  return rule as Rule & Condition;
 }
 
 // A key no object schema field is expected to take: deps terms live beside the
@@ -457,21 +458,50 @@ export function resize(current: unknown, size: number): unknown {
   return current;
 }
 
-function compare(operator: Operator, left: unknown, right: unknown): Rule {
-  return { kind: "compare", operator, left, right };
+function compare(operator: Operator, left: unknown, right: unknown): Rule & Condition {
+  return condition({ kind: "compare", operator, left, right });
 }
+
+const OPERATORS: Readonly<Record<string, Operator>> = {
+  lt: "<",
+  lte: "<=",
+  gt: ">",
+  gte: ">=",
+  eq: "==",
+  ne: "!=",
+};
 
 function termAt(path: readonly string[], measure: TermData["measure"]): Term<unknown> {
   const data: TermData = { path, measure };
-  return new Proxy({} as Term<unknown>, {
+  const self: Term<unknown> = new Proxy({} as Term<unknown>, {
     get: (_target, key) => {
       if (key === TERM) {
         return data;
       }
-      return typeof key === "string" ? termAt([...path, key], "value") : undefined;
+      if (typeof key !== "string") {
+        return undefined;
+      }
+      if (!key.startsWith("$")) {
+        return termAt([...path, key], "value");
+      }
+      const name = key.slice(1);
+      const operator = Object.hasOwn(OPERATORS, name) ? OPERATORS[name] : undefined;
+      if (operator !== undefined) {
+        return (other: unknown) => compare(operator, self, other);
+      }
+      switch (name) {
+        case "length":
+          return () => termAt(path, "length");
+        case "all":
+        case "any":
+          return (each: (element: TermOf<unknown>) => Rule) => quantified(name, self, each);
+        default:
+          return termAt([...path, key], "value");
+      }
     },
     has: (_target, key) => key === TERM,
   });
+  return self;
 }
 
 export function readOperand(operand: unknown, value: unknown): unknown {

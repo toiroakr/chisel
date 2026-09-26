@@ -137,16 +137,20 @@ function fieldsOf(
         const inner = stepInto(rule, key);
         return inner === undefined ? [] : [inner];
       }),
+      key,
     ),
   );
 }
 
+// `field` is the key of the object field holding this position, carried down
+// rather than read back from `path`, since a key may itself hold ".", "[]" or "?".
 function positionAt(
   schema: AnySchema,
   path: string,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
+  field?: string,
 ): Position[] {
   const borders = bordersOf(
     [...schema.invariants.flatMap(conjuncts), ...inherited].filter(rule => boundTermPath(rule)?.length === 0),
@@ -160,7 +164,7 @@ function positionAt(
         ["なし", "あり"],
         focus,
         value => (value === undefined ? "なし" : "あり"),
-        className => (className === "なし" ? undefined : inner.placeholder()),
+        className => (className === "なし" ? undefined : inner.placeholder(field)),
       ),
       ...positionAt(
         inner,
@@ -168,9 +172,11 @@ function positionAt(
         {
           reach: given => focus.reach(given).filter(value => value !== undefined),
           update: (given, change) =>
-            focus.update(given, value => change(value === undefined ? inner.placeholder() : value)),
+            focus.update(given, value => change(value === undefined ? inner.placeholder(field) : value)),
         },
         reading,
+        [],
+        field,
       ),
     ];
   }
@@ -189,10 +195,10 @@ function positionAt(
       reach: given => focus.reach(given).flatMap(value => (Array.isArray(value) ? value : [])),
       update: (given, change) =>
         focus.update(given, value => {
-          const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder()];
+          const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder(field)];
           return items.map((item, index) => (index === 0 ? change(item) : item));
         }),
-    }, reading);
+    }, reading, [], field);
     return withOwnBorders(path, borders, focus, elements, reading);
   }
   if (schema.kind === "record") {
@@ -209,10 +215,10 @@ function positionAt(
           const present =
             entries.length > 0
               ? entries
-              : [["<key>", (schema as RecordSchema<unknown>).value.placeholder()] as const];
+              : [["<key>", (schema as RecordSchema<unknown>).value.placeholder(field)] as const];
           return Object.fromEntries(present.map(([key, item]) => [key, change(item)]));
         }),
-    }, reading);
+    }, reading, [], field);
     return withOwnBorders(path, borders, focus, values, reading);
   }
   if (schema.kind === "object") {

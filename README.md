@@ -23,21 +23,21 @@ The first version describes the domain vocabulary and the behavior boundary, not
 import * as c from "chisel";
 
 const Order = c.variants("state", {
-  unpaid: c.object({ orderId: c.string("OrderId") }),
+  unpaid: c.object({ orderId: c.string() }),
   paid: c.object({
-    orderId: c.string("OrderId"),
-    paymentId: c.string("PaymentId"),
+    orderId: c.string(),
+    paymentId: c.string(),
   }),
 });
 
 const CancelResult = c.variants("type", {
-  accepted: c.object({ orderId: c.string("OrderId") }),
-  rejected: c.object({ reason: c.string("Reason") }),
+  accepted: c.object({ orderId: c.string() }),
+  rejected: c.object({ reason: c.string() }),
 });
 
 const CancelEffect = c.variants("type", {
-  refund: c.object({ paymentId: c.string("PaymentId") }),
-  restock: c.object({ orderId: c.string("OrderId") }),
+  refund: c.object({ paymentId: c.string() }),
+  restock: c.object({ orderId: c.string() }),
 });
 
 export const cancelOrder = c.behavior("cancel-order", {
@@ -60,7 +60,7 @@ export const cancelOrderExamples = c.examples(cancelOrder, {
   "cancel-order: unpaid": {
     given: {
       state: "unpaid",
-      orderId: "<OrderId>",
+      orderId: "<orderId>",
     },
     expect: c.todo(
       "Expected result for unpaid must be decided by a human",
@@ -69,8 +69,8 @@ export const cancelOrderExamples = c.examples(cancelOrder, {
   "cancel-order: paid": {
     given: {
       state: "paid",
-      orderId: "<OrderId>",
-      paymentId: "<PaymentId>",
+      orderId: "<orderId>",
+      paymentId: "<paymentId>",
     },
     expect: c.todo(
       "Expected result for paid must be decided by a human",
@@ -185,25 +185,30 @@ npm run demo
 The analyzer follows the example-adequacy model of [Souther](https://github.com/souther-lang/souther). It measures what the model itself states and nothing else:
 
 - **Cases** of the input, result and effect variants. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
-- **Classes** of each input position, derived from the types: an `optional` field is absent or present, a `boolean` true or false, a `variants` field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`variants(...).invariant(v => ne(v.state, "archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
+- **Classes** of each input position, derived from the types: an optional field (`c.string().optional()`) is absent or present, a `boolean` true or false, a `variants` field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`variants(...).refine(v => v.state.$ne("archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
 - **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `int`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named. A point one bound owes is excluded when another bound refuses it, and bounds that leave nothing admitted (`$ >= 10` with `$ <= 5`) are reported as a model error rather than as gaps. A length is never negative, so a point that would lie below zero has no point there (`none: a length is never negative`) and no row is asked for at it, whether the border comes from an invariant or a guard.
+
+The common bounds have zod's shorthands, each desugaring to the same rule `refine` would take: on numbers `min`, `max`, `gt` and `lt` compare the value, and on strings, arrays and records `min`, `max` and `length` compare the length, so the borders keep a value and a length apart. `refine(v => ...)` states anything else, such as a relation between two fields (`.refine(v => v.start.$lte(v.end))`); its callback returns a rule built with term operators, not a boolean, so a condition the analysis cannot read does not type-check.
 
 ```ts
 const Line = c.object({
-  quantity: c.int().invariant(v => c.gte(v, 1)),
-  unitPrice: c.int().invariant(v => c.gte(v, 0)),
+  quantity: c.int().min(1),
+  unitPrice: c.int().min(0),
 });
-const Lines = c.array(Line).invariant(v => c.gte(c.length(v), 1));
+const Lines = c.array(Line).min(1);
+const SubtotalByProduct = c.record(c.int().min(0)).min(1);
 ```
 
-- **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant; its else is an ordinary result case, so a business rejection is data, not an exception:
+A record's length is its number of keys, so `SubtotalByProduct` needs at least one product; `generate` writes it as `{ "<key>": 0 }`, one entry showing the shape of its value, the way an array placeholder holds one element.
+
+- **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant: a condition is written on terms, which read a field by its own name, as `run` reads the value (`line.quantity`), and whose operators carry a `$` prefix, so no field name can shadow one: they compare with `$lt`, `$lte`, `$gt`, `$gte`, `$eq` and `$ne`, measure with `$length()`, quantify over array elements with `$all` and `$any`, and combine with `$and`, `$or` and `$not`. A condition becomes a guard with `$else`, which answers when the condition does not hold; that answer is an ordinary result case, so a business rejection is data, not an exception:
 
 ```ts
 const implementation = c.implement(checkout, {
   cases: {
     withItems: c.action("check stock, then confirm", {
       guards: cart => [
-        c.guard(c.all(cart.lines, line => c.lte(line.quantity, line.stock)), () => ({
+        cart.lines.$all(line => line.quantity.$lte(line.stock)).$else(() => ({
           result: { type: "rejected", reason: "out of stock" },
           effects: [],
         })),
@@ -225,16 +230,16 @@ A behavior can state what it ensures of its answer, and declare the outside worl
 ```ts
 const findMember = c.behavior("find-member", {
   input, result, effects,
-  requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string("MemberId"), c.boolean()) },
+  requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string(), c.boolean()) },
   ensures: clause => [
     clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
-      c.and(c.gt(asked.id, 0), c.eq(answer.id, asked.id)),
+      asked.id.$gt(0).$and(answer.id.$eq(asked.id)),
     ),
   ],
 });
 ```
 
-Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [guard(lt(deps.now, request.at), ...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [deps.now.$lt(request.at).$else(...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
 
 `check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). Every measure carries `status`, `reason` exactly where it is `unavailable`, and `weakening` exactly where something weakened it; every border point, arm and way carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
@@ -255,7 +260,7 @@ export const quoteSpec = c.spec("quote", {
 
 A stage need not be written yet: `generate` prints an implementation whose every case is `c.todo(...)`, so a composition can be declared and given examples before any stage is implemented. A stage Chisel will never run, one answered by another service, is `c.external(behavior, reason)`: it is not `todo` (nothing is owed), and `check` reports the rows it cannot run (`incompleteness`, printed as rows it could not run) and leaves the verdict `undetermined`; the production code is checked with `c.test` instead.
 
-The composition is an ordinary behavior, so a row may expect a case that departed at an early stage, which no stage's own examples can state. A stage may itself be a composition's implementation. The stages must name their cases by one discriminant; a case that would both depart one stage and be answered by a later one is refused, since a value cannot say which rail it is on. A case that flows on must not carry a field the next stage does not declare, at any depth (`validate answers @valid.total, which price does not declare`), nor a case of a nested sum the next stage does not declare (`@valid.payment@card`); and a field the next stage requires must always be answered (`validate does not always answer @valid.total, which price requires`), so leaving it out or answering it only as optional is refused too. The next stage would refuse such a value the first time the composition runs, so it is refused when composed instead. The same holds for types: every value the first stage may answer must be one the next stage takes, so a leaf of another type (`validate answers @valid.total as number, which price takes as integer`), a container of another kind, a literal of another value, or a string where the next stage takes one literal is refused, while an integer where it takes a number, or a literal where it takes that literal's type, is accepted. Invariants are left to run time: an `int()` answered where the next stage takes `int().invariant(v => gte(v, 1))` composes. A literal is the exception, since it has only one value: it is parsed with the next stage's schema, so `literal(0)` answered there is refused. A departed case stays departed through the later stages. Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
+The composition is an ordinary behavior, so a row may expect a case that departed at an early stage, which no stage's own examples can state. A stage may itself be a composition's implementation. The stages must name their cases by one discriminant; a case that would both depart one stage and be answered by a later one is refused, since a value cannot say which rail it is on. A case that flows on must not carry a field the next stage does not declare, at any depth (`validate answers @valid.total, which price does not declare`), nor a case of a nested sum the next stage does not declare (`@valid.payment@card`); and a field the next stage requires must always be answered (`validate does not always answer @valid.total, which price requires`), so leaving it out or answering it only as optional is refused too. The next stage would refuse such a value the first time the composition runs, so it is refused when composed instead. The same holds for types: every value the first stage may answer must be one the next stage takes, so a leaf of another type (`validate answers @valid.total as number, which price takes as integer`), a container of another kind, a literal of another value, or a string where the next stage takes one literal is refused, while an integer where it takes a number, or a literal where it takes that literal's type, is accepted. Invariants are left to run time: an `int()` answered where the next stage takes `int().min(1)` composes. A literal is the exception, since it has only one value: it is parsed with the next stage's schema, so `literal(0)` answered there is refused. A departed case stays departed through the later stages. Effects and dependencies are united. A composition has no arms or ways of its own, so those measures are `not applicable` for it; its adequacy is measured over its own input and result cases.
 
 ## Conformance
 

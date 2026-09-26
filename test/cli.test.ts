@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { runCommand } from "@politty/valibot";
-import type { RunResult } from "@politty/valibot";
+import { runCommand } from "@politty/zod";
+import type { RunResult } from "@politty/zod";
 import { describe, expect, it } from "vitest";
 import { cli } from "../src/cli.js";
 import { validate } from "./support/json-schema.js";
@@ -176,7 +176,7 @@ describe("chisel generate", () => {
         '  "unreferenced: ready": {',
         "    given: {",
         '      state: "ready",',
-        '      id: "<Id>",',
+        '      id: "<id>",',
         "    },",
         '    expect: c.todo("readyの期待結果を人間が決める必要があります"),',
         "  },",

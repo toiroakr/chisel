@@ -1,34 +1,34 @@
 import * as c from "../../src/index.js";
 
-const カートID = c.string("カートID");
-const 商品ID = c.string("商品ID");
-const クーポンコード = c.string("クーポンコード");
+const カートID = c.string();
+const 商品ID = c.string();
+const クーポンコード = c.string();
 
 const 明細 = c.object({
   商品ID,
-  数量: c.int().invariant(v => c.gte(v, 1)),
-  単価: c.int().invariant(v => c.gte(v, 0)),
-  在庫数: c.int().invariant(v => c.gte(v, 0)),
+  数量: c.int().min(1),
+  単価: c.int().min(0),
+  在庫数: c.int().min(0),
 });
 
 const カート = c.variants("状態", {
   空: c.object({ カートID }),
   商品あり: c.object({
     カートID,
-    明細: c.array(明細).invariant(v => c.gte(c.length(v), 1)),
-    クーポン: c.optional(クーポンコード),
+    明細: c.array(明細).min(1),
+    クーポン: クーポンコード.optional(),
   }),
   確定済み: c.object({ カートID }),
 });
 
 const 確定結果 = c.variants("結果", {
   確定: c.object({ カートID, 合計金額: c.number() }),
-  不可: c.object({ 理由: c.string("確定不可理由") }),
+  不可: c.object({ 理由: c.string() }),
 });
 
 const 確定作用 = c.variants("種類", {
   在庫引当: c.object({ 商品ID, 数量: c.number() }),
-  決済要求: c.object({ カートID, 金額: c.number() }),
+  決済要求: c.object({ カートID, 金額: c.number(), 内訳: c.record(c.int().min(0)).min(1) }),
   クーポン消費: c.object({ クーポンコード }),
 });
 
@@ -60,7 +60,7 @@ const 具体例 = c.examples(注文を確定する, {
       effects: [
         { 種類: "在庫引当", 商品ID: "商品-A", 数量: 2 },
         { 種類: "在庫引当", 商品ID: "商品-B", 数量: 1 },
-        { 種類: "決済要求", カートID: "カート-2", 金額: 2500 },
+        { 種類: "決済要求", カートID: "カート-2", 金額: 2500, 内訳: { "商品-A": 1000, "商品-B": 1500 } },
       ],
     },
   },
@@ -94,7 +94,7 @@ const 実装 = c.implement(注文を確定する, {
     }),
     商品あり: c.action("在庫を確かめて確定する", {
       guards: カート => [
-        c.guard(c.all(カート.明細, 明細 => c.lte(明細.数量, 明細.在庫数)), () => ({
+        カート.明細.$all(明細 => 明細.数量.$lte(明細.在庫数)).$else(() => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),
@@ -109,7 +109,20 @@ const 実装 = c.implement(注文を確定する, {
               商品ID: 明細.商品ID,
               数量: 明細.数量,
             })),
-            { 種類: "決済要求", カートID: カート.カートID, 金額: 合計金額 },
+            {
+              種類: "決済要求",
+              カートID: カート.カートID,
+              金額: 合計金額,
+              // A Map rather than a plain object, so a product ID such as "toString"
+              // cannot read an inherited member while the subtotals are added up.
+              内訳: Object.fromEntries(
+                カート.明細.reduce(
+                  (小計, 明細) =>
+                    小計.set(明細.商品ID, (小計.get(明細.商品ID) ?? 0) + 明細.数量 * 明細.単価),
+                  new Map<string, number>(),
+                ),
+              ),
+            },
           ],
         };
       },

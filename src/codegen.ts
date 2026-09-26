@@ -5,6 +5,9 @@ export function formatTypeScriptValue(value: unknown): string {
 }
 
 function format(value: unknown, level: number): string {
+  if (value === undefined) {
+    return "undefined";
+  }
   if (value instanceof temporalInstant()) {
     return `Temporal.Instant.from(${JSON.stringify(value.toString())})`;
   }
