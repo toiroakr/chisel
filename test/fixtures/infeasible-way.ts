@@ -3,7 +3,6 @@ import {
   behavior,
   spec,
   examples,
-  guard,
   implement,
   int,
   object,
@@ -20,7 +19,7 @@ const 二段 = implement(受け付ける, {
   cases: {
     入力済み: action("二段", {
       guards: 入力 => [
-        guard(入力.数量.$gte(10).$and(入力.数量.$gte(5)), () => ({
+        入力.数量.$gte(10).$and(入力.数量.$gte(5)).$else(() => ({
           result: { 結果: "却下" },
           effects: [],
         })),

@@ -5,7 +5,6 @@ import {
   spec,
   example,
   examples,
-  guard,
   implement,
   int,
   object,
@@ -25,7 +24,7 @@ const 在庫を確かめる = implement(注文を確定する, {
   cases: {
     商品あり: action("在庫を確かめる", {
       guards: カート => [
-        guard(カート.明細.$all(明細 => 明細.数量.$lte(明細.在庫数)), () => ({
+        カート.明細.$all(明細 => 明細.数量.$lte(明細.在庫数)).$else(() => ({
           result: { 結果: "不可", 理由: "在庫不足" },
           effects: [],
         })),

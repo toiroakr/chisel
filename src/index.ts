@@ -63,7 +63,6 @@ export {
   action,
   behavior,
   external,
-  guard,
   implement,
   isBehavior,
   match,

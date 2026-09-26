@@ -9,7 +9,6 @@ import {
   example,
   examples,
   generate,
-  guard,
   implement,
   int,
   object,
@@ -491,7 +490,7 @@ describe("pairs of classes", () => {
     const 上限で分ける = implement(注文を受け付ける, {
       cases: {
         入力済み: action("上限で分ける", {
-          guards: 注文 => [guard(注文.合計.$lte(100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          guards: 注文 => [注文.合計.$lte(100000).$else(() => ({ result: { 結果: "要承認" }, effects: [] }))],
           run: () => ({ result: { 結果: "受付" }, effects: [] }),
         }),
       },
@@ -578,7 +577,7 @@ describe("a guard threshold interval the invariants leave empty", () => {
     const 上限で分ける = implement(受け付ける, {
       cases: {
         入力済み: action("上限で分ける", {
-          guards: 注文 => [guard(注文.合計.$lte(100000), () => ({ result: { 結果: "要承認" }, effects: [] }))],
+          guards: 注文 => [注文.合計.$lte(100000).$else(() => ({ result: { 結果: "要承認" }, effects: [] }))],
           run: () => ({ result: { 結果: "受付" }, effects: [] }),
         }),
       },

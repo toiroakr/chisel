@@ -1,4 +1,5 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
+import type { Execution, Guard } from "./behavior.js";
 
 export type Comparable = number | string | TemporalTypes.Instant;
 
@@ -22,6 +23,9 @@ export interface Condition {
   $and(other: Rule): Rule & Condition;
   $or(other: Rule): Rule & Condition;
   $not(): Rule & Condition;
+  $else<Input, Result, Effect, Deps = unknown>(
+    orElse: (input: Input, deps: Deps) => Execution<Result, Effect>,
+  ): Guard<Input, Result, Effect, Deps>;
 }
 
 interface Ordered<T> {
@@ -147,6 +151,7 @@ function condition(rule: Rule): Rule & Condition {
     $and: { value: (other: Rule) => condition({ kind: "and", rules: [rule, other] }) },
     $or: { value: (other: Rule) => condition({ kind: "or", rules: [rule, other] }) },
     $not: { value: () => condition({ kind: "not", rule }) },
+    $else: { value: (orElse: Guard<unknown, unknown, unknown>["orElse"]) => ({ kind: "guard", condition: rule, orElse }) },
   });
   return rule as Rule & Condition;
 }

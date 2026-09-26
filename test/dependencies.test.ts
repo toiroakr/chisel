@@ -11,7 +11,6 @@ import {
   examples,
   fake,
   generate,
-  guard,
   implement,
   match,
   perform,
@@ -300,7 +299,7 @@ describe("a value dependency read in a guard condition", () => {
     cases: {
       申込済み: action("過去を断る", {
         guards: (申込, 依存) => [
-          guard(依存.現在時刻.$lt(申込.希望日時), () => ({
+          依存.現在時刻.$lt(申込.希望日時).$else(() => ({
             result: { 結果: "過去" },
             effects: [],
           })),
@@ -422,13 +421,10 @@ describe("a value dependency read inside all", () => {
     cases: {
       入力済み: action("上限で断る", {
         guards: (注文, 依存) => [
-          guard(
-            注文.明細.$all((行) => 行.数量.$lte(依存.上限)),
-            () => ({
-              result: { 結果: "上限超過" },
-              effects: [],
-            }),
-          ),
+          注文.明細.$all((行) => 行.数量.$lte(依存.上限)).$else(() => ({
+            result: { 結果: "上限超過" },
+            effects: [],
+          })),
         ],
         run: () => ({ result: { 結果: "受付" }, effects: [] }),
       }),
