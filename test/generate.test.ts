@@ -189,6 +189,21 @@ describe("generateExamples for border points", () => {
     ]);
   });
 
+  it("names a placeholder after its field's whole key, even one holding a path delimiter", () => {
+    const 登録する = behavior("登録する", {
+      input: variants("状態", {
+        入力済み: object({ "注文.メモ": string().optional() }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+
+    expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み" },
+      { 状態: "入力済み", "注文.メモ": "<注文.メモ>" },
+    ]);
+  });
+
   it("finds a value inside both bounds of a number", () => {
     const 割合を決める = behavior("割合を決める", {
       input: variants("状態", {
