@@ -7,6 +7,8 @@ import {
   action,
   behavior,
   compose,
+  date,
+  instant,
   spec,
   check,
   example,
@@ -322,6 +324,12 @@ describe("compose", () => {
     it("refuses a number where the second stage takes an integer, since it may not be whole", () => {
       expect(() => compose("数値を整数で", 段(number(), int()))).toThrow(
         new SpecificationError("返す answers @有効.値 as number, which 受け取る takes as integer"),
+      );
+    });
+
+    it("refuses a date where the second stage takes an instant, since a date names no moment", () => {
+      expect(() => compose("日付を時刻で", 段(date(), instant()))).toThrow(
+        new SpecificationError("返す answers @有効.値 as date, which 受け取る takes as instant"),
       );
     });
 
