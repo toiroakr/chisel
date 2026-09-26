@@ -530,6 +530,7 @@ interface Temporalish {
   until(other: unknown, options: object): { total(unit: string): number };
   readonly epochNanoseconds?: bigint;
   toZonedDateTime?(timeZone: string): { readonly epochNanoseconds: bigint };
+  withCalendar?(calendar: string): Temporalish;
   readonly constructor: { compare(left: unknown, right: unknown): number; from(text: string): Temporalish };
 }
 
@@ -539,7 +540,13 @@ const MOMENTS: Readonly<Record<string, Moment>> = {
     shift: (value, amount) => (value as Temporalish).add({ nanoseconds: amount }),
   },
   date: {
-    read: value => (value as Temporalish).constructor.from("1970-01-01").until(value, { largestUnit: "days" }).total("days"),
+    // Counted in the ISO calendar, since until refuses two dates in different
+    // calendars and a date in any calendar is one the schema accepts.
+    read: value =>
+      (value as Temporalish).constructor
+        .from("1970-01-01")
+        .until((value as Temporalish).withCalendar!("iso8601"), { largestUnit: "days" })
+        .total("days"),
     shift: (value, amount) => (value as Temporalish).add({ days: amount }),
   },
   datetime: {

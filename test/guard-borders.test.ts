@@ -613,6 +613,29 @@ describe("comparisons Chisel could not read", () => {
     ]);
   });
 
+  it("places a row of dates in another calendar on their difference in days", async () => {
+    const { 比べる, 順序 } = orderedBy(date());
+    const report = await check(
+      spec("順序", {
+        examples: examples(比べる, {
+          "グレゴリオ暦": {
+            given: {
+              状態: "入力済み",
+              開始: Temporal.PlainDate.from("2026-01-01[u-ca=gregory]"),
+              終了: Temporal.PlainDate.from("2026-01-02[u-ca=gregory]"),
+            },
+            expect: { result: {}, effects: [] },
+          },
+        } as never),
+        implementation: 順序,
+      }),
+    );
+
+    expect(report.borders[0]!.points.filter(point => point.status === "met").map(point => point.role)).toStrictEqual([
+      "ON",
+    ]);
+  });
+
   it("composes a row on the difference of two dates by moving one of them in days", () => {
     expect(composedDifferenceRows(date())).toStrictEqual([
       "ON (= -1): 1999-12-31 / 2000-01-01",
