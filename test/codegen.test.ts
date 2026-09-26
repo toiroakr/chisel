@@ -15,6 +15,22 @@ describe("formatTypeScriptValue", () => {
     expect(formatTypeScriptValue(instant)).toBe('Temporal.Instant.from("2024-01-01T00:00:00Z")');
   });
 
+  it("formats a Temporal.PlainDate as a Temporal.PlainDate.from(...) call", () => {
+    expect(formatTypeScriptValue(Temporal.PlainDate.from("2026-01-01"))).toBe(
+      'Temporal.PlainDate.from("2026-01-01")',
+    );
+  });
+
+  it("formats a Temporal.PlainTime as a Temporal.PlainTime.from(...) call", () => {
+    expect(formatTypeScriptValue(Temporal.PlainTime.from("15:00"))).toBe('Temporal.PlainTime.from("15:00:00")');
+  });
+
+  it("formats a Temporal.PlainDateTime as a Temporal.PlainDateTime.from(...) call", () => {
+    expect(formatTypeScriptValue(Temporal.PlainDateTime.from("2026-01-01T15:00"))).toBe(
+      'Temporal.PlainDateTime.from("2026-01-01T15:00:00")',
+    );
+  });
+
   it("formats an empty array as []", () => {
     expect(formatTypeScriptValue([])).toBe("[]");
   });

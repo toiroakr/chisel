@@ -461,12 +461,12 @@ function between(
   if (carrier === undefined || rule.operator === "==" || rule.operator === "!=") {
     return [];
   }
-  const instants = carrier === nanosecondCarrier;
+  const moment = first.kind === second.kind ? MOMENTS[first.kind ?? ""] : undefined;
   const difference: CompareRule = {
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),
-    right: instants ? 0n : 0,
+    right: carrier === nanosecondCarrier ? 0n : 0,
   };
   const borders = bordersOf([difference], () => carrier, {
     source: reading.source,
@@ -478,10 +478,7 @@ function between(
     if (value === undefined) {
       return undefined;
     }
-    if (instants) {
-      return (value as { readonly epochNanoseconds: bigint }).epochNanoseconds;
-    }
-    return value as number;
+    return moment === undefined ? (value as number) : moment.read(value);
   };
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,
@@ -501,11 +498,20 @@ function between(
       if (moved === undefined || other === undefined) {
         return undefined;
       }
-      if (instants) {
-        const shifted = (other as { add(duration: object): unknown }).add({
-          nanoseconds: sign * Number(coordinate as bigint),
-        });
-        return moved.write(given, moving.measure, shifted);
+      if (moment !== undefined) {
+        const amount = sign * Number(coordinate as number | bigint);
+        const shifted = moment.shift(other, amount);
+        if (shifted !== undefined) {
+          return moved.write(given, moving.measure, shifted);
+        }
+        // Moving this side would carry it past an end of the day, so the other
+        // side is moved against the value this one already holds instead.
+        const held = fixed.standsIn ? undefined : at(fixed.path);
+        const current = moved.valuesIn(given)[0];
+        const counter = current === undefined ? undefined : moment.shift(current, -amount);
+        return held === undefined || counter === undefined
+          ? undefined
+          : held.write(given, fixed.measure, counter);
       }
       const base =
         fixed.measure === "length" && !fixed.standsIn ? sizeOf(other) : (other as number);
@@ -513,6 +519,52 @@ function between(
     },
   }));
 }
+
+interface Moment {
+  read(value: unknown): number | bigint;
+  shift(value: unknown, amount: number): unknown;
+}
+
+interface Temporalish {
+  add(duration: object): Temporalish;
+  until(other: unknown, options: object): { total(unit: string): number };
+  readonly epochNanoseconds?: bigint;
+  toZonedDateTime?(timeZone: string): { readonly epochNanoseconds: bigint };
+  withCalendar?(calendar: string): Temporalish;
+  readonly constructor: { compare(left: unknown, right: unknown): number; from(text: string): Temporalish };
+}
+
+const MOMENTS: Readonly<Record<string, Moment>> = {
+  instant: {
+    read: value => (value as Temporalish).epochNanoseconds!,
+    shift: (value, amount) => (value as Temporalish).add({ nanoseconds: amount }),
+  },
+  date: {
+    // Counted in the ISO calendar, since until refuses two dates in different
+    // calendars and a date in any calendar is one the schema accepts.
+    read: value =>
+      (value as Temporalish).constructor
+        .from("1970-01-01")
+        .until((value as Temporalish).withCalendar!("iso8601"), { largestUnit: "days" })
+        .total("days"),
+    shift: (value, amount) => (value as Temporalish).add({ days: amount }),
+  },
+  datetime: {
+    // Read through UTC as an exact bigint: a total in nanoseconds since 1970 is
+    // past what a number holds exactly, and would round a one-nanosecond gap away.
+    read: value => (value as Temporalish).toZonedDateTime!("UTC").epochNanoseconds,
+    shift: (value, amount) => (value as Temporalish).add({ nanoseconds: amount }),
+  },
+  time: {
+    read: value =>
+      BigInt((value as Temporalish).constructor.from("00:00").until(value, { largestUnit: "hours" }).total("nanoseconds")),
+    shift: (value, amount) => {
+      const shifted = (value as Temporalish).add({ nanoseconds: amount });
+      const order = (value as Temporalish).constructor.compare(shifted, value);
+      return Math.sign(order) === Math.sign(amount) ? shifted : undefined;
+    },
+  },
+};
 
 function differenceCarrier(
   first: string | undefined,
@@ -525,7 +577,10 @@ function differenceCarrier(
   if (numeric(first) && numeric(second)) {
     return numberCarrier;
   }
-  return first === "instant" && second === "instant" ? nanosecondCarrier : undefined;
+  if (first !== second) {
+    return undefined;
+  }
+  return first === "date" ? integerCarrier : first === "instant" || first === "datetime" || first === "time" ? nanosecondCarrier : undefined;
 }
 
 export function comparisonsNotReadOf(implementation: AnyImplementation): readonly string[] {

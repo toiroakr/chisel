@@ -1,5 +1,3 @@
-import type { Temporal as TemporalTypes } from "temporal-spec";
-
 export function formatTypeScriptValue(value: unknown): string {
   return format(value, 0);
 }
@@ -8,8 +6,9 @@ function format(value: unknown, level: number): string {
   if (value === undefined) {
     return "undefined";
   }
-  if (value instanceof temporalInstant()) {
-    return `Temporal.Instant.from(${JSON.stringify(value.toString())})`;
+  const type = temporalTypeOf(value);
+  if (type !== undefined) {
+    return `Temporal.${type}.from(${JSON.stringify(String(value))})`;
   }
   if (
     value === null ||
@@ -51,16 +50,19 @@ function indent(level: number): string {
   return "  ".repeat(level);
 }
 
-function temporalInstant(): TemporalTypes.InstantConstructor {
+const TEMPORAL_TYPES = ["Instant", "PlainDate", "PlainTime", "PlainDateTime"] as const;
+
+function temporalTypeOf(value: unknown): (typeof TEMPORAL_TYPES)[number] | undefined {
   const temporal = (
     globalThis as unknown as {
-      readonly Temporal?: {
-        readonly Instant?: TemporalTypes.InstantConstructor;
-      };
+      readonly Temporal?: Partial<Record<(typeof TEMPORAL_TYPES)[number], abstract new (...args: never[]) => unknown>>;
     }
   ).Temporal;
-  if (temporal?.Instant === undefined) {
+  if (temporal === undefined) {
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
-  return temporal.Instant;
+  return TEMPORAL_TYPES.find(type => {
+    const constructor = temporal[type];
+    return constructor !== undefined && value instanceof constructor;
+  });
 }
