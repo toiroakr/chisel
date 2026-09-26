@@ -113,12 +113,14 @@ const 実装 = c.implement(注文を確定する, {
               種類: "決済要求",
               カートID: カート.カートID,
               金額: 合計金額,
-              内訳: カート.明細.reduce<Record<string, number>>(
-                (内訳, 明細) => ({
-                  ...内訳,
-                  [明細.商品ID]: (内訳[明細.商品ID] ?? 0) + 明細.数量 * 明細.単価,
-                }),
-                {},
+              // A Map rather than a plain object, so a product ID such as "toString"
+              // cannot read an inherited member while the subtotals are added up.
+              内訳: Object.fromEntries(
+                カート.明細.reduce(
+                  (小計, 明細) =>
+                    小計.set(明細.商品ID, (小計.get(明細.商品ID) ?? 0) + 明細.数量 * 明細.単価),
+                  new Map<string, number>(),
+                ),
               ),
             },
           ],
