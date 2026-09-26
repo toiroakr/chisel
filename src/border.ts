@@ -27,6 +27,7 @@ export interface Carrier {
   readonly past?: (value: unknown, direction: 1 | -1) => unknown;
   readonly format: (value: unknown) => string;
   readonly floor?: { readonly value: unknown; readonly reason: string };
+  readonly ceiling?: { readonly value: unknown; readonly reason: string };
 }
 
 export const integerCarrier: Carrier = {
@@ -55,6 +56,49 @@ export const instantCarrier: Carrier = {
     (value as { add(duration: object): unknown }).add({ nanoseconds: direction }),
   format: String,
 };
+
+interface Plain {
+  add(duration: object): unknown;
+  readonly constructor: { compare(left: unknown, right: unknown): number };
+}
+
+const comparePlain = (left: unknown, right: unknown) => (left as Plain).constructor.compare(left, right);
+
+export const dateCarrier: Carrier = {
+  compare: comparePlain,
+  step: (value, direction) => (value as Plain).add({ days: direction }),
+  format: String,
+};
+
+export const dateTimeCarrier: Carrier = {
+  compare: comparePlain,
+  step: (value, direction) => (value as Plain).add({ nanoseconds: direction }),
+  format: String,
+};
+
+const withinOneDay = "a time of day lies within one day";
+
+// A plain time wraps past midnight when stepped, so the step stops at either end
+// of the day instead, and the ends are named so a point beyond them is "no point".
+export const timeCarrier: Carrier = {
+  compare: comparePlain,
+  step: (value, direction) => {
+    const end = direction === 1 ? timeCarrier.ceiling! : timeCarrier.floor!;
+    return comparePlain(value, end.value) === 0 ? undefined : (value as Plain).add({ nanoseconds: direction });
+  },
+  format: String,
+  get floor() {
+    return { value: plainTime("00:00"), reason: withinOneDay };
+  },
+  get ceiling() {
+    return { value: plainTime("23:59:59.999999999"), reason: withinOneDay };
+  },
+};
+
+function plainTime(text: string): unknown {
+  return (globalThis as unknown as { readonly Temporal: { readonly PlainTime: { from(text: string): unknown } } })
+    .Temporal.PlainTime.from(text);
+}
 
 function epochNanoseconds(value: unknown): bigint {
   return (value as { readonly epochNanoseconds: bigint }).epochNanoseconds;
@@ -219,7 +263,11 @@ function borderOf(
   const on = closed ? bound : step?.(bound, inward);
   const off = closed ? step?.(bound, outward) : bound;
   const guarded = drawing.source !== "invariant";
-  if (on === undefined && !guarded) {
+  const floored = belowFloor(carrier);
+  const ceiled = aboveCeiling(carrier);
+  const pastEnd = (edge: unknown, direction: 1 | -1) =>
+    direction === -1 ? floored.under(edge) : ceiled.over(edge);
+  if (on === undefined && !guarded && !pastEnd(bound, inward)) {
     return undefined;
   }
   const inner = on ?? bound;
@@ -273,12 +321,11 @@ function borderOf(
       contains: outside(outer),
     },
   ];
-  const floored = belowFloor(carrier);
   const reaching: readonly [boolean, boolean, boolean, boolean] = [
-    on !== undefined && floored.at(on),
-    off !== undefined && floored.at(off),
-    !lower && floored.under(inner),
-    lower && floored.under(outer),
+    on === undefined ? pastEnd(bound, inward) : floored.at(on),
+    off === undefined ? closed && pastEnd(bound, outward) : floored.at(off),
+    lower ? ceiled.over(inner) : floored.under(inner),
+    lower ? floored.under(outer) : ceiled.over(outer),
   ];
   return {
     border: {
@@ -342,19 +389,20 @@ function namedValueBorder(
     };
   };
   const floored = belowFloor(carrier);
-  const neighbourOrNone = (role: PointRole, edge: unknown, inside: boolean): BorderPoint =>
-    edge !== undefined && floored.at(edge)
+  const ceiled = aboveCeiling(carrier);
+  const neighbourOrNone = (role: PointRole, edge: unknown, direction: 0 | 1 | -1, inside: boolean): BorderPoint =>
+    (edge !== undefined && floored.at(edge)) ||
+    (edge === undefined && direction !== 0 && (direction === -1 ? floored.under(bound) : ceiled.over(bound)))
       ? noPointBelow(role, carrier)
       : neighbour(role, edge, inside);
   const runOrNone = (role: PointRole, direction: 1 | -1, inside: boolean): BorderPoint =>
-    direction === -1 && floored.under(below ?? bound)
-      ? noPointBelow(role, carrier)
-      : run(role, direction, inside);
+    direction === -1 ? (floored.under(below ?? bound) ? noPointBelow(role, carrier) : run(role, direction, inside))
+      : ceiled.over(above ?? bound) ? noPointBelow(role, carrier) : run(role, direction, inside);
   const points: BorderPoint[] = keeps
     ? [
-        neighbourOrNone("ON", bound, true),
-        neighbourOrNone("OFF", below, false),
-        neighbourOrNone("OFF", above, false),
+        neighbourOrNone("ON", bound, 0, true),
+        neighbourOrNone("OFF", below, -1, false),
+        neighbourOrNone("OFF", above, 1, false),
         {
           role: "IN",
           relation: "none: the rule keeps a single value",
@@ -365,9 +413,9 @@ function namedValueBorder(
         runOrNone("OUT", 1, false),
       ]
     : [
-        neighbourOrNone("ON", below, true),
-        neighbourOrNone("ON", above, true),
-        neighbourOrNone("OFF", bound, false),
+        neighbourOrNone("ON", below, -1, true),
+        neighbourOrNone("ON", above, 1, true),
+        neighbourOrNone("OFF", bound, 0, false),
         runOrNone("IN", -1, true),
         runOrNone("IN", 1, true),
         {
@@ -407,10 +455,17 @@ function belowFloor(carrier: Carrier): {
   };
 }
 
+function aboveCeiling(carrier: Carrier): { readonly over: (edge: unknown) => boolean } {
+  const { ceiling } = carrier;
+  return ceiling === undefined
+    ? { over: () => false }
+    : { over: edge => carrier.compare(edge, ceiling.value) >= 0 };
+}
+
 function noPointBelow(role: PointRole, carrier: Carrier): BorderPoint {
   return {
     role,
-    relation: `none: ${carrier.floor?.reason ?? "no value lies there"}`,
+    relation: `none: ${carrier.floor?.reason ?? carrier.ceiling?.reason ?? "no value lies there"}`,
     status: "no point",
     contains: () => false,
   };

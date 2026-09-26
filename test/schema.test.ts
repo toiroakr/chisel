@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   array,
   boolean,
+  date,
+  datetime,
   instant,
   int,
   isVariantsSchema,
@@ -10,6 +12,7 @@ import {
   object,
   record,
   string,
+  time,
   variants,
   tagOf,
 } from "../src/index.js";
@@ -249,6 +252,65 @@ describe("instant", () => {
     const placeholder = instant().placeholder() as Temporal.Instant;
 
     expect(placeholder.toString()).toBe("2000-01-01T00:00:00Z");
+  });
+});
+
+describe("date", () => {
+  it("accepts a Temporal.PlainDate", () => {
+    const value = Temporal.PlainDate.from("2026-01-01");
+
+    expect(date().parse(value)).toStrictEqual({ success: true, value });
+  });
+
+  it("reports a value that is not a Temporal.PlainDate with the path of the field", () => {
+    expect(object({ 予約日: date() }).parse({ 予約日: "2026-01-01" })).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.予約日", message: "Expected a Temporal.PlainDate" }],
+    });
+  });
+
+  it("uses a fixed Temporal.PlainDate as its placeholder", () => {
+    expect(String(date().placeholder())).toBe("2000-01-01");
+  });
+});
+
+describe("time", () => {
+  it("accepts a Temporal.PlainTime", () => {
+    const value = Temporal.PlainTime.from("15:00");
+
+    expect(time().parse(value)).toStrictEqual({ success: true, value });
+  });
+
+  it("reports a value that is not a Temporal.PlainTime with the path of the field", () => {
+    expect(object({ 受付開始: time() }).parse({ 受付開始: Temporal.PlainDate.from("2026-01-01") })).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.受付開始", message: "Expected a Temporal.PlainTime" }],
+    });
+  });
+
+  it("uses a fixed Temporal.PlainTime as its placeholder", () => {
+    expect(String(time().placeholder())).toBe("00:00:00");
+  });
+});
+
+describe("datetime", () => {
+  it("accepts a Temporal.PlainDateTime", () => {
+    const value = Temporal.PlainDateTime.from("2026-01-01T15:00");
+
+    expect(datetime().parse(value)).toStrictEqual({ success: true, value });
+  });
+
+  it("reports a value that is not a Temporal.PlainDateTime with the path of the field", () => {
+    expect(
+      object({ 入館: datetime() }).parse({ 入館: Temporal.Instant.from("2026-01-01T15:00:00Z") }),
+    ).toStrictEqual({
+      success: false,
+      issues: [{ path: "$.入館", message: "Expected a Temporal.PlainDateTime" }],
+    });
+  });
+
+  it("uses a fixed Temporal.PlainDateTime as its placeholder", () => {
+    expect(String(datetime().placeholder())).toBe("2000-01-01T00:00:00");
   });
 });
 

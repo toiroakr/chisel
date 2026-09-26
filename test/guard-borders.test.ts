@@ -9,11 +9,14 @@ import {
   example,
   examples,
   implement,
+  date,
+  datetime,
   instant,
   int,
   number,
   object,
   string,
+  time,
   variants,
 } from "../src/index.js";
 import type { Condition, Rule, TermOf } from "../src/index.js";
@@ -534,6 +537,118 @@ describe("comparisons Chisel could not read", () => {
       "= 0",
       "< -1",
       "> 0",
+    ]);
+  });
+
+  function orderedBy(field: Parameters<typeof object>[0][string]) {
+    const 比べる = behavior("比べる", {
+      input: variants("状態", { 入力済み: object({ 開始: field, 終了: field }) }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+    const 順序 = implement(比べる, {
+      cases: {
+        入力済み: action("順序", {
+          guards: 入力 => [
+            (入力.開始 as unknown as TermOf<number>).$lt(入力.終了 as unknown as TermOf<number>).$else(() => ({
+              result: {},
+              effects: [],
+            })),
+          ],
+          run: () => ({ result: {}, effects: [] }),
+        }),
+      },
+    });
+    return { 比べる, 順序 };
+  }
+
+  async function differenceRelations(field: Parameters<typeof object>[0][string]) {
+    const { 比べる, 順序 } = orderedBy(field);
+    const report = await check(spec("順序", { examples: examples(比べる, {}), implementation: 順序 }));
+    return report.borders[0]!.points.map(point => point.relation);
+  }
+
+  function composedDifferenceRows(field: Parameters<typeof object>[0][string]) {
+    const { 比べる, 順序 } = orderedBy(field);
+    return generate(examples(比べる, {}), 順序)
+      .rows.filter(row => row.name.includes(" − "))
+      .map(row => {
+        const given = row.given as { readonly 開始: unknown; readonly 終了: unknown };
+        return `${row.name.slice(row.name.lastIndexOf(" − ") + " − @入力済み.終了 ".length)}: ${String(given.開始)} / ${String(given.終了)}`;
+      });
+  }
+
+  it("reads two dates on their difference in days", async () => {
+    expect(await differenceRelations(date())).toStrictEqual(["= -1", "= 0", "< -1", "> 0"]);
+  });
+
+  it("reads two times on their difference in nanoseconds", async () => {
+    expect(await differenceRelations(time())).toStrictEqual(["= -1", "= 0", "< -1", "> 0"]);
+  });
+
+  it("reads two datetimes on their difference in nanoseconds", async () => {
+    expect(await differenceRelations(datetime())).toStrictEqual(["= -1", "= 0", "< -1", "> 0"]);
+  });
+
+  it("places a row whose datetimes lie one nanosecond apart at the ON point, however far from 1970 they are", async () => {
+    const { 比べる, 順序 } = orderedBy(datetime());
+    const report = await check(
+      spec("順序", {
+        examples: examples(比べる, {
+          "1ns 違い": {
+            given: {
+              状態: "入力済み",
+              開始: Temporal.PlainDateTime.from("2026-01-01T09:00"),
+              終了: Temporal.PlainDateTime.from("2026-01-01T09:00:00.000000001"),
+            },
+            expect: { result: {}, effects: [] },
+          },
+        } as never),
+        implementation: 順序,
+      }),
+    );
+
+    expect(report.borders[0]!.points.filter(point => point.status === "met").map(point => point.role)).toStrictEqual([
+      "ON",
+    ]);
+  });
+
+  it("places a row of dates in another calendar on their difference in days", async () => {
+    const { 比べる, 順序 } = orderedBy(date());
+    const report = await check(
+      spec("順序", {
+        examples: examples(比べる, {
+          "グレゴリオ暦": {
+            given: {
+              状態: "入力済み",
+              開始: Temporal.PlainDate.from("2026-01-01[u-ca=gregory]"),
+              終了: Temporal.PlainDate.from("2026-01-02[u-ca=gregory]"),
+            },
+            expect: { result: {}, effects: [] },
+          },
+        } as never),
+        implementation: 順序,
+      }),
+    );
+
+    expect(report.borders[0]!.points.filter(point => point.status === "met").map(point => point.role)).toStrictEqual([
+      "ON",
+    ]);
+  });
+
+  it("composes a row on the difference of two dates by moving one of them in days", () => {
+    expect(composedDifferenceRows(date())).toStrictEqual([
+      "ON (= -1): 1999-12-31 / 2000-01-01",
+      "IN (< -1): 1999-12-30 / 2000-01-01",
+      "OUT (> 0): 2000-01-02 / 2000-01-01",
+    ]);
+  });
+
+  it("composes a row on the difference of two times by moving the other one where the first would wrap past midnight", () => {
+    expect(composedDifferenceRows(time())).toStrictEqual([
+      "ON (= -1): 00:00:00 / 00:00:00.000000001",
+      "IN (< -1): 00:00:00 / 00:00:00.000000002",
+      "OUT (> 0): 00:00:00.000000001 / 00:00:00",
     ]);
   });
 

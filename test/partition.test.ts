@@ -3,12 +3,15 @@ import {
   array,
   boolean,
   int,
+  date,
+  datetime,
   instant,
   number,
   object,
   positionsOf,
   record,
   string,
+  time,
   variants,
 } from "../src/index.js";
 import type { DividedPosition, Position } from "../src/index.js";
@@ -236,6 +239,28 @@ describe("borders an invariant draws", () => {
     });
   });
 
+  it("steps a date by a day", () => {
+    expect(bordersAt(date().refine(v => v.$gt(Temporal.PlainDate.from("2026-01-01"))))[0]!.points[0]).toStrictEqual({
+      role: "ON",
+      relation: "= 2026-01-02",
+      status: "owed",
+    });
+  });
+
+  it("steps a datetime by a nanosecond", () => {
+    expect(
+      bordersAt(datetime().refine(v => v.$gt(Temporal.PlainDateTime.from("2026-01-01T09:00"))))[0]!.points[0],
+    ).toStrictEqual({ role: "ON", relation: "= 2026-01-01T09:00:00.000000001", status: "owed" });
+  });
+
+  it("steps a time by a nanosecond", () => {
+    expect(bordersAt(time().refine(v => v.$gt(Temporal.PlainTime.from("09:00"))))[0]!.points[0]).toStrictEqual({
+      role: "ON",
+      relation: "= 09:00:00.000000001",
+      status: "owed",
+    });
+  });
+
   it("draws a border on the length of a string", () => {
     expect(bordersAt(string().refine(v => v.$length().$gte(3)))).toStrictEqual([
       {
@@ -369,6 +394,44 @@ describe("a length border stops at zero", () => {
       { role: "OFF", relation: "= 1", status: "excluded" },
       { role: "IN", relation: "none: a length is never negative", status: "no point" },
       { role: "OUT", relation: "> 1", status: "excluded" },
+    ]);
+  });
+
+  it("names no OFF or OUT point before midnight, since a time of day lies within one day", () => {
+    expect(pointsAt(time().refine(v => v.$gte(Temporal.PlainTime.from("00:00"))))).toStrictEqual([
+      { role: "ON", relation: "= 00:00:00", status: "owed" },
+      { role: "OFF", relation: "none: a time of day lies within one day", status: "no point" },
+      { role: "IN", relation: "> 00:00:00", status: "owed" },
+      { role: "OUT", relation: "none: a time of day lies within one day", status: "no point" },
+    ]);
+  });
+
+  it("names no OFF or OUT point after the last nanosecond of a day", () => {
+    expect(pointsAt(time().refine(v => v.$lte(Temporal.PlainTime.from("23:59:59.999999999"))))).toStrictEqual([
+      { role: "ON", relation: "= 23:59:59.999999999", status: "owed" },
+      { role: "OFF", relation: "none: a time of day lies within one day", status: "no point" },
+      { role: "IN", relation: "< 23:59:59.999999999", status: "owed" },
+      { role: "OUT", relation: "none: a time of day lies within one day", status: "no point" },
+    ]);
+  });
+
+  it("names no IN point before an upper bound of midnight", () => {
+    expect(pointsAt(time().refine(v => v.$lte(Temporal.PlainTime.from("00:00"))))).toStrictEqual([
+      { role: "ON", relation: "= 00:00:00", status: "owed" },
+      { role: "OFF", relation: "= 00:00:00.000000001", status: "excluded" },
+      { role: "IN", relation: "none: a time of day lies within one day", status: "no point" },
+      { role: "OUT", relation: "> 00:00:00.000000001", status: "excluded" },
+    ]);
+  });
+
+  it("names no neighbour or run before midnight when the rule keeps it", () => {
+    expect(pointsAt(time().refine(v => v.$eq(Temporal.PlainTime.from("00:00"))))).toStrictEqual([
+      { role: "ON", relation: "= 00:00:00", status: "owed" },
+      { role: "OFF", relation: "none: a time of day lies within one day", status: "no point" },
+      { role: "OFF", relation: "= 00:00:00.000000001", status: "excluded" },
+      { role: "IN", relation: "none: the rule keeps a single value", status: "no point" },
+      { role: "OUT", relation: "none: a time of day lies within one day", status: "no point" },
+      { role: "OUT", relation: "> 00:00:00.000000001", status: "excluded" },
     ]);
   });
 

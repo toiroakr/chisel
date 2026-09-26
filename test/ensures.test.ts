@@ -8,11 +8,14 @@ import {
   example,
   examples,
   implement,
+  date,
+  datetime,
   int,
   object,
   perform,
   SpecificationError,
   string,
+  time,
   variants,
   test,
 } from "../src/index.js";
@@ -286,6 +289,26 @@ describe("how much of an ensures rule the check reads", () => {
         conjunct: "input.数量 > -1",
         classification: "derivable",
       },
+    ]);
+  });
+
+  it("classifies a comparison of dates, times or datetimes as derivable, since they are ordered", async () => {
+    const 予約する = behavior("予約する", {
+      input: variants("状態", { 入力済み: object({ 予約日: date(), 開始: time(), 入館: datetime() }) }),
+      result: variants("結果", { 確定: object({ 宿泊日: date(), 受付: time(), 退館: datetime() }) }),
+      effects: variants("種類", {}),
+      ensures: clause => [
+        clause.always("日付", (入力, 答え) => 答え.宿泊日.$gte(入力.予約日)),
+        clause.always("時刻", (入力, 答え) => 答え.受付.$lte(入力.開始)),
+        clause.always("日時", (入力, 答え) => 答え.退館.$gt(入力.入館)),
+      ],
+    });
+    const report = await check(spec("予約", { examples: examples(予約する, {}) }));
+
+    expect(report.ensures.rules.map(rule => rule.classification)).toStrictEqual([
+      "derivable",
+      "derivable",
+      "derivable",
     ]);
   });
 

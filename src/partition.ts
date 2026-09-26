@@ -10,7 +10,10 @@ import type {
 import type { Border, Carrier } from "./border.js";
 import {
   bordersOf,
+  dateCarrier,
+  dateTimeCarrier,
   instantCarrier,
+  timeCarrier,
   integerCarrier,
   lengthCarrier,
   numberCarrier,
@@ -294,6 +297,12 @@ export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrie
       return numberCarrier;
     case "instant":
       return instantCarrier;
+    case "date":
+      return dateCarrier;
+    case "datetime":
+      return dateTimeCarrier;
+    case "time":
+      return timeCarrier;
     case "string":
       return stringCarrier;
     default:

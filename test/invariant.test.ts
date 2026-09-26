@@ -4,6 +4,8 @@ import {
   array,
   behavior,
   check,
+  date,
+  datetime,
   examples,
   instant,
   int,
@@ -12,6 +14,7 @@ import {
   record,
   spec,
   string,
+  time,
   variants,
 } from "../src/index.js";
 
@@ -118,6 +121,46 @@ describe("invariant", () => {
     ]).toStrictEqual([true, false]);
   });
 
+  it("orders dates", () => {
+    const 受付開始後 = date().refine(v => v.$gte(Temporal.PlainDate.from("2026-01-01")));
+
+    expect([
+      受付開始後.parse(Temporal.PlainDate.from("2026-01-01")).success,
+      受付開始後.parse(Temporal.PlainDate.from("2025-12-31")).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("orders times", () => {
+    const 営業時間内 = time().refine(v => v.$lt(Temporal.PlainTime.from("18:00")));
+
+    expect([
+      営業時間内.parse(Temporal.PlainTime.from("17:59")).success,
+      営業時間内.parse(Temporal.PlainTime.from("18:00")).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("orders datetimes", () => {
+    const 期間 = object({ 入館: datetime(), 退館: datetime() }).refine(v => v.入館.$lte(v.退館));
+
+    expect([
+      期間.parse({
+        入館: Temporal.PlainDateTime.from("2026-01-01T09:00"),
+        退館: Temporal.PlainDateTime.from("2026-01-01T18:00"),
+      }).success,
+      期間.parse({
+        入館: Temporal.PlainDateTime.from("2026-01-02T09:00"),
+        退館: Temporal.PlainDateTime.from("2026-01-01T18:00"),
+      }).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("does not compile a date compared with an instant", () => {
+    // @ts-expect-error a date and an instant are not ordered against each other
+    const 誤り = (v: TermOf<Temporal.PlainDate>) => v.$gte(Temporal.Instant.from("2026-01-01T00:00:00Z"));
+
+    expect(typeof 誤り).toBe("function");
+  });
+
   it("relates two fields of an object and names them where it is violated", () => {
     const 期間 = object({ 開始: instant(), 終了: instant() }).refine(v =>
       v.開始.$lt(v.終了),
@@ -149,6 +192,34 @@ describe("placeholder under an invariant", () => {
 
   it("moves a number one step past a strict bound", () => {
     expect(int().refine(v => v.$gt(5)).placeholder()).toBe(6);
+  });
+
+  it("moves a date one day past a strict bound", () => {
+    expect(String(date().refine(v => v.$gt(Temporal.PlainDate.from("2026-01-01"))).placeholder())).toBe(
+      "2026-01-02",
+    );
+  });
+
+  it("moves a time one nanosecond past a strict bound", () => {
+    expect(String(time().refine(v => v.$gt(Temporal.PlainTime.from("09:00"))).placeholder())).toBe(
+      "09:00:00.000000001",
+    );
+  });
+
+  it("leaves a time at midnight rather than wrapping it when a bound below midnight admits nothing", () => {
+    expect(String(time().lt(Temporal.PlainTime.from("00:00")).placeholder())).toBe("00:00:00");
+  });
+
+  it("leaves a time at the last nanosecond rather than wrapping it when a bound past it admits nothing", () => {
+    expect(String(time().gt(Temporal.PlainTime.from("23:59:59.999999999")).placeholder())).toBe(
+      "23:59:59.999999999",
+    );
+  });
+
+  it("moves a datetime one nanosecond past a strict bound", () => {
+    expect(
+      String(datetime().refine(v => v.$gt(Temporal.PlainDateTime.from("2026-01-01T09:00"))).placeholder()),
+    ).toBe("2026-01-01T09:00:00.000000001");
   });
 
   it("moves a number under an upper bound", () => {
@@ -249,6 +320,37 @@ describe("bound shorthands", () => {
 
   it("draws the border of lt from lt on a number", async () => {
     expect(await bordersOf(int().lt(10))).toStrictEqual(await bordersOf(int().refine(v => v.$lt(10))));
+  });
+
+  it("draws the border of gte from min on a date", async () => {
+    const 受付開始 = Temporal.PlainDate.from("2026-01-01");
+
+    expect(await bordersOf(date().min(受付開始))).toStrictEqual(await bordersOf(date().refine(v => v.$gte(受付開始))));
+  });
+
+  it("draws the border of lte from max on a time", async () => {
+    const 締切 = Temporal.PlainTime.from("18:00");
+
+    expect(await bordersOf(time().max(締切))).toStrictEqual(await bordersOf(time().refine(v => v.$lte(締切))));
+  });
+
+  it("draws the border of gt from gt on a datetime", async () => {
+    const 開場 = Temporal.PlainDateTime.from("2026-01-01T09:00");
+
+    expect(await bordersOf(datetime().gt(開場))).toStrictEqual(await bordersOf(datetime().refine(v => v.$gt(開場))));
+  });
+
+  it("draws the border of lt from lt on an instant", async () => {
+    const 期限 = Temporal.Instant.from("2026-01-01T00:00:00Z");
+
+    expect(await bordersOf(instant().lt(期限))).toStrictEqual(await bordersOf(instant().refine(v => v.$lt(期限))));
+  });
+
+  it("does not compile a bound of another temporal type", () => {
+    // @ts-expect-error a date is bounded by a date, not an instant
+    const 誤り = () => date().min(Temporal.Instant.from("2026-01-01T00:00:00Z"));
+
+    expect(typeof 誤り).toBe("function");
   });
 
   it("draws a length border from min on an array", async () => {

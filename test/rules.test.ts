@@ -16,6 +16,7 @@ import {
   perform,
   SpecificationError,
   string,
+  time,
   variants,
 } from "../src/index.js";
 import type { Implementation } from "../src/index.js";
@@ -491,6 +492,7 @@ describe("ways no row can take", () => {
         上限: int(),
         最低: int().refine(v => v.$gte(10)),
         明細: array(int()),
+        開始: time(),
       }),
     }),
     result: variants("結果", { 受付: object({}), 却下: object({}) }),
@@ -544,6 +546,22 @@ describe("ways no row can take", () => {
       rules: ["$.数量 >= 0 holds → otherwise: gap", "$.数量 >= 0 fails → else of guard 1: no row owed"],
       arms: ["$.数量 >= 0 holds: gap", "$.数量 >= 0 else: no row owed"],
     });
+  });
+
+  it("owes no row at a way past the last nanosecond of a day, where no time of day lies", async () => {
+    const 当日中 = implement(受け付ける, {
+      cases: {
+        入力済み: action("当日中", {
+          guards: 入力 => [入力.開始.$lte(Temporal.PlainTime.from("23:59:59.999999999")).$else(却下)],
+          run: 受付,
+        }),
+      },
+    });
+
+    expect((await statuses(当日中)).rules).toStrictEqual([
+      "$.開始 <= 23:59:59.999999999 holds → otherwise: gap",
+      "$.開始 <= 23:59:59.999999999 fails → else of guard 1: no row owed",
+    ]);
   });
 
   it("owes no row at a way whose comparison between two positions their bounds refuse", async () => {

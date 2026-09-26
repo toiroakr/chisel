@@ -13,6 +13,7 @@ import {
   int,
   object,
   string,
+  time,
   variants,
 } from "../src/index.js";
 
@@ -558,6 +559,29 @@ describe("a position the invariants leave empty", () => {
     expect(
       (await report()).borders.flatMap(border => border.points.map(point => point.status)),
     ).not.toContain("gap");
+  });
+});
+
+describe("a time the invariants push past an end of the day", () => {
+  async function issues(開始: ReturnType<typeof time>) {
+    const 予約する = behavior("予約する", {
+      input: variants("状態", { 入力済み: object({ 開始 }) }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+    return (await check(spec("予約", { examples: examples(予約する, {}) }))).modelIssues;
+  }
+
+  it("reports a time later than the last nanosecond of a day as a model error", async () => {
+    expect(await issues(time().gt(Temporal.PlainTime.from("23:59:59.999999999")))).toStrictEqual([
+      "@入力済み.開始: 不変条件を満たす値がありません (invariant $ > 23:59:59.999999999)",
+    ]);
+  });
+
+  it("reports a time earlier than midnight as a model error", async () => {
+    expect(await issues(time().lt(Temporal.PlainTime.from("00:00")))).toStrictEqual([
+      "@入力済み.開始: 不変条件を満たす値がありません (invariant $ < 00:00:00)",
+    ]);
   });
 });
 

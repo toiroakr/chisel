@@ -250,7 +250,8 @@ function finite(domain: readonly unknown[], constraints: readonly Constraint[]):
 function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval | false {
   let lower: Edge | undefined =
     carrier.floor === undefined ? undefined : { value: carrier.floor.value, inclusive: true };
-  let upper: Edge | undefined;
+  let upper: Edge | undefined =
+    carrier.ceiling === undefined ? undefined : { value: carrier.ceiling.value, inclusive: true };
   const equal: unknown[] = [];
   const unequal: unknown[] = [];
   for (const { operator, bound } of constraints) {
