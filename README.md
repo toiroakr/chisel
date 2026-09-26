@@ -196,7 +196,10 @@ const Line = c.object({
   unitPrice: c.int().min(0),
 });
 const Lines = c.array(Line).min(1);
+const SubtotalByProduct = c.record(c.int().min(0)).min(1);
 ```
+
+A record's length is its number of keys, so `SubtotalByProduct` needs at least one product; `generate` writes it as `{ "<key>": 0 }`, one entry showing the shape of its value, the way an array placeholder holds one element.
 
 - **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant: a condition is written on terms, which read a field by its own name, as `run` reads the value (`line.quantity`), and whose operators carry a `$` prefix, so no field name can shadow one: they compare with `$lt`, `$lte`, `$gt`, `$gte`, `$eq` and `$ne`, measure with `$length()`, quantify over array elements with `$all` and `$any`, and combine with `$and`, `$or` and `$not`. A condition becomes a guard with `$else`, which answers when the condition does not hold; that answer is an ordinary result case, so a business rejection is data, not an exception:
 
