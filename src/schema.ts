@@ -24,11 +24,11 @@ export interface Schema<T> {
 
 // Shorthands for the bounds a rule most often states; each one desugars to the
 // same rule refine() would take, so the analysis reads them alike.
-interface ValueBounds {
-  min(bound: number): this;
-  max(bound: number): this;
-  gt(bound: number): this;
-  lt(bound: number): this;
+interface ValueBounds<T> {
+  min(bound: T): this;
+  max(bound: T): this;
+  gt(bound: T): this;
+  lt(bound: T): this;
 }
 
 interface LengthBounds {
@@ -44,11 +44,11 @@ export interface StringSchema extends Schema<string>, LengthBounds {
   readonly kind: "string";
 }
 
-export interface NumberSchema extends Schema<number>, ValueBounds {
+export interface NumberSchema extends Schema<number>, ValueBounds<number> {
   readonly kind: "number";
 }
 
-export interface IntSchema extends Schema<number>, ValueBounds {
+export interface IntSchema extends Schema<number>, ValueBounds<number> {
   readonly kind: "integer";
 }
 
@@ -56,19 +56,19 @@ export interface BooleanSchema extends Schema<boolean> {
   readonly kind: "boolean";
 }
 
-export interface InstantSchema extends Schema<TemporalTypes.Instant> {
+export interface InstantSchema extends Schema<TemporalTypes.Instant>, ValueBounds<TemporalTypes.Instant> {
   readonly kind: "instant";
 }
 
-export interface DateSchema extends Schema<TemporalTypes.PlainDate> {
+export interface DateSchema extends Schema<TemporalTypes.PlainDate>, ValueBounds<TemporalTypes.PlainDate> {
   readonly kind: "date";
 }
 
-export interface TimeSchema extends Schema<TemporalTypes.PlainTime> {
+export interface TimeSchema extends Schema<TemporalTypes.PlainTime>, ValueBounds<TemporalTypes.PlainTime> {
   readonly kind: "time";
 }
 
-export interface DateTimeSchema extends Schema<TemporalTypes.PlainDateTime> {
+export interface DateTimeSchema extends Schema<TemporalTypes.PlainDateTime>, ValueBounds<TemporalTypes.PlainDateTime> {
   readonly kind: "datetime";
 }
 
@@ -173,6 +173,8 @@ type SchemaCore<S extends AnySchema> = Omit<
   "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
 >;
 
+const ORDERED_KINDS = new Set(["number", "integer", "instant", "date", "time", "datetime"]);
+
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
   const schema = {
     ...core,
@@ -200,12 +202,12 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
     },
   };
   const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
-  if (core.kind === "number" || core.kind === "integer") {
+  if (ORDERED_KINDS.has(core.kind)) {
     Object.assign(schema, {
-      min: (bound: number) => refine(v => v.$gte(bound)),
-      max: (bound: number) => refine(v => v.$lte(bound)),
-      gt: (bound: number) => refine(v => v.$gt(bound)),
-      lt: (bound: number) => refine(v => v.$lt(bound)),
+      min: (bound: unknown) => refine(v => v.$gte(bound)),
+      max: (bound: unknown) => refine(v => v.$lte(bound)),
+      gt: (bound: unknown) => refine(v => v.$gt(bound)),
+      lt: (bound: unknown) => refine(v => v.$lt(bound)),
     });
   }
   if (core.kind === "string" || core.kind === "array" || core.kind === "record") {

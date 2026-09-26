@@ -312,6 +312,37 @@ describe("bound shorthands", () => {
     expect(await bordersOf(int().lt(10))).toStrictEqual(await bordersOf(int().refine(v => v.$lt(10))));
   });
 
+  it("draws the border of gte from min on a date", async () => {
+    const 受付開始 = Temporal.PlainDate.from("2026-01-01");
+
+    expect(await bordersOf(date().min(受付開始))).toStrictEqual(await bordersOf(date().refine(v => v.$gte(受付開始))));
+  });
+
+  it("draws the border of lte from max on a time", async () => {
+    const 締切 = Temporal.PlainTime.from("18:00");
+
+    expect(await bordersOf(time().max(締切))).toStrictEqual(await bordersOf(time().refine(v => v.$lte(締切))));
+  });
+
+  it("draws the border of gt from gt on a datetime", async () => {
+    const 開場 = Temporal.PlainDateTime.from("2026-01-01T09:00");
+
+    expect(await bordersOf(datetime().gt(開場))).toStrictEqual(await bordersOf(datetime().refine(v => v.$gt(開場))));
+  });
+
+  it("draws the border of lt from lt on an instant", async () => {
+    const 期限 = Temporal.Instant.from("2026-01-01T00:00:00Z");
+
+    expect(await bordersOf(instant().lt(期限))).toStrictEqual(await bordersOf(instant().refine(v => v.$lt(期限))));
+  });
+
+  it("does not compile a bound of another temporal type", () => {
+    // @ts-expect-error a date is bounded by a date, not an instant
+    const 誤り = () => date().min(Temporal.Instant.from("2026-01-01T00:00:00Z"));
+
+    expect(typeof 誤り).toBe("function");
+  });
+
   it("draws a length border from min on an array", async () => {
     expect(await bordersOf(array(int()).min(1))).toStrictEqual(
       await bordersOf(array(int()).refine(v => v.$length().$gte(1))),
