@@ -161,7 +161,11 @@ type SchemaCore<S extends AnySchema> = Omit<
   "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
 >;
 
-function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
+function refinable<S extends AnySchema>(
+  core: SchemaCore<S>,
+  invariants: readonly Rule[] = [],
+  complete: (value: unknown, name?: string) => unknown = value => value,
+): S {
   const schema = {
     ...core,
     invariants,
@@ -176,12 +180,15 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
     placeholder(name?: string) {
-      return invariants
-        .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
+      return complete(
+        invariants
+          .flatMap(conjuncts)
+          .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name)),
+        name,
+      );
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
-      return refinable<S>(core, [...invariants, rule(selfTerm())]);
+      return refinable<S>(core, [...invariants, rule(selfTerm())], complete);
     },
     optional() {
       return optional(schema as unknown as S);
@@ -392,12 +399,25 @@ function optional<T>(schema: Schema<T>): OptionalSchema<T> {
 }
 
 export function record<T>(value: Schema<T>): RecordSchema<T> {
-  return refinable<RecordSchema<T>>({
-    kind: "record",
-    value,
-    parse,
-    placeholder: () => ({}),
-  });
+  // Entries a length invariant adds are filled here rather than in resize,
+  // which reads only the value it is given and cannot know the value schema.
+  const complete = (placeholder: unknown, name?: string) =>
+    Object.fromEntries(
+      Object.entries(placeholder as Readonly<Record<string, unknown>>).map(([key, item]) => [
+        key,
+        item === undefined ? value.placeholder(name) : item,
+      ]),
+    );
+  return refinable<RecordSchema<T>>(
+    {
+      kind: "record",
+      value,
+      parse,
+      placeholder: () => ({}),
+    },
+    [],
+    complete,
+  );
 
   function parse(
     raw: unknown,

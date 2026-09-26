@@ -12,6 +12,7 @@ import {
   int,
   number,
   object,
+  record,
   string,
   variants,
 } from "../src/index.js";
@@ -170,6 +171,21 @@ describe("generateExamples for border points", () => {
     expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
       { 状態: "入力済み", ID: "<ID>" },
       { 状態: "入力済み", ID: "<ID>_" },
+    ]);
+  });
+
+  it("writes a record with as many entries as a point on its length border asks for", () => {
+    const 登録する = behavior("登録する", {
+      input: variants("状態", {
+        入力済み: object({ 在庫: record(string()).min(1) }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+
+    expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
+      { 状態: "入力済み", 在庫: { "<key1>": "<在庫>" } },
+      { 状態: "入力済み", 在庫: { "<key1>": "<在庫>", "<key2>": "<在庫>" } },
     ]);
   });
 
