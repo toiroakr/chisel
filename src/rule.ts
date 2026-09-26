@@ -419,7 +419,10 @@ function step(bound: unknown, direction: 1 | -1): unknown {
   }
   const add = (bound as { readonly add?: (duration: object) => unknown } | null)?.add;
   if (typeof add === "function") {
-    return add.call(bound, isPlainDate(bound) ? { days: direction } : { nanoseconds: direction });
+    const moved = add.call(bound, isPlainDate(bound) ? { days: direction } : { nanoseconds: direction });
+    // A plain time wraps past midnight, landing on the far side of the bound; no
+    // time of day lies past either end, so the bound is kept rather than wrapped.
+    return Math.sign(ordering(moved, bound)) === direction ? moved : bound;
   }
   return bound;
 }

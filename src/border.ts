@@ -263,7 +263,11 @@ function borderOf(
   const on = closed ? bound : step?.(bound, inward);
   const off = closed ? step?.(bound, outward) : bound;
   const guarded = drawing.source !== "invariant";
-  if (on === undefined && !guarded) {
+  const floored = belowFloor(carrier);
+  const ceiled = aboveCeiling(carrier);
+  const pastEnd = (edge: unknown, direction: 1 | -1) =>
+    direction === -1 ? floored.under(edge) : ceiled.over(edge);
+  if (on === undefined && !guarded && !pastEnd(bound, inward)) {
     return undefined;
   }
   const inner = on ?? bound;
@@ -317,10 +321,6 @@ function borderOf(
       contains: outside(outer),
     },
   ];
-  const floored = belowFloor(carrier);
-  const ceiled = aboveCeiling(carrier);
-  const pastEnd = (edge: unknown, direction: 1 | -1) =>
-    direction === -1 ? floored.under(edge) : ceiled.over(edge);
   const reaching: readonly [boolean, boolean, boolean, boolean] = [
     on === undefined ? pastEnd(bound, inward) : floored.at(on),
     off === undefined ? closed && pastEnd(bound, outward) : floored.at(off),

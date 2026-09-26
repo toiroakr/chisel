@@ -206,6 +206,16 @@ describe("placeholder under an invariant", () => {
     );
   });
 
+  it("leaves a time at midnight rather than wrapping it when a bound below midnight admits nothing", () => {
+    expect(String(time().lt(Temporal.PlainTime.from("00:00")).placeholder())).toBe("00:00:00");
+  });
+
+  it("leaves a time at the last nanosecond rather than wrapping it when a bound past it admits nothing", () => {
+    expect(String(time().gt(Temporal.PlainTime.from("23:59:59.999999999")).placeholder())).toBe(
+      "23:59:59.999999999",
+    );
+  });
+
   it("moves a datetime one nanosecond past a strict bound", () => {
     expect(
       String(datetime().refine(v => v.$gt(Temporal.PlainDateTime.from("2026-01-01T09:00"))).placeholder()),
