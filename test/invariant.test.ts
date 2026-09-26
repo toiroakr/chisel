@@ -25,6 +25,15 @@ describe("terms", () => {
     ]);
   });
 
+  it("reads a field whose name starts with $ when the name is not an operator", () => {
+    const 識別子付き = object({ $id: int() }).refine(v => v.$id.$gte(1));
+
+    expect([識別子付き.parse({ $id: 1 }).success, 識別子付き.parse({ $id: 0 }).success]).toStrictEqual([
+      true,
+      false,
+    ]);
+  });
+
   it("holds a chain of and only when every link holds", () => {
     const 範囲 = int().refine(v => v.$gte(1).$and(v.$lte(9)));
 

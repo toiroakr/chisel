@@ -490,7 +490,7 @@ function termAt(path: readonly string[], measure: TermData["measure"]): Term<unk
         case "any":
           return (each: (element: TermOf<unknown>) => Rule) => quantified(name, self, each);
         default:
-          return undefined;
+          return termAt([...path, key], "value");
       }
     },
     has: (_target, key) => key === TERM,
