@@ -19,37 +19,37 @@ export type Term<T> = {
 export type Operand<T> = Term<T> | T;
 
 export interface Condition {
-  and(other: Rule): Rule & Condition;
-  or(other: Rule): Rule & Condition;
-  not(): Rule & Condition;
+  $and(other: Rule): Rule & Condition;
+  $or(other: Rule): Rule & Condition;
+  $not(): Rule & Condition;
 }
 
 interface Ordered<T> {
-  lt(other: Operand<T>): Rule & Condition;
-  lte(other: Operand<T>): Rule & Condition;
-  gt(other: Operand<T>): Rule & Condition;
-  gte(other: Operand<T>): Rule & Condition;
-  eq(other: Operand<T>): Rule & Condition;
-  ne(other: Operand<T>): Rule & Condition;
+  $lt(other: Operand<T>): Rule & Condition;
+  $lte(other: Operand<T>): Rule & Condition;
+  $gt(other: Operand<T>): Rule & Condition;
+  $gte(other: Operand<T>): Rule & Condition;
+  $eq(other: Operand<T>): Rule & Condition;
+  $ne(other: Operand<T>): Rule & Condition;
 }
 
 interface Equatable<T> {
-  eq(other: Operand<T>): Rule & Condition;
-  ne(other: Operand<T>): Rule & Condition;
+  $eq(other: Operand<T>): Rule & Condition;
+  $ne(other: Operand<T>): Rule & Condition;
 }
 
 interface Measured {
-  length(): TermOf<number>;
+  $length(): TermOf<number>;
 }
 
 interface Quantified<E> {
-  all(each: (element: TermOf<E>) => Rule): Rule & Condition;
-  any(each: (element: TermOf<E>) => Rule): Rule & Condition;
+  $all(each: (element: TermOf<E>) => Rule): Rule & Condition;
+  $any(each: (element: TermOf<E>) => Rule): Rule & Condition;
 }
 
-// Fields are read through a `$` prefix so that no field name can shadow a method:
-// a field named `length` or `all` is as ordinary as any other.
-type Fields<T> = { readonly [K in keyof T & string as `$${K}`]-?: TermOf<Exclude<T[K], undefined>> };
+// Operators carry the `$` prefix rather than fields, so a field reads as it does
+// on the value `run` receives, and a field named `length` or `all` stays ordinary.
+type Fields<T> = { readonly [K in keyof T & string]-?: TermOf<Exclude<T[K], undefined>> };
 
 export type TermOf<T> = Term<T> &
   (0 extends 1 & T
@@ -144,9 +144,9 @@ function quantified(
 // serialises as the plain data the analysis reads.
 function condition(rule: Rule): Rule & Condition {
   Object.defineProperties(rule, {
-    and: { value: (other: Rule) => condition({ kind: "and", rules: [rule, other] }) },
-    or: { value: (other: Rule) => condition({ kind: "or", rules: [rule, other] }) },
-    not: { value: () => condition({ kind: "not", rule }) },
+    $and: { value: (other: Rule) => condition({ kind: "and", rules: [rule, other] }) },
+    $or: { value: (other: Rule) => condition({ kind: "or", rules: [rule, other] }) },
+    $not: { value: () => condition({ kind: "not", rule }) },
   });
   return rule as Rule & Condition;
 }
@@ -470,19 +470,20 @@ function termAt(path: readonly string[], measure: TermData["measure"]): Term<unk
       if (typeof key !== "string") {
         return undefined;
       }
-      if (key.startsWith("$")) {
-        return termAt([...path, key.slice(1)], "value");
+      if (!key.startsWith("$")) {
+        return termAt([...path, key], "value");
       }
-      const operator = OPERATORS[key];
+      const name = key.slice(1);
+      const operator = OPERATORS[name];
       if (operator !== undefined) {
         return (other: unknown) => compare(operator, self, other);
       }
-      switch (key) {
+      switch (name) {
         case "length":
           return () => termAt(path, "length");
         case "all":
         case "any":
-          return (each: (element: TermOf<unknown>) => Rule) => quantified(key, self, each);
+          return (each: (element: TermOf<unknown>) => Rule) => quantified(name, self, each);
         default:
           return undefined;
       }

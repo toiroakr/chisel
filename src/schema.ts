@@ -190,17 +190,17 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
   const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
   if (core.kind === "number" || core.kind === "integer") {
     Object.assign(schema, {
-      min: (bound: number) => refine(v => v.gte(bound)),
-      max: (bound: number) => refine(v => v.lte(bound)),
-      gt: (bound: number) => refine(v => v.gt(bound)),
-      lt: (bound: number) => refine(v => v.lt(bound)),
+      min: (bound: number) => refine(v => v.$gte(bound)),
+      max: (bound: number) => refine(v => v.$lte(bound)),
+      gt: (bound: number) => refine(v => v.$gt(bound)),
+      lt: (bound: number) => refine(v => v.$lt(bound)),
     });
   }
   if (core.kind === "string" || core.kind === "array" || core.kind === "record") {
     Object.assign(schema, {
-      min: (length: number) => refine(v => v.length().gte(length)),
-      max: (length: number) => refine(v => v.length().lte(length)),
-      length: (length: number) => refine(v => v.length().eq(length)),
+      min: (length: number) => refine(v => v.$length().$gte(length)),
+      max: (length: number) => refine(v => v.$length().$lte(length)),
+      length: (length: number) => refine(v => v.$length().$eq(length)),
     });
   }
   return schema as unknown as S;

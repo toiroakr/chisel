@@ -29,7 +29,7 @@ const 検証するの実装 = implement(検証する, {
   cases: {
     申込: action("数量を確かめる", {
       guards: 申込 => [
-        guard(申込.$数量.gte(1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
+        guard(申込.数量.$gte(1), () => ({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] })),
       ],
       run: 申込 => ({ result: { 結果: "有効", 数量: 申込.数量 }, effects: [] }),
     }),

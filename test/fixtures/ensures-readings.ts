@@ -8,7 +8,7 @@ export const 見積もる = behavior("見積もる", {
   }),
   effects: variants("種類", {}),
   ensures: clause => [
-    clause.when("入力を写す", ["見積"], (入力, 答え) => 答え.$数量.gte(入力.$数量)),
-    clause.when("商品は同じ", ["見積"], (入力, 答え) => 答え.$商品ID.eq(入力.$商品ID)),
+    clause.when("入力を写す", ["見積"], (入力, 答え) => 答え.数量.$gte(入力.数量)),
+    clause.when("商品は同じ", ["見積"], (入力, 答え) => 答え.商品ID.$eq(入力.商品ID)),
   ],
 });

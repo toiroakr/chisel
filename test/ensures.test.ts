@@ -27,7 +27,7 @@ const 注文を確定する = behavior("注文を確定する", {
   effects: variants("種類", {}),
   ensures: clause => [
     clause.when("確定したカートは入力のカート", ["確定"], (カート, 答え) =>
-      答え.$カートID.eq(カート.$カートID),
+      答え.カートID.$eq(カート.カートID),
     ),
   ],
 });
@@ -96,7 +96,7 @@ describe("ensures", () => {
         input: variants("状態", { 商品あり: object({ カートID: string() }) }),
         result: variants("結果", { 確定: object({ カートID: string() }) }),
         effects: variants("種類", {}),
-        ensures: clause => [clause.when("答えだけ", ["確定"], (_, 答え) => 答え.$カートID.eq("x"))],
+        ensures: clause => [clause.when("答えだけ", ["確定"], (_, 答え) => 答え.カートID.$eq("x"))],
       }),
     ).toThrow(new SpecificationError("Ensures 答えだけ must relate the input to the answer"));
   });
@@ -112,7 +112,7 @@ describe("borders an ensures clause draws", () => {
     effects: variants("種類", {}),
     ensures: clause => [
       clause.when("見つかる会員は番号が正で入力と同じ", ["見つかった"], (照会, 答え) =>
-        照会.$会員番号.gt(0).and(答え.$会員番号.eq(照会.$会員番号)),
+        照会.会員番号.$gt(0).$and(答え.会員番号.$eq(照会.会員番号)),
       ),
     ],
   });
@@ -150,7 +150,7 @@ describe("borders an ensures clause draws", () => {
       effects: variants("種類", {}),
       ensures: clause => [
         clause.when("番号が正か仮登録", ["見つかった"], (照会, 答え) =>
-          照会.$会員番号.gt(0).or(照会.$仮登録.gt(0)).and(答え.$会員番号.eq(照会.$会員番号)),
+          照会.会員番号.$gt(0).$or(照会.仮登録.$gt(0)).$and(答え.会員番号.$eq(照会.会員番号)),
         ),
       ],
     });
@@ -168,7 +168,7 @@ describe("an ensures clause over every element of the answer", () => {
       input: variants("状態", { 入力済み: object({ 数量: int() }) }),
       result: object({ 明細: array(int()) }),
       effects: variants("種類", {}),
-      ensures: clause => [clause.always("明細", (_, 答え) => 答え.$明細.all(rule))],
+      ensures: clause => [clause.always("明細", (_, 答え) => 答え.明細.$all(rule))],
     });
 
   it("relates the input to the answer when it reads the input inside all", () => {
@@ -178,7 +178,7 @@ describe("an ensures clause over every element of the answer", () => {
         result: object({ 明細: array(int()) }),
         effects: variants("種類", {}),
         ensures: clause => [
-          clause.always("明細は数量以下", (入力, 答え) => 答え.$明細.all(行 => 行.lte(入力.$数量))),
+          clause.always("明細は数量以下", (入力, 答え) => 答え.明細.$all(行 => 行.$lte(入力.数量))),
         ],
       }),
     ).not.toThrow();
@@ -190,7 +190,7 @@ describe("an ensures clause over every element of the answer", () => {
       result: object({ 明細: array(int()) }),
       effects: variants("種類", {}),
       ensures: clause => [
-        clause.always("明細は数量以下", (入力, 答え) => 答え.$明細.all(行 => 行.lte(入力.$数量))),
+        clause.always("明細は数量以下", (入力, 答え) => 答え.明細.$all(行 => 行.$lte(入力.数量))),
       ],
     });
     const 多すぎる = implement(明細を返す, {
@@ -205,7 +205,7 @@ describe("an ensures clause over every element of the answer", () => {
   });
 
   it("is still refused when all reads only the element", () => {
-    expect(() => 明細を返す(行 => 行.lte(3))).toThrow(
+    expect(() => 明細を返す(行 => 行.$lte(3))).toThrow(
       new SpecificationError("Ensures 明細 must relate the input to the answer"),
     );
   });
@@ -219,8 +219,8 @@ describe("ensures clause names", () => {
         result: object({ 数量: int() }),
         effects: variants("種類", {}),
         ensures: clause => [
-          clause.always("数量を保つ", (入力, 答え) => 答え.$数量.eq(入力.$数量)),
-          clause.always("数量を保つ", (入力, 答え) => 答え.$数量.gt(入力.$数量)),
+          clause.always("数量を保つ", (入力, 答え) => 答え.数量.$eq(入力.数量)),
+          clause.always("数量を保つ", (入力, 答え) => 答え.数量.$gt(入力.数量)),
         ],
       }),
     ).toThrow(new SpecificationError("Ensures 数量を保つ is declared more than once"));
@@ -238,12 +238,12 @@ describe("how much of an ensures rule the check reads", () => {
     effects: variants("種類", {}),
     ensures: clause => [
       clause.when("入力を写す", ["見積"], (入力, 答え) =>
-        答え.$数量.gte(入力.$数量).and(答え.$商品ID.eq(入力.$商品ID)),
+        答え.数量.$gte(入力.数量).$and(答え.商品ID.$eq(入力.商品ID)),
       ),
       clause.when("明細は数量以下", ["見積"], (入力, 答え) =>
-        答え.$明細.all(行 => 行.lte(入力.$数量)),
+        答え.明細.$all(行 => 行.$lte(入力.数量)),
       ),
-      clause.when("自明", ["不可"], (入力, 答え) => 答え.$理由.eq(答え.$理由).and(入力.$数量.gt(-1))),
+      clause.when("自明", ["不可"], (入力, 答え) => 答え.理由.$eq(答え.理由).$and(入力.数量.$gt(-1))),
     ],
   });
 

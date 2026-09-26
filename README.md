@@ -185,10 +185,10 @@ npm run demo
 The analyzer follows the example-adequacy model of [Souther](https://github.com/souther-lang/souther). It measures what the model itself states and nothing else:
 
 - **Cases** of the input, result and effect variants. Evidence is graded: an input case is `specified` by a row, `executed` when the model ran on it and `verified` when the row held; a result or effect case is `specified`, `observed` or `verified`.
-- **Classes** of each input position, derived from the types: an optional field (`c.string().optional()`) is absent or present, a `boolean` true or false, a `variants` field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`variants(...).refine(v => v.$state.ne("archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
+- **Classes** of each input position, derived from the types: an optional field (`c.string().optional()`) is absent or present, a `boolean` true or false, a `variants` field one of its cases. A class an `eq`/`ne` invariant refuses is `excluded` and counted neither way. The same holds for an input case an invariant on the input sum refuses (`variants(...).refine(v => v.state.$ne("archived"))`), and a rule on a field every case shares draws its border under each case. A position no rule draws a line through is `not derivable`, which is a fact about the model rather than a gap.
 - **Borders** drawn by an invariant that compares a value or a `length` with a constant, with the four domain-testing points `ON`, `OFF`, `IN` and `OUT`. Outside an invariant nothing can be constructed, so `OFF` and `OUT` are excluded; `ON` and `IN` are owed a row. `int`, lengths and instants have a neighbouring value; `number` and `string` do not, so their `OFF` point is not named. A point one bound owes is excluded when another bound refuses it, and bounds that leave nothing admitted (`$ >= 10` with `$ <= 5`) are reported as a model error rather than as gaps. A length is never negative, so a point that would lie below zero has no point there (`none: a length is never negative`) and no row is asked for at it, whether the border comes from an invariant or a guard.
 
-The common bounds have zod's shorthands, each desugaring to the same rule `refine` would take: on numbers `min`, `max`, `gt` and `lt` compare the value, and on strings, arrays and records `min`, `max` and `length` compare the length, so the borders keep a value and a length apart. `refine(v => ...)` states anything else, such as a relation between two fields (`.refine(v => v.$start.lte(v.$end))`); its callback returns a rule built with term methods, not a boolean, so a condition the analysis cannot read does not type-check.
+The common bounds have zod's shorthands, each desugaring to the same rule `refine` would take: on numbers `min`, `max`, `gt` and `lt` compare the value, and on strings, arrays and records `min`, `max` and `length` compare the length, so the borders keep a value and a length apart. `refine(v => ...)` states anything else, such as a relation between two fields (`.refine(v => v.start.$lte(v.end))`); its callback returns a rule built with term operators, not a boolean, so a condition the analysis cannot read does not type-check.
 
 ```ts
 const Line = c.object({
@@ -198,14 +198,14 @@ const Line = c.object({
 const Lines = c.array(Line).min(1);
 ```
 
-- **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant: a condition is written on terms, which read a field through a `$` prefix (`line.$quantity`, so no field name can shadow a method), compare with `lt`, `lte`, `gt`, `gte`, `eq` and `ne`, measure with `length()`, quantify over array elements with `all` and `any`, and combine with `and`, `or` and `not`. Its else is an ordinary result case, so a business rejection is data, not an exception:
+- **Arms and rules** of an action's `guards`, and the borders and classes its guards draw. A guard compares with the same vocabulary as an invariant: a condition is written on terms, which read a field by its own name, as `run` reads the value (`line.quantity`), and whose operators carry a `$` prefix, so no field name can shadow one: they compare with `$lt`, `$lte`, `$gt`, `$gte`, `$eq` and `$ne`, measure with `$length()`, quantify over array elements with `$all` and `$any`, and combine with `$and`, `$or` and `$not`. Its else is an ordinary result case, so a business rejection is data, not an exception:
 
 ```ts
 const implementation = c.implement(checkout, {
   cases: {
     withItems: c.action("check stock, then confirm", {
       guards: cart => [
-        c.guard(cart.$lines.all(line => line.$quantity.lte(line.$stock)), () => ({
+        c.guard(cart.lines.$all(line => line.quantity.$lte(line.stock)), () => ({
           result: { type: "rejected", reason: "out of stock" },
           effects: [],
         })),
@@ -230,13 +230,13 @@ const findMember = c.behavior("find-member", {
   requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string(), c.boolean()) },
   ensures: clause => [
     clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
-      asked.$id.gt(0).and(answer.$id.eq(asked.$id)),
+      asked.id.$gt(0).$and(answer.id.$eq(asked.id)),
     ),
   ],
 });
 ```
 
-Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [guard(deps.$now.lt(request.$at), ...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }`, and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [guard(deps.now.$lt(request.at), ...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
 
 `check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). Every measure carries `status`, `reason` exactly where it is `unavailable`, and `weakening` exactly where something weakened it; every border point, arm and way carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
