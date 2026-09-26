@@ -68,7 +68,9 @@ export type TermOf<T> = Term<T> &
           ? Measured & Quantified<E>
           : [T] extends [object]
             ? string extends keyof T
-              ? { readonly [key: string]: any }
+              ? unknown extends T[string & keyof T]
+                ? { readonly [key: string]: any }
+                : Measured & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
               : Fields<T>
             : unknown);
 
@@ -479,7 +481,7 @@ function termAt(path: readonly string[], measure: TermData["measure"]): Term<unk
         return termAt([...path, key], "value");
       }
       const name = key.slice(1);
-      const operator = OPERATORS[name];
+      const operator = Object.hasOwn(OPERATORS, name) ? OPERATORS[name] : undefined;
       if (operator !== undefined) {
         return (other: unknown) => compare(operator, self, other);
       }

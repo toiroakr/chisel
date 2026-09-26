@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AnySchema } from "../src/index.js";
+import type { AnySchema, TermOf } from "../src/index.js";
 import {
   array,
   behavior,
@@ -32,6 +32,29 @@ describe("terms", () => {
       true,
       false,
     ]);
+  });
+
+  it("reads a field named like a member every object inherits", () => {
+    const 変換付き = object({ $toString: int() }).refine(v => v.$toString.$gte(1));
+
+    expect([変換付き.parse({ $toString: 1 }).success, 変換付き.parse({ $toString: 0 }).success]).toStrictEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("does not compile a record's length compared with a string", () => {
+    // @ts-expect-error the length of a record is a number
+    const 誤り = (v: TermOf<Readonly<Record<string, number>>>) => v.$length().$gte("3");
+
+    expect(typeof 誤り).toBe("function");
+  });
+
+  it("does not compile a record's value compared with a value of another type", () => {
+    // @ts-expect-error the values of this record are numbers
+    const 誤り = (v: TermOf<Readonly<Record<string, number>>>) => v.商品A.$lte("x");
+
+    expect(typeof 誤り).toBe("function");
   });
 
   it("holds a chain of and only when every link holds", () => {
