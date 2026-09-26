@@ -184,8 +184,8 @@ describe("generateExamples for border points", () => {
     });
 
     expect(generate(登録する).rows.map(row => row.given)).toStrictEqual([
-      { 状態: "入力済み", 在庫: { "<key1>": "<在庫>" } },
-      { 状態: "入力済み", 在庫: { "<key1>": "<在庫>", "<key2>": "<在庫>" } },
+      { 状態: "入力済み", 在庫: { "<key>": "<在庫>" } },
+      { 状態: "入力済み", 在庫: { "<key>": "<在庫>", "<key2>": "<在庫>" } },
     ]);
   });
 

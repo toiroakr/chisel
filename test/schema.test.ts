@@ -138,10 +138,14 @@ describe("record", () => {
     expect(result.success ? [] : result.issues.map(issue => issue.path)).toStrictEqual(["$.apple"]);
   });
 
-  it("uses an empty object as its placeholder", () => {
+  it("shows the shape of its value by holding one placeholder entry", () => {
     const Prices = record(number());
 
-    expect(Prices.placeholder()).toStrictEqual({});
+    expect(Prices.placeholder()).toStrictEqual({ "<key>": 0 });
+  });
+
+  it("names its value's placeholder after the field holding the record", () => {
+    expect(object({ 在庫: record(string()) }).placeholder()).toStrictEqual({ 在庫: { "<key>": "<在庫>" } });
   });
 });
 

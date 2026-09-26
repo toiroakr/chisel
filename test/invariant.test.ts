@@ -152,12 +152,14 @@ describe("placeholder under an invariant", () => {
     expect(string().refine(v => v.$length().$gte(10)).placeholder()).toBe("<string>__");
   });
 
-  it("fills a record with its value's placeholder up to the length its invariant asks for", () => {
-    expect(record(string()).min(2).placeholder()).toStrictEqual({ "<key1>": "<string>", "<key2>": "<string>" });
+  it("repeats the placeholder entry of a record to the length its invariant asks for", () => {
+    expect(record(string()).min(2).placeholder()).toStrictEqual({ "<key>": "<string>", "<key2>": "<string>" });
   });
 
-  it("names the values it fills a record with after the field holding the record", () => {
-    expect(object({ 在庫: record(string()).min(1) }).placeholder()).toStrictEqual({ 在庫: { "<key1>": "<在庫>" } });
+  it("repeats the placeholder entry of a record to the length an enclosing object's invariant asks for", () => {
+    expect(
+      object({ 在庫: record(int()) }).refine(v => v.在庫.$length().$gte(2)).placeholder(),
+    ).toStrictEqual({ 在庫: { "<key>": 0, "<key2>": 0 } });
   });
 
   it("repeats the placeholder element to the length its invariant asks for", () => {
