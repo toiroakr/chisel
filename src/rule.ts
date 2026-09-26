@@ -53,7 +53,11 @@ interface Quantified<E> {
 
 // Operators carry the `$` prefix rather than fields, so a field reads as it does
 // on the value `run` receives, and a field named `length` or `all` stays ordinary.
-type Fields<T> = { readonly [K in keyof T & string]-?: TermOf<Exclude<T[K], undefined>> };
+type TermOperator = "$lt" | "$lte" | "$gt" | "$gte" | "$eq" | "$ne" | "$length" | "$all" | "$any";
+
+type Fields<T> = {
+  readonly [K in Exclude<keyof T & string, TermOperator>]-?: TermOf<Exclude<T[K], undefined>>;
+};
 
 export type TermOf<T> = Term<T> &
   (0 extends 1 & T

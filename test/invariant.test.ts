@@ -43,6 +43,13 @@ describe("terms", () => {
     ]);
   });
 
+  it("does not compile reading a field named like an operator, which reads the operator instead", () => {
+    // @ts-expect-error $length names the operator, so the field cannot be read in a condition
+    const 誤り = (v: TermOf<{ readonly $length: number }>) => v.$length.$gte(1);
+
+    expect(typeof 誤り).toBe("function");
+  });
+
   it("does not compile a record's length compared with a string", () => {
     // @ts-expect-error the length of a record is a number
     const 誤り = (v: TermOf<Readonly<Record<string, number>>>) => v.$length().$gte("3");
