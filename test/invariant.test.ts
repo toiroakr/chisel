@@ -4,6 +4,8 @@ import {
   array,
   behavior,
   check,
+  date,
+  datetime,
   examples,
   instant,
   int,
@@ -12,6 +14,7 @@ import {
   record,
   spec,
   string,
+  time,
   variants,
 } from "../src/index.js";
 
@@ -118,6 +121,46 @@ describe("invariant", () => {
     ]).toStrictEqual([true, false]);
   });
 
+  it("orders dates", () => {
+    const 受付開始後 = date().refine(v => v.$gte(Temporal.PlainDate.from("2026-01-01")));
+
+    expect([
+      受付開始後.parse(Temporal.PlainDate.from("2026-01-01")).success,
+      受付開始後.parse(Temporal.PlainDate.from("2025-12-31")).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("orders times", () => {
+    const 営業時間内 = time().refine(v => v.$lt(Temporal.PlainTime.from("18:00")));
+
+    expect([
+      営業時間内.parse(Temporal.PlainTime.from("17:59")).success,
+      営業時間内.parse(Temporal.PlainTime.from("18:00")).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("orders datetimes", () => {
+    const 期間 = object({ 入館: datetime(), 退館: datetime() }).refine(v => v.入館.$lte(v.退館));
+
+    expect([
+      期間.parse({
+        入館: Temporal.PlainDateTime.from("2026-01-01T09:00"),
+        退館: Temporal.PlainDateTime.from("2026-01-01T18:00"),
+      }).success,
+      期間.parse({
+        入館: Temporal.PlainDateTime.from("2026-01-02T09:00"),
+        退館: Temporal.PlainDateTime.from("2026-01-01T18:00"),
+      }).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("does not compile a date compared with an instant", () => {
+    // @ts-expect-error a date and an instant are not ordered against each other
+    const 誤り = (v: TermOf<Temporal.PlainDate>) => v.$gte(Temporal.Instant.from("2026-01-01T00:00:00Z"));
+
+    expect(typeof 誤り).toBe("function");
+  });
+
   it("relates two fields of an object and names them where it is violated", () => {
     const 期間 = object({ 開始: instant(), 終了: instant() }).refine(v =>
       v.開始.$lt(v.終了),
@@ -149,6 +192,24 @@ describe("placeholder under an invariant", () => {
 
   it("moves a number one step past a strict bound", () => {
     expect(int().refine(v => v.$gt(5)).placeholder()).toBe(6);
+  });
+
+  it("moves a date one day past a strict bound", () => {
+    expect(String(date().refine(v => v.$gt(Temporal.PlainDate.from("2026-01-01"))).placeholder())).toBe(
+      "2026-01-02",
+    );
+  });
+
+  it("moves a time one nanosecond past a strict bound", () => {
+    expect(String(time().refine(v => v.$gt(Temporal.PlainTime.from("09:00"))).placeholder())).toBe(
+      "09:00:00.000000001",
+    );
+  });
+
+  it("moves a datetime one nanosecond past a strict bound", () => {
+    expect(
+      String(datetime().refine(v => v.$gt(Temporal.PlainDateTime.from("2026-01-01T09:00"))).placeholder()),
+    ).toBe("2026-01-01T09:00:00.000000001");
   });
 
   it("moves a number under an upper bound", () => {

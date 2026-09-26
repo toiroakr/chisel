@@ -1,7 +1,13 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { Execution, Guard } from "./behavior.js";
 
-export type Comparable = number | string | TemporalTypes.Instant;
+type Moment =
+  | TemporalTypes.Instant
+  | TemporalTypes.PlainDate
+  | TemporalTypes.PlainTime
+  | TemporalTypes.PlainDateTime;
+
+export type Comparable = number | string | Moment;
 
 // Symbol.for, not Symbol(): the CLI loads spec files through tsImport in a
 // separate module graph, and a per-module symbol would not recognise their terms.
@@ -64,7 +70,7 @@ export type TermOf<T> = Term<T> &
     ? { readonly [key: string]: any }
     : [T] extends [boolean]
     ? Equatable<T>
-    : [T] extends [number | TemporalTypes.Instant]
+    : [T] extends [number | Moment]
       ? Ordered<T>
       : [T] extends [string]
         ? Ordered<T> & Measured
@@ -413,7 +419,7 @@ function step(bound: unknown, direction: 1 | -1): unknown {
   }
   const add = (bound as { readonly add?: (duration: object) => unknown } | null)?.add;
   if (typeof add === "function") {
-    return add.call(bound, { nanoseconds: direction });
+    return add.call(bound, isPlainDate(bound) ? { days: direction } : { nanoseconds: direction });
   }
   return bound;
 }
@@ -565,4 +571,11 @@ function describeOperand(operand: unknown, path: string, elements: ElementLabels
     .filter(part => part !== "")
     .join(".");
   return measure === "length" ? `length(${location})` : location;
+}
+
+// A plain date has no time of day, so adding a nanosecond leaves it where it is.
+function isPlainDate(value: unknown): boolean {
+  const constructor = (globalThis as { readonly Temporal?: { readonly PlainDate?: abstract new (...args: never[]) => unknown } })
+    .Temporal?.PlainDate;
+  return constructor !== undefined && value instanceof constructor;
 }

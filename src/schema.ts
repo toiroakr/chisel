@@ -60,6 +60,18 @@ export interface InstantSchema extends Schema<TemporalTypes.Instant> {
   readonly kind: "instant";
 }
 
+export interface DateSchema extends Schema<TemporalTypes.PlainDate> {
+  readonly kind: "date";
+}
+
+export interface TimeSchema extends Schema<TemporalTypes.PlainTime> {
+  readonly kind: "time";
+}
+
+export interface DateTimeSchema extends Schema<TemporalTypes.PlainDateTime> {
+  readonly kind: "datetime";
+}
+
 export interface LiteralSchema<T extends string | number | boolean | null>
   extends Schema<T> {
   readonly kind: "literal";
@@ -278,6 +290,29 @@ export function instant(): InstantSchema {
       ? valid(value)
       : invalid(path, "Expected a Temporal.Instant");
   }
+}
+
+export function date(): DateSchema {
+  return plain("date", "PlainDate", "2000-01-01") as DateSchema;
+}
+
+export function time(): TimeSchema {
+  return plain("time", "PlainTime", "00:00") as TimeSchema;
+}
+
+export function datetime(): DateTimeSchema {
+  return plain("datetime", "PlainDateTime", "2000-01-01T00:00") as DateTimeSchema;
+}
+
+type PlainType = "PlainDate" | "PlainTime" | "PlainDateTime";
+
+function plain(kind: string, type: PlainType, placeholder: string): AnySchema {
+  return refinable<AnySchema>({
+    kind,
+    parse: (value: unknown, path = "$") =>
+      value instanceof temporalPlain(type) ? valid(value) : invalid(path, `Expected a Temporal.${type}`),
+    placeholder: () => temporalPlain(type).from(placeholder),
+  });
 }
 
 export function literal<const T extends string | number | boolean | null>(
@@ -514,6 +549,18 @@ function temporalInstant(): TemporalTypes.InstantConstructor {
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
   return temporal.Instant;
+}
+
+function temporalPlain(type: PlainType): { from(text: string): unknown; new (...args: never[]): unknown } {
+  const constructor = (
+    globalThis as unknown as {
+      readonly Temporal?: Partial<Record<PlainType, { from(text: string): unknown; new (...args: never[]): unknown }>>;
+    }
+  ).Temporal?.[type];
+  if (constructor === undefined) {
+    throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
+  }
+  return constructor;
 }
 
 export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
