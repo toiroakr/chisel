@@ -42,11 +42,18 @@ describe("formatTypeScriptValue", () => {
   });
 
   it("throws a TypeError for a value with no TypeScript literal form", () => {
-    expect(() => formatTypeScriptValue(undefined)).toThrow(TypeError);
     expect(() => formatTypeScriptValue(() => {})).toThrow(TypeError);
   });
 
+  it("writes undefined as undefined", () => {
+    expect(formatTypeScriptValue(undefined)).toBe("undefined");
+  });
+
+  it("writes an absent array element as undefined, as a row for an optional element holds one", () => {
+    expect(formatTypeScriptValue([undefined])).toBe("[\n  undefined,\n]");
+  });
+
   it("keeps an explicit undefined field rather than dropping it, unlike object().placeholder", () => {
-    expect(() => formatTypeScriptValue({ a: undefined })).toThrow(TypeError);
+    expect(formatTypeScriptValue({ a: undefined })).toBe("{\n  a: undefined,\n}");
   });
 });
