@@ -335,7 +335,14 @@ export async function check(
   const verifiedResults = new Set<string>();
   const observedEffects = new Set<string>();
   const verifiedEffects = new Set<string>();
-  const positions = measuredPositionsOf(definition);
+  const guardPartitions =
+    specification.implementation === undefined
+      ? []
+      : guardPartitionsOf(specification.implementation);
+  const positions = measuredPositionsOf(
+    definition,
+    new Set(guardPartitions.map(partition => partition.path)),
+  );
   const coveredClasses = positions.map(() => new Set<string>());
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
@@ -586,10 +593,6 @@ export async function check(
             .join(", ")})`,
         ];
   });
-  const guardPartitions =
-    specification.implementation === undefined
-      ? []
-      : guardPartitionsOf(specification.implementation);
   const partitions = positions.map((position, index): PartitionCoverage => {
     const drawn = guardPartitions.find(partition => partition.path === position.path);
     if (drawn !== undefined && position.kind !== "divided") {
@@ -817,6 +820,11 @@ export function generate(
       notComposed.push(`${row.name}: ${parsed.issues[0]!.message}`);
     }
   };
+  const guardDivided = new Set(
+    (implementation === undefined ? [] : guardPartitionsOf(implementation)).map(
+      partition => partition.path,
+    ),
+  );
   const refused = excludedCases(definition.input);
   for (const tag of definition.input.variantTags.filter(
     tag => !existing.has(tag) && !refused.includes(tag),
@@ -828,7 +836,7 @@ export function generate(
     });
   }
 
-  for (const position of measuredPositionsOf(definition)) {
+  for (const position of measuredPositionsOf(definition, guardDivided)) {
     if (position.kind !== "divided") {
       continue;
     }
@@ -851,7 +859,7 @@ export function generate(
     }
   }
 
-  for (const position of measuredPositionsOf(definition)) {
+  for (const position of measuredPositionsOf(definition, guardDivided)) {
     for (const border of position.borders) {
       for (const point of border.points) {
         if (point.status !== "owed" || point.witness === undefined) {
@@ -1342,8 +1350,15 @@ function isUnder(position: Position, prefix: readonly string[]): boolean {
   return prefix.every((segment, index) => position.segments[index] === segment);
 }
 
-function measuredPositionsOf(definition: AnyBehavior): readonly Position[] {
-  return positionsOf(definition.input).filter(position => !isDisregarded(definition, position));
+// A position a guard divides is kept even when disregarded: the guard reads it,
+// so its classes are the guard's obligation, not the type's.
+function measuredPositionsOf(
+  definition: AnyBehavior,
+  guardDivided: ReadonlySet<string> = new Set(),
+): readonly Position[] {
+  return positionsOf(definition.input).filter(
+    position => guardDivided.has(position.path) || !isDisregarded(definition, position),
+  );
 }
 
 async function disregardBroken(

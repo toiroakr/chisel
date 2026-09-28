@@ -128,6 +128,27 @@ describe("what disregards leaves measured", () => {
     expect(report.partitions.map(partition => partition.path)).toStrictEqual(["@提出済み.至急"]);
   });
 
+  it("still counts the classes a guard draws on a disregarded field among the partitions check reports", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 金額: int() }) }),
+      result: variants("結果", { 承認: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.金額] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("上限内なら承認", {
+          guards: r => [r.金額.$lte(100).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
+          run: () => ({ result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(spec("承認", { examples: examples(承認する, {}), implementation: 実装 }));
+
+    expect(report.partitions.map(partition => partition.path)).toStrictEqual(["@提出済み.金額"]);
+  });
+
   it("still owes the points of a guard on a disregarded field", () => {
     const 承認する = behavior("承認する", {
       input: variants("状態", { 提出済み: object({ 金額: int() }) }),
