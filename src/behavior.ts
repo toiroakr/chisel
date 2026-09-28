@@ -129,17 +129,18 @@ export type BehaviorDeps<B> = B extends { readonly requires: infer Requires }
   ? Resolved<Requires>
   : never;
 
+type CaseDecision<B extends AnyBehavior, Input> =
+  | Decision<Input, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+  | RulesDecision<Input, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+  | Todo;
+
 export type ImplementationCases<B extends AnyBehavior> = {
-  readonly [Tag in Tags<B["input"]>]:
-    | Decision<VariantOf<B["input"], Tag>, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
-    | RulesDecision<
-        VariantOf<B["input"], Tag>,
-        BehaviorResult<B>,
-        BehaviorEffect<B>,
-        BehaviorDeps<B>
-      >
-    | Todo;
+  readonly [Tag in Tags<B["input"]>]: CaseDecision<B, VariantOf<B["input"], Tag>>;
 };
+
+// Decides every case `cases` leaves out. It is typed by the whole input, since
+// which cases it takes is known only from what `cases` writes.
+export type OtherwiseDecision<B extends AnyBehavior> = CaseDecision<B, BehaviorInput<B>>;
 
 export interface Implementation<B extends AnyBehavior> {
   readonly kind: "implementation";
@@ -288,20 +289,50 @@ export function brokenEnsures(
 
 export function implement<B extends AnyBehavior>(
   definition: B,
-  options: NoInfer<{
-    readonly cases: ImplementationCases<B>;
-    readonly controls?: ControlTable<B["effects"]>;
-  }>,
+  options: NoInfer<
+    | {
+        readonly cases: ImplementationCases<B>;
+        readonly otherwise?: undefined;
+        readonly controls?: ControlTable<B["effects"]>;
+      }
+    | {
+        readonly cases: Partial<ImplementationCases<B>>;
+        readonly otherwise: OtherwiseDecision<B>;
+        readonly controls?: ControlTable<B["effects"]>;
+      }
+  >,
 ): Implementation<NoInfer<B>> {
-  for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
+  const cases = casesOf(definition, options.cases, options.otherwise) as ImplementationCases<B>;
+  for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
     checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
   }
   return {
     kind: "implementation",
     behavior: definition,
-    cases: options.cases,
+    cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+// `otherwise` is handed every case `cases` leaves out, as the same decision, so
+// the measures can tell it was written once.
+function casesOf(
+  definition: AnyBehavior,
+  written: Partial<ImplementationCases<AnyBehavior>>,
+  otherwise: OtherwiseDecision<AnyBehavior> | undefined,
+): Partial<ImplementationCases<AnyBehavior>> {
+  if (otherwise === undefined) {
+    return written;
+  }
+  const left = definition.input.variantTags.filter(tag => written[tag] === undefined);
+  if (left.length === 0) {
+    throw new SpecificationError(
+      `otherwise in ${definition.name} decides no case: every case is written`,
+    );
+  }
+  return Object.fromEntries(
+    definition.input.variantTags.map(tag => [tag, written[tag] ?? otherwise]),
+  );
 }
 
 export function external<B extends AnyBehavior>(definition: B, reason: string): Implementation<B> {

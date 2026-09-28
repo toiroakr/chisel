@@ -41,6 +41,7 @@ export interface GuardBorder {
   readonly border: Border;
   readonly origin?: {
     readonly decision: RulesDecision<unknown, unknown, unknown>;
+    readonly tag: string;
     readonly scope: AnySchema;
   };
   coordinateOf(reached: ComparisonReached): unknown;
@@ -76,7 +77,7 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
           ).map(
             drawn => ({
               ...drawn,
-              origin: { decision, scope: guardScope(implementation.behavior, tag) },
+              origin: { decision, tag, scope: guardScope(implementation.behavior, tag) },
             }),
           ),
         ),
@@ -585,7 +586,7 @@ function differenceCarrier(
 
 export function comparisonsNotReadOf(implementation: AnyImplementation): readonly string[] {
   const input = implementation.behavior.input;
-  return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+  const unread = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
@@ -594,6 +595,8 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
           ),
         ),
   );
+  // An otherwise decides several cases with one guard, which is one comparison.
+  return [...new Set(unread)];
 }
 
 function unreadIn(rule: Rule, frames: Frames): string[] {

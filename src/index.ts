@@ -95,6 +95,7 @@ export type {
   Guard,
   Implementation,
   ImplementationCases,
+  OtherwiseDecision,
   Match,
   Otherwise,
   Todo,

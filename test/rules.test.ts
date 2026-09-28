@@ -704,3 +704,143 @@ describe("action", () => {
     ).toMatchObject({ way: "otherwise", status: "met" });
   });
 });
+
+describe("otherwise", () => {
+  const 承認する = behavior("承認する", {
+    input: variants("状態", {
+      下書き: object({ 金額: int() }),
+      申請中: object({ 金額: int(), 上限: int() }),
+      承認済み: object({ 金額: int() }),
+    }),
+    result: variants("結果", { 承認: object({}), 却下: object({ 理由: string() }) }),
+    effects: variants("種類", {}),
+  });
+  const 承認 = () => ({ result: { 結果: "承認" as const }, effects: [] });
+  const 却下 = (理由: string) => () => ({ result: { 結果: "却下" as const, 理由 }, effects: [] });
+  const 申請中だけ承認する = implement(承認する, {
+    cases: {
+      申請中: action("上限までなら承認する", {
+        guards: 申請 => [申請.金額.$lte(申請.上限).$else(却下("上限超過"))],
+        run: 承認,
+      }),
+    },
+    otherwise: action("申請中でなければ断る", { run: 却下("申請中ではない") }),
+  });
+
+  it("answers every case cases leaves out", async () => {
+    expect([
+      await perform(申請中だけ承認する, { 状態: "下書き", 金額: 3000 }),
+      await perform(申請中だけ承認する, { 状態: "承認済み", 金額: 3000 }),
+      await perform(申請中だけ承認する, { 状態: "申請中", 金額: 3000, 上限: 5000 }),
+    ]).toStrictEqual([却下("申請中ではない")(), 却下("申請中ではない")(), 承認()]);
+  });
+
+  it("refuses at compile time a case left out when there is no otherwise", () => {
+    // @ts-expect-error 下書き and 承認済み are decided by nothing: cases leaves them out and there is no otherwise
+    implement(承認する, { cases: { 申請中: action("承認する", { run: 承認 }) } });
+  });
+
+  it("refuses an otherwise that decides no case", () => {
+    expect(() =>
+      implement(承認する, {
+        cases: {
+          下書き: action("下書きは断る", { run: 却下("申請中ではない") }),
+          申請中: action("承認する", { run: 承認 }),
+          承認済み: action("承認済みは断る", { run: 却下("申請中ではない") }),
+        },
+        otherwise: action("使われない", { run: 却下("申請中ではない") }),
+      }),
+    ).toThrow(new SpecificationError("otherwise in 承認する decides no case: every case is written"));
+  });
+
+  it("measures otherwise once, while every case it decides is still owed a row", async () => {
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          "下書きは断る": { given: { 状態: "下書き", 金額: 3000 }, expect: 却下("申請中ではない")() },
+        }),
+        implementation: 申請中だけ承認する,
+      }),
+    );
+
+    expect({
+      missing: report.input.missing,
+      rules:
+        report.measures.rules.status === "unavailable"
+          ? []
+          : report.measures.rules.rules.map(rule => `${rule.decision}: ${rule.way}: ${rule.status}`),
+    }).toStrictEqual({
+      missing: ["申請中", "承認済み"],
+      rules: [
+        "申請中でなければ断る: otherwise: met",
+        "上限までなら承認する: $.金額 <= $.上限 holds → otherwise: gap",
+        "上限までなら承認する: $.金額 <= $.上限 fails → else of guard 1: gap",
+      ],
+    });
+  });
+
+  it("leaves every case it decides open while it is todo", async () => {
+    const まだ決めていない = implement(承認する, {
+      cases: { 申請中: action("承認する", { run: 承認 }) },
+      otherwise: todo("申請中でないときの答えは未定"),
+    });
+    const report = await check(
+      spec("承認", { examples: examples(承認する, {}), implementation: まだ決めていない }),
+    );
+
+    expect(report.pendingDecisions).toStrictEqual([
+      { variant: "下書き", reason: "申請中でないときの答えは未定" },
+      { variant: "承認済み", reason: "申請中でないときの答えは未定" },
+    ]);
+  });
+
+  it("draws a guard's border in each case it decides, met only by rows in that case", async () => {
+    const 金額があれば断る = implement(承認する, {
+      cases: { 申請中: action("承認する", { run: 承認 }) },
+      otherwise: action("金額を確かめて断る", {
+        guards: 報告 => [報告.金額.$gte(1).$else(却下("金額なし"))],
+        run: 却下("申請中ではない"),
+      }),
+    });
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          "下書きは断る": { given: { 状態: "下書き", 金額: 3000 }, expect: 却下("申請中ではない")() },
+        }),
+        implementation: 金額があれば断る,
+      }),
+    );
+
+    expect(
+      report.borders.map(border => `${border.path}: ${border.points.map(point => point.status).join(" ")}`),
+    ).toStrictEqual(["@下書き.金額: gap gap met gap", "@承認済み.金額: gap gap gap gap"]);
+  });
+
+  it("owes a row at an arm one of the cases it decides can take", async () => {
+    const 受け付ける = behavior("受け付ける", {
+      input: variants("状態", {
+        下書き: object({ 金額: int() }),
+        申請中: object({ 金額: int().min(10) }),
+        差戻し: object({ 金額: int() }),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 受付 = () => ({ result: { 結果: "受付" as const }, effects: [] });
+    const 断る = () => ({ result: { 結果: "却下" as const }, effects: [] });
+    const 実装 = implement(受け付ける, {
+      cases: { 下書き: action("下書きは断る", { run: 断る }) },
+      otherwise: action("少額は断る", { guards: 申請 => [申請.金額.$gte(5).$else(断る)], run: 受付 }),
+    });
+    const report = await check(
+      spec("受付", { examples: examples(受け付ける, {}), implementation: 実装 }),
+    );
+
+    // 申請中 never has an amount under 5, but 差戻し can, so the else arm is owed.
+    expect(
+      report.measures.arms.status === "unavailable"
+        ? []
+        : report.measures.arms.arms.map(arm => `${arm.decision}: ${arm.arm}: ${arm.status}`),
+    ).toStrictEqual(["少額は断る: holds: gap", "少額は断る: else: gap"]);
+  });
+});

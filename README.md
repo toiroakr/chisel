@@ -152,6 +152,19 @@ export const cancellation = c.spec("order cancellation", {
 });
 ```
 
+`cases` may leave a case out when `otherwise` decides it: one action for every case not written. Had `Order` a `shipped` and a `cancelled` case as well, the two could be refused together:
+
+```ts
+const implementation = c.implement(cancelOrder, {
+  cases: { unpaid: ..., paid: ... },
+  otherwise: c.action("refuse", {
+    run: () => ({ result: { type: "rejected", reason: "not cancellable" }, effects: [] }),
+  }),
+});
+```
+
+`otherwise` is typed by the whole input, so its guards read only the fields every case has. It is one decision: its arms and ways are listed once, owed a row wherever one of its cases can take them, while each case it decides is still an input case owed its own row, and a guard in it draws its border in each of those cases. `otherwise: c.todo(reason)` leaves every case it decides open, and a case left out with no `otherwise` fails to compile. An `otherwise` beside `cases` that write every case decides nothing and is refused.
+
 ## Commands
 
 Chisel requires Node.js 26 or later and uses its built-in Temporal API.

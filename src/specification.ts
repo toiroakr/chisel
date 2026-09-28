@@ -7,6 +7,7 @@ import type {
   BehaviorResult,
   Execution,
   Implementation,
+  ImplementationCases,
   Todo,
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
@@ -646,7 +647,7 @@ export async function check(
     specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
   ).map((drawn): BorderCoverage => {
     const coordinates = reached
-      .filter(item => item.rule === drawn.comparison)
+      .filter(item => isOn(drawn, item, definition))
       .map(item => drawn.coordinateOf(item));
     return {
       path: drawn.path,
@@ -896,9 +897,7 @@ export function generate(
 
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
-      comparisonsReached(implementation!, given, deps).filter(
-        item => item.rule === drawn.comparison,
-      );
+      comparisonsReached(implementation!, given, deps).filter(item => isOn(drawn, item, definition));
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
         continue;
@@ -1115,13 +1114,13 @@ function measureRules(
   if (implementation.external !== undefined) {
     return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
-  const decisions = Object.values(implementation.cases);
-  const notRead = decisions.flatMap(decision =>
+  const decisions = decisionsOf(implementation);
+  const notRead = decisions.flatMap(({ decision }) =>
     decision.kind === "decision" ? [decision.id] : [],
   );
   const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
     taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
-  const rules = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+  const rules = decisions.flatMap(({ decision, tags }) =>
     decision.kind !== "rules"
       ? []
       : waysOf(decision).map((way): RuleCoverage => {
@@ -1132,7 +1131,10 @@ function measureRules(
           if (took(owed, decision.id, way.steps)) {
             return { ...base, status: "answer owed" };
           }
-          return { ...base, ...unmetStatus([feasibilityOf(way, scopeOf(implementation, tag))]) };
+          return {
+            ...base,
+            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag)))),
+          };
         }),
   );
   if (notRead.length === 0) {
@@ -1154,19 +1156,19 @@ function measureArms(
   if (implementation.external !== undefined) {
     return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
-  const decisions = Object.values(implementation.cases);
-  const notRead = decisions.flatMap(decision =>
+  const decisions = decisionsOf(implementation);
+  const notRead = decisions.flatMap(({ decision }) =>
     decision.kind === "decision" ? [decision.id] : [],
   );
   const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
-  const arms = Object.entries(implementation.cases).flatMap(([tag, decision]) => {
+  const arms = decisions.flatMap(({ decision, tags }) => {
     if (decision.kind !== "rules") {
       return [];
     }
     const ways = waysOf(decision).map(way => ({
       way,
-      feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
+      feasibilities: tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag))),
     }));
     const through = (index: number, arm: string) =>
       ways.filter(({ way }) =>
@@ -1181,7 +1183,7 @@ function measureArms(
         ? { status: "met" }
         : took(owed, decision.id, index, arm)
           ? { status: "answer owed" }
-          : unmetStatus(through(index, arm).map(item => item.feasibility));
+          : unmetStatus(through(index, arm).flatMap(item => item.feasibilities));
     const guarded = decision.guards.flatMap((candidate, index) =>
       (["holds", "else"] as const).map(
         (arm): ArmCoverage => ({
@@ -1212,6 +1214,19 @@ function measureArms(
   return arms.length === 0
     ? { status: "unavailable", reason: "not measured", notRead }
     : { status: "partial", arms, notRead };
+}
+
+// Each decision once, with the cases it decides: an `otherwise` decides every
+// case `cases` left out, and its arms and ways are one set, owed a row wherever
+// one of those cases can take them.
+function decisionsOf(
+  implementation: Implementation<AnyBehavior>,
+): { readonly decision: ImplementationCases<AnyBehavior>[string]; readonly tags: readonly string[] }[] {
+  const tags = new Map<ImplementationCases<AnyBehavior>[string], string[]>();
+  for (const [tag, decision] of Object.entries(implementation.cases)) {
+    tags.set(decision, [...(tags.get(decision) ?? []), tag]);
+  }
+  return [...tags].map(([decision, decided]) => ({ decision, tags: decided }));
 }
 
 function stagesOf(implementation: AnyImplementation): AnyImplementation[] {
@@ -1256,6 +1271,15 @@ function externalsIn(implementation: AnyImplementation | undefined): string[] {
   return implementation.pipeline === undefined
     ? []
     : implementation.pipeline.flatMap(stage => externalsIn(stage));
+}
+
+// A guard an otherwise shares draws a border in each case it decides, so a
+// comparison is on a border only when it was reached in that border's case.
+function isOn(drawn: GuardBorder, reached: ComparisonReached, definition: AnyBehavior): boolean {
+  return (
+    reached.rule === drawn.comparison &&
+    (drawn.origin === undefined || tagOf(definition.input, reached.scope) === drawn.origin.tag)
+  );
 }
 
 function unmetStatus(
