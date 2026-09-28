@@ -81,6 +81,23 @@ describe("disregards with $default", () => {
   });
 });
 
+describe("disregarding a whole case", () => {
+  it("offers only the case's own row when the case itself is disregarded", () => {
+    const 承認する = behavior("承認する", {
+      input: 報告,
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 下書き: () => [], $default: r => [r] },
+    });
+
+    expect(generate(承認する).rows.map(row => row.name)).toStrictEqual([
+      "承認する: 下書き",
+      "承認する: 提出済み",
+      "承認する: @下書き.明細[].領収書 = あり",
+    ]);
+  });
+});
+
 describe("what disregards leaves measured", () => {
   it("keeps a field whose name only begins with a disregarded one", () => {
     const 承認する = behavior("承認する", {
@@ -140,5 +157,47 @@ describe("disregards is typed by the case it is written for", () => {
       // @ts-expect-error 下書き has no 至急
       disregards: { 下書き: r => [r.至急] },
     });
+  });
+});
+
+describe("check holds an implementation to what its behavior disregards", () => {
+  const 承認する = behavior("承認する", {
+    input: variants("状態", { 提出済み: object({ 至急: boolean() }) }),
+    result: variants("結果", { 承認: object({}), 保留: object({}) }),
+    effects: variants("種類", {}),
+    disregards: { 提出済み: r => [r.至急] },
+  });
+  const 通常の行 = examples(承認する, {
+    通常: { given: { 状態: "提出済み", 至急: false }, expect: { result: { 結果: "承認" }, effects: [] } },
+  });
+
+  it("fails a row whose answer changes when a disregarded field takes another class", async () => {
+    const 至急なら保留 = implement(承認する, {
+      cases: {
+        提出済み: action("至急なら保留", {
+          guards: r => [r.至急.$eq(false).$else(() => ({ result: { 結果: "保留" }, effects: [] }))],
+          run: () => ({ result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(spec("承認", { examples: 通常の行, implementation: 至急なら保留 }));
+
+    expect(report.failures).toStrictEqual([
+      {
+        name: "通常",
+        message: "承認する disregards @提出済み.至急, but its answer changed when it was true",
+      },
+    ]);
+  });
+
+  it("passes a row whose answer stays the same across the classes of a disregarded field", async () => {
+    const いつも承認 = implement(承認する, {
+      cases: { 提出済み: action("承認", { run: () => ({ result: { 結果: "承認" }, effects: [] }) }) },
+    });
+
+    const report = await check(spec("承認", { examples: 通常の行, implementation: いつも承認 }));
+
+    expect(report.failures).toStrictEqual([]);
   });
 });

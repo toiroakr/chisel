@@ -534,6 +534,9 @@ export async function check(
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
+          failures.push(
+            ...(await disregardBroken(implementation, row, actual, standIns(row))),
+          );
         }
       }
       const open = openDecisionIn(implementation, error);
@@ -1329,14 +1332,59 @@ function coverage(
   };
 }
 
+function isDisregarded(definition: AnyBehavior, position: Position): boolean {
+  return Object.entries(definition.disregards).some(([tag, paths]) =>
+    paths.some(keys => {
+      const prefix = `@${tag}${keys.map(key => `.${key}`).join("")}`;
+      return (
+        position.path === prefix ||
+        (position.path.startsWith(prefix) && /^[.[?@{]/.test(position.path.slice(prefix.length)))
+      );
+    }),
+  );
+}
+
 function measuredPositionsOf(definition: AnyBehavior): readonly Position[] {
-  const disregarded = Object.entries(definition.disregards).flatMap(([tag, paths]) =>
-    paths.map(keys => `@${tag}${keys.map(key => `.${key}`).join("")}`),
-  );
-  return positionsOf(definition.input).filter(
-    position =>
-      !disregarded.some(
-        prefix => position.path === prefix || /^[.[?@{]/.test(position.path.slice(prefix.length)) && position.path.startsWith(prefix),
-      ),
-  );
+  return positionsOf(definition.input).filter(position => !isDisregarded(definition, position));
+}
+
+async function disregardBroken(
+  implementation: AnyImplementation,
+  row: Example<AnyBehavior>,
+  answered: unknown,
+  standIns: unknown,
+): Promise<ExampleFailure[]> {
+  const definition = implementation.behavior;
+  const tag = tagOf(definition.input, row.given);
+  const failures: ExampleFailure[] = [];
+  for (const position of positionsOf(definition.input)) {
+    if (
+      position.kind !== "divided" ||
+      !position.path.startsWith(`@${tag}`) ||
+      !isDisregarded(definition, position)
+    ) {
+      continue;
+    }
+    const taken = position.classify(row.given);
+    for (const className of position.classes) {
+      if (taken.includes(className) || position.excluded.includes(className)) {
+        continue;
+      }
+      const varied = position.place(row.given, className);
+      if (!definition.input.parse(varied).success) {
+        continue;
+      }
+      const changed = await runTraced(implementation, varied as never, standIns as never).then(
+        traced => !isDeepStrictEqual(traced.execution, answered),
+        () => true,
+      );
+      if (changed) {
+        failures.push({
+          name: row.name,
+          message: `${definition.name} disregards ${position.path}, but its answer changed when it was ${className}`,
+        });
+      }
+    }
+  }
+  return failures;
 }
