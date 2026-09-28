@@ -1115,13 +1115,13 @@ function measureRules(
   if (implementation.external !== undefined) {
     return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
-  const decisions = Object.values(implementation.cases);
-  const notRead = decisions.flatMap(decision =>
+  const decided = decisionsWithCases(implementation);
+  const notRead = decided.flatMap(([decision]) =>
     decision.kind === "decision" ? [decision.id] : [],
   );
   const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
     taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
-  const rules = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+  const rules = decided.flatMap(([decision, tags]) =>
     decision.kind !== "rules"
       ? []
       : waysOf(decision).map((way): RuleCoverage => {
@@ -1132,7 +1132,10 @@ function measureRules(
           if (took(owed, decision.id, way.steps)) {
             return { ...base, status: "answer owed" };
           }
-          return { ...base, ...unmetStatus([feasibilityOf(way, scopeOf(implementation, tag))]) };
+          return {
+            ...base,
+            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag)))),
+          };
         }),
   );
   if (notRead.length === 0) {
@@ -1154,20 +1157,22 @@ function measureArms(
   if (implementation.external !== undefined) {
     return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
-  const decisions = Object.values(implementation.cases);
-  const notRead = decisions.flatMap(decision =>
+  const decided = decisionsWithCases(implementation);
+  const notRead = decided.flatMap(([decision]) =>
     decision.kind === "decision" ? [decision.id] : [],
   );
   const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
-  const arms = Object.entries(implementation.cases).flatMap(([tag, decision]) => {
+  const arms = decided.flatMap(([decision, tags]) => {
     if (decision.kind !== "rules") {
       return [];
     }
-    const ways = waysOf(decision).map(way => ({
-      way,
-      feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
-    }));
+    const ways = tags.flatMap(tag =>
+      waysOf(decision).map(way => ({
+        way,
+        feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
+      })),
+    );
     const through = (index: number, arm: string) =>
       ways.filter(({ way }) =>
         index === decision.guards.length
@@ -1212,6 +1217,18 @@ function measureArms(
   return arms.length === 0
     ? { status: "unavailable", reason: "not measured", notRead }
     : { status: "partial", arms, notRead };
+}
+
+// Not one entry per case: $default hands one decision to several cases, and
+// listing it per case would owe each of its arms once for every case it decides.
+function decisionsWithCases(
+  implementation: AnyImplementation,
+): readonly (readonly [AnyImplementation["cases"][string], readonly string[]])[] {
+  const grouped = new Map<AnyImplementation["cases"][string], string[]>();
+  for (const [tag, decision] of Object.entries(implementation.cases)) {
+    grouped.set(decision, [...(grouped.get(decision) ?? []), tag]);
+  }
+  return [...grouped];
 }
 
 function stagesOf(implementation: AnyImplementation): AnyImplementation[] {

@@ -334,22 +334,51 @@ export function brokenEnsures(
   );
 }
 
+type CaseDecision<B extends AnyBehavior, Input> =
+  | Decision<Input, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+  | RulesDecision<Input, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+  | Todo;
+
+export type CasesWithDefault<B extends AnyBehavior> =
+  | ImplementationCases<B>
+  | (Partial<ImplementationCases<B>> & {
+      readonly $default: CaseDecision<B, BehaviorInput<B>>;
+    });
+
 export function implement<B extends AnyBehavior>(
   definition: B,
   options: NoInfer<{
-    readonly cases: ImplementationCases<B>;
+    readonly cases: CasesWithDefault<B>;
     readonly controls?: ControlTable<B["effects"]>;
   }>,
 ): Implementation<NoInfer<B>> {
-  for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
+  const cases = casesWithoutDefault(definition, options.cases);
+  for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
     checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
   }
   return {
     kind: "implementation",
     behavior: definition,
-    cases: options.cases,
+    cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+function casesWithoutDefault<B extends AnyBehavior>(
+  definition: B,
+  written: CasesWithDefault<B>,
+): ImplementationCases<B> {
+  const { $default: fallback, ...cases } = written as Readonly<Record<string, unknown>>;
+  if (fallback === undefined) {
+    return written as ImplementationCases<B>;
+  }
+  const left = definition.input.variantTags.filter(tag => cases[tag] === undefined);
+  if (left.length === 0) {
+    throw new SpecificationError(`$default of ${definition.name} decides no case`);
+  }
+  return Object.fromEntries(
+    definition.input.variantTags.map(tag => [tag, cases[tag] ?? fallback]),
+  ) as ImplementationCases<B>;
 }
 
 export function external<B extends AnyBehavior>(definition: B, reason: string): Implementation<B> {

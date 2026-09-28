@@ -24,3 +24,12 @@ Issue #28（複数の behavior が 1 つのレコードのモデルを共有し�
 - **型の書き方の落とし穴（Why not のメモ）**：`{ [Tag in Tags]?: ... } & { $default?: ... }` という交差型にすると、`behavior()` の呼び出しの中で `$default` の `r` が `TermOf<never> | TermOf<...>` の union になり、フィールドを指せなかった（型だけを取り出すと正しいのに、呼び出しの文脈で型付けすると壊れる）。`[Key in Tags | "$default"]?` の 1 つの mapped type にしたら直った。
 - **`$each` は作っていない**：配列の要素のフィールド（`r.明細.$each.領収書`）を指す手段は足していない。刈れるのは、フィールド全体（`r.明細`）か、配列を通らない入れ子のフィールドまで。
 - **`compose`**：合成した behavior は、最初の stage の `disregards` をそのまま引き継ぐ（合成の入力は最初の stage の入力なので）。
+
+### `cases.$default`
+
+- **実装方法**：`implement()` の中で、`$default` を書かれていない各状態に**同じ decision オブジェクト**として展開する。`Implementation.cases` は今までどおり全状態のキーを持つので、`perform`・`traceSync`・guard の境界・`pendingDecisions`・`generate` は変更せずに動いた。
+- **arms / ways を 1 回だけ数える方法**：`measureArms` と `measureRules` で、decision をオブジェクトの同一性でまとめる（`decisionsWithCases`）。まだ誰も通っていない way が行を要求するかどうか（feasibility）は、その decision が受け持つ全状態で調べ、1 つでも到達できれば「行が要る（gap）」にする。
+- **副作用（既存の挙動の変化）**：`$default` を使わなくても、同じ action の定数を 2 つの状態に手で書いた場合、今までは arms が 2 回数えられていたが、今は 1 回になる。既存のテストはすべて通った。意図に沿う変化と判断して残した。
+- **拒否するもの**：`cases` が全状態を書いたうえで `$default` もある場合は `$default of <behavior> decides no case` で拒否する。
+- **`$default` の型**：`$default` の action は入力全体（全状態の union）を受け取る。guard の term から指せるのは、全状態に共通するフィールドだけになる（今の `TermOf` の仕様どおり）。
+- **やっていないこと**：`match(...)` の cases への `$default`。状態のタグに `$default` という名前が使われた場合の衝突チェック（`variants` 側での拒否）。
