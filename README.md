@@ -245,6 +245,30 @@ Every answer an example writes, the model produces or a conformance subject retu
 
 `check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). Every measure carries `status`, `reason` exactly where it is `unavailable`, and `weakening` exactly where something weakened it; every border point, arm and way carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
+## One model, several behaviors
+
+Behaviors that work on one record can share its model as their input: `input: Report` in each of them, so a state added to `Report` reaches every behavior at once. Each of them is then asked about every field of every state, including fields its answer never turns on. `disregards` says which, per input case like `cases`, with `$default` for every case not written; `r => [r]` disregards a whole case:
+
+```ts
+export const approve = c.behavior("approve", {
+  input: Report,
+  result, effects,
+  disregards: { submitted: r => [r.lines, r.urgent], $default: r => [r] },
+});
+
+c.implement(approve, {
+  cases: {
+    submitted: c.action("approve within the limit", {
+      guards: r => [r.amount.$lte(r.limit).$else(refuse("over the limit"))],
+      run: approved,
+    }),
+    $default: c.action("refuse unless submitted", { run: refuse("not submitted") }),
+  },
+});
+```
+
+A disregarded field draws no classes and no invariant borders, so `generate` offers no row that only moves it, while every input case is still owed its row, guards still draw their borders and arms from the whole input, and an invariant that leaves a disregarded field empty is still a model error. Rows keep the whole record, so `c.test` hands production code what it takes. `check` holds the claim: it moves each disregarded field of an answered row into its other classes and runs the model again, and an answer that changes is a failure. `cases.$default` decides every case `cases` leaves out; it is one decision, so its arms and ways are listed once and owed wherever one of its cases can reach them, a `c.todo` there leaves each of its cases pending, and a `$default` beside cases that decide every case is refused. An input case cannot be named `$default`. [`examples/expense-report/`](examples/expense-report/) writes three behaviors over one five-state model both ways.
+
 ## Composition
 
 `c.compose(name, [firstImplementation, secondImplementation, ...more])` connects behaviors the way Souther's `>->` does: of the cases a stage answers, those the next stage takes as input flow on to it, and the rest depart the main line and are answered as they are. It takes the stages' implementations and returns the composition's declaration and its implementation together.

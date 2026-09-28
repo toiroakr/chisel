@@ -96,5 +96,4 @@ Issue #28（複数の behavior が 1 つのレコードのモデルを共有し�
 - `$default` の `r` の型を「書かなかった状態のフィールド」に絞ること
 - 刈ったフィールドを `check` の report に出すこと（今は report から見えない。`check` での確認の失敗だけが見える）
 - `match(...)` の `$default`
-- README / CLAUDE.md への記載
 - 既存の問題（PoC とは無関係）：`approve` の guard `amount <= limit` の境界（2 つの位置の差）の行は、答え済みの行が 0 のとき `generate` から before / after のどちらでも出なかった。答え済みの行を足すと `check` では ON / OFF / IN / OUT が出る。
