@@ -249,3 +249,33 @@ describe("what disregards does not hide", () => {
     expect(report.failures).toStrictEqual([]);
   });
 });
+
+describe("disregards reads keys as written", () => {
+  it("keeps a nested field whose path reads like a disregarded key holding a dot", () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", {
+        下書き: object({ "注文.メモ": boolean(), 注文: object({ メモ: boolean() }) }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 下書き: r => [r["注文.メモ"]] },
+    });
+
+    expect(generate(承認する).rows.map(row => row.name)).toStrictEqual([
+      "承認する: 下書き",
+      "承認する: @下書き.注文.メモ = true",
+    ]);
+  });
+});
+
+describe("a case named $default", () => {
+  it("is refused, since $default names every case left out", () => {
+    expect(() =>
+      behavior("承認する", {
+        input: variants("状態", { $default: object({}) }),
+        result: object({}),
+        effects: variants("種類", {}),
+      }),
+    ).toThrow("承認する cannot take a case named $default");
+  });
+});

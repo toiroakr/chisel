@@ -28,6 +28,7 @@ export type Position = DividedPosition | UndividedPosition;
 export interface DividedPosition {
   readonly kind: "divided";
   readonly path: string;
+  readonly segments: readonly string[];
   readonly classes: readonly string[];
   readonly excluded: readonly string[];
   readonly borders: readonly Border[];
@@ -51,6 +52,7 @@ export function coordinatesIn(
 export interface UndividedPosition {
   readonly kind: "not-derivable" | "bounded";
   readonly path: string;
+  readonly segments: readonly string[];
   readonly borders: readonly Border[];
   valuesIn(given: unknown): readonly unknown[];
   write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
@@ -60,6 +62,10 @@ interface Focus {
   reach(given: unknown): readonly unknown[];
   update(given: unknown, change: (value: unknown) => unknown): unknown;
 }
+
+// Segments rather than one rendered string, so a key holding "." or "[]" never
+// reads as the nested path it happens to spell.
+type Trail = readonly string[];
 
 interface Reading {
   readonly containers: boolean;
@@ -71,7 +77,7 @@ export function positionsOf(
 ): readonly Position[] {
   return underCases(
     input,
-    "",
+    [],
     {
       reach: given => [given],
       update: (given, change) => change(given),
@@ -82,14 +88,14 @@ export function positionsOf(
 
 function underCases(
   schema: AnyVariantsSchema,
-  path: string,
+  path: Trail,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
 ): Position[] {
   const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
   return schema.variantTags.flatMap(tag =>
-    fieldsOf(schema.variants[tag] as ObjectSchema<ObjectShape>, `${path}@${tag}`, {
+    fieldsOf(schema.variants[tag] as ObjectSchema<ObjectShape>, [...path, `@${tag}`], {
       reach: given => focus.reach(given).filter(value => tagOf(schema, value) === tag),
       update: (given, change) =>
         focus.update(given, value =>
@@ -111,7 +117,7 @@ export function excludedCases(schema: AnyVariantsSchema, inherited: readonly Rul
 
 function fieldsOf(
   schema: ObjectSchema<ObjectShape>,
-  path: string,
+  path: Trail,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
@@ -120,7 +126,7 @@ function fieldsOf(
   return Object.entries(schema.shape).flatMap(([key, field]) =>
     positionAt(
       field,
-      `${path}.${key}`,
+      [...path, `.${key}`],
       {
         reach: given =>
           focus.reach(given).map(value => (value as Readonly<Record<string, unknown>>)[key]),
@@ -149,7 +155,7 @@ function fieldsOf(
 // rather than read back from `path`, since a key may itself hold ".", "[]" or "?".
 function positionAt(
   schema: AnySchema,
-  path: string,
+  path: Trail,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
@@ -171,7 +177,7 @@ function positionAt(
       ),
       ...positionAt(
         inner,
-        `${path}?`,
+        [...path, "?"],
         {
           reach: given => focus.reach(given).filter(value => value !== undefined),
           update: (given, change) =>
@@ -194,7 +200,7 @@ function positionAt(
   }
   if (schema.kind === "array") {
     const element = (schema as ArraySchema<unknown>).element;
-    const elements = positionAt(element, `${path}[]`, {
+    const elements = positionAt(element, [...path, "[]"], {
       reach: given => focus.reach(given).flatMap(value => (Array.isArray(value) ? value : [])),
       update: (given, change) =>
         focus.update(given, value => {
@@ -205,7 +211,7 @@ function positionAt(
     return withOwnBorders(path, borders, focus, elements, reading);
   }
   if (schema.kind === "record") {
-    const values = positionAt((schema as RecordSchema<unknown>).value, `${path}{}`, {
+    const values = positionAt((schema as RecordSchema<unknown>).value, [...path, "{}"], {
       reach: given =>
         focus
           .reach(given)
@@ -249,7 +255,8 @@ function positionAt(
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
-      path,
+      path: path.join(""),
+      segments: path,
       borders,
       valuesIn: focus.reach,
       write: writer(focus),
@@ -258,7 +265,7 @@ function positionAt(
 }
 
 function withOwnBorders(
-  path: string,
+  path: Trail,
   borders: readonly Border[],
   focus: Focus,
   inner: readonly Position[],
@@ -270,7 +277,8 @@ function withOwnBorders(
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
-      path,
+      path: path.join(""),
+      segments: path,
       borders,
       valuesIn: focus.reach,
       write: writer(focus),
@@ -311,7 +319,7 @@ export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrie
 }
 
 function divided(
-  path: string,
+  path: Trail,
   classes: readonly string[],
   focus: Focus,
   classOf: (value: unknown) => string | undefined,
@@ -323,7 +331,8 @@ function divided(
 ): DividedPosition {
   return {
     kind: "divided",
-    path,
+    path: path.join(""),
+    segments: path,
     classes: [...classes],
     excluded: classes.filter(className =>
       refusal.rules.some(rule => !holds(rule, refusal.sample(className))),

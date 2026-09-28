@@ -246,6 +246,9 @@ export function behavior<
   ) => readonly EnsuresClause[];
   readonly disregards?: Disregards<NoInfer<InputSchema>>;
 }): Behavior<InputSchema, ResultSchema, EffectSchema, Requires> {
+  if (options.input.variantTags.includes("$default")) {
+    throw new SpecificationError(`${name} cannot take a case named $default`);
+  }
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
   const repeated = clauses.find(
     (clause, index) => clauses.findIndex(other => other.name === clause.name) !== index,

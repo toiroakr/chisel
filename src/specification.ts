@@ -1334,14 +1334,12 @@ function coverage(
 
 function isDisregarded(definition: AnyBehavior, position: Position): boolean {
   return Object.entries(definition.disregards).some(([tag, paths]) =>
-    paths.some(keys =>
-      isUnder(position.path, `@${tag}${keys.map(key => `.${key}`).join("")}`),
-    ),
+    paths.some(keys => isUnder(position, [`@${tag}`, ...keys.map(key => `.${key}`)])),
   );
 }
 
-function isUnder(path: string, prefix: string): boolean {
-  return path === prefix || (path.startsWith(prefix) && /^[.[?@{]/.test(path.slice(prefix.length)));
+function isUnder(position: Position, prefix: readonly string[]): boolean {
+  return prefix.every((segment, index) => position.segments[index] === segment);
 }
 
 function measuredPositionsOf(definition: AnyBehavior): readonly Position[] {
@@ -1360,7 +1358,7 @@ async function disregardBroken(
   for (const position of positionsOf(definition.input)) {
     if (
       position.kind !== "divided" ||
-      !isUnder(position.path, `@${tag}`) ||
+      !isUnder(position, [`@${tag}`]) ||
       !isDisregarded(definition, position)
     ) {
       continue;
