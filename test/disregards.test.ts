@@ -201,3 +201,51 @@ describe("check holds an implementation to what its behavior disregards", () => 
     expect(report.failures).toStrictEqual([]);
   });
 });
+
+describe("what disregards does not hide", () => {
+  it("still reports a disregarded field the invariants leave empty as a model error", async () => {
+    const 数量を決める = behavior("数量を決める", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int().refine(v => v.$gte(10)).refine(v => v.$lte(5)) }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.数量] },
+    });
+
+    const report = await check(spec("数量", { examples: examples(数量を決める, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([
+      "@入力済み.数量: 不変条件を満たす値がありません (invariant $ >= 10, invariant $ <= 5)",
+    ]);
+  });
+
+  it("does not move a row into another case whose name begins with its own", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", {
+        下書き: object({ 至急: boolean() }),
+        下書き2: object({ 至急: boolean() }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r] },
+    });
+    const 状態で答える = implement(承認する, {
+      cases: {
+        下書き: action("下書き", { run: () => ({ result: {}, effects: [] }) }),
+        下書き2: action("下書き2", { run: () => { throw new Error("下書き2 に移された"); } }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          下書き: { given: { 状態: "下書き", 至急: false }, expect: { result: {}, effects: [] } },
+        }),
+        implementation: 状態で答える,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+});

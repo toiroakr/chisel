@@ -13,7 +13,9 @@ Issue #28（複数の behavior が 1 つのレコードのモデルを共有し�
 
 ### ブランチ
 
-- worktree の作成時は `poc/disregards` という名前で切った。元セッションの指示で `poc/issue-28-shared-model` に変更し、`git branch --unset-upstream` で origin/main への upstream を外した。push する場合は `git push -u origin poc/issue-28-shared-model` で新しいリモートブランチに出す（main には push しない）。
+- worktree の作成時は `poc/disregards` という名前で切った。元セッションの指示で `poc/issue-28-shared-model` に変更し、`git branch --unset-upstream` で origin/main への upstream を外した。
+- `git push -u origin poc/issue-28-shared-model` で新しいリモートブランチに push した。main には push していない。PR は作っていない。
+- コミット：`f290d14`（disregards）→ `44316cf`（cases.$default）→ `64192ce`（check での確認、例、このメモ）→ そのあとに、advisor の指摘を受けた修正のコミット。
 
 ### `disregards`
 
@@ -24,6 +26,8 @@ Issue #28（複数の behavior が 1 つのレコードのモデルを共有し�
 - **型の書き方の落とし穴（Why not のメモ）**：`{ [Tag in Tags]?: ... } & { $default?: ... }` という交差型にすると、`behavior()` の呼び出しの中で `$default` の `r` が `TermOf<never> | TermOf<...>` の union になり、フィールドを指せなかった（型だけを取り出すと正しいのに、呼び出しの文脈で型付けすると壊れる）。`[Key in Tags | "$default"]?` の 1 つの mapped type にしたら直った。
 - **`$each` は作っていない**：配列の要素のフィールド（`r.明細.$each.領収書`）を指す手段は足していない。刈れるのは、フィールド全体（`r.明細`）か、配列を通らない入れ子のフィールドまで。
 - **`compose`**：合成した behavior は、最初の stage の `disregards` をそのまま引き継ぐ（合成の入力は最初の stage の入力なので）。
+- **`Behavior.disregards` は省略不可のフィールドにした**：`behavior()` が必ず `{}` 以上を入れる。計測する側が `undefined` を気にしなくて済むようにするため。その代わり、`Behavior` を自分で組み立てる `composition.ts` にも足す必要があった（`dependency.ts` の `kind: "behavior"` は型の判定で、組み立てではないので触っていない）。
+- **invariant の矛盾（`modelIssues`）は刈らない**：最初は `check` の `positions` をまとめて刈った位置に差し替えたので、刈ったフィールドの invariant が矛盾していても（`int().min(10).max(5)` など）、`modelIssues` から消えていた。モデルの矛盾は behavior がそのフィールドを見るかどうかと関係ない事実なので、`modelIssues` だけは全フィールドから作るように直した（advisor の指摘。テストあり）。
 
 ### `cases.$default`
 
@@ -44,11 +48,15 @@ Issue #28（複数の behavior が 1 つのレコードのモデルを共有し�
 
 - 答え済みの行で、実装の答えが期待どおりだったとき、disregards にしたフィールドのうち値の種類で分かれるもの（boolean、省略可能、sum）について、行の値をほかの種類に差し替えて実装を走らせ直す。答えが変わるか、エラーになったら、`failures` に `<behavior> disregards <path>, but its answer changed when it was <class>` を追加する。
 - 新しい report の項目を作らず、既存の `failures` に載せた理由：`adequate` が自然に false になり、`check --json` の閉じた schema（`schema/report.schema.json`）も変えずに済むため。
+- **修正した不具合**：確認の対象を「行の状態の下にある位置」に絞る判定を、最初は前方一致（`startsWith("@下書き")`）で書いていた。そのため、状態 `下書き` の行に対して `@下書き2.…` の位置まで選んでしまい、行を `下書き2` の状態に書き換えて走らせ、答えが変わったと誤って報告していた。`disregards` の判定と同じ境界つきの一致（`isUnder`）に揃えた（advisor の指摘。テストあり）。
 - 確かめるのは値の種類で分かれる位置だけで、`int().min(0)` のような invariant の境界点（0 ちょうど、など）への差し替えはしていない。
 - 経費精算の例の `approve` に答え済みの行を 6 行足して `check` したところ、誤検知は 0 件だった。
 
 ## 結果（経費精算の例：`examples/expense-report/`）
 
+- **引き継ぎの指示から変えた点**：
+  - 領収書 `receipt` は、指示では省略可能な string だったが、`c.boolean()`（領収書が付いているか）に変えた。Chisel では「比べる相手が省略されているとき、比較は成り立つ」ので、`submit` の guard を `line.receipt.$ne("")` と書くと、領収書のない宿泊の明細でも guard が成り立ってしまい、「宿泊には領収書が要る」を表せなかったため。型エラーが出たからではない。
+  - 指示にない `amount: int().min(0)`（明細の金額）と `urgent: c.boolean()`（submitted だけの至急フラグ）を足した。前者は invariant の境界の行（`IN (> 0)`）がどう刈られるかを、後者は「その状態にしかないフィールド」が `$default` でどう扱われるかを見るため。
 - モデル：`model.ts` に 5 状態（draft / submitted / approved / returned / settled）の `Report`。明細 `lines[]` は、費目 `category`（LODGING / TRANSPORT / MEAL）、金額 `amount: int().min(0)`、領収書の有無 `receipt: boolean()` を持つ。submitted だけが至急フラグ `urgent: boolean()` を持つ。
 - behavior は 3 つ。全部 `input: Report` を共有する。
   - `submit`：draft で、宿泊の明細すべてに領収書があれば提出、それ以外は拒否

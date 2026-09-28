@@ -576,7 +576,7 @@ export async function check(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
-  const modelIssues = positions.flatMap(position => {
+  const modelIssues = positionsOf(definition.input).flatMap(position => {
     const emptied = emptiedBy(position.borders);
     return emptied === undefined
       ? []
@@ -1334,14 +1334,14 @@ function coverage(
 
 function isDisregarded(definition: AnyBehavior, position: Position): boolean {
   return Object.entries(definition.disregards).some(([tag, paths]) =>
-    paths.some(keys => {
-      const prefix = `@${tag}${keys.map(key => `.${key}`).join("")}`;
-      return (
-        position.path === prefix ||
-        (position.path.startsWith(prefix) && /^[.[?@{]/.test(position.path.slice(prefix.length)))
-      );
-    }),
+    paths.some(keys =>
+      isUnder(position.path, `@${tag}${keys.map(key => `.${key}`).join("")}`),
+    ),
   );
+}
+
+function isUnder(path: string, prefix: string): boolean {
+  return path === prefix || (path.startsWith(prefix) && /^[.[?@{]/.test(path.slice(prefix.length)));
 }
 
 function measuredPositionsOf(definition: AnyBehavior): readonly Position[] {
@@ -1360,7 +1360,7 @@ async function disregardBroken(
   for (const position of positionsOf(definition.input)) {
     if (
       position.kind !== "divided" ||
-      !position.path.startsWith(`@${tag}`) ||
+      !isUnder(position.path, `@${tag}`) ||
       !isDisregarded(definition, position)
     ) {
       continue;
