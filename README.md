@@ -47,6 +47,24 @@ export const cancelOrder = c.behavior("cancel-order", {
 });
 ```
 
+Where several behaviors work on one record, its model can be written once. `states(discriminant, [tags], shape)` is a `variants` whose every case holds the same `shape`: the states are the cases a behavior is measured over, and a field a state may lack is `.optional()`. A behavior then takes the fields it reads with `pick`, which keeps every case and drops the rest, so no row is asked for at a field it never reads, while a state added to the model reaches every behavior:
+
+```ts
+const Report = c.states("status", ["draft", "submitted", "approved"], {
+  applicant: c.string(),
+  amount: c.int(),
+  approver: c.string().optional(),
+});
+
+export const approve = c.behavior("approve", {
+  input: Report.pick("amount", "approver"),
+  result: ApproveResult,
+  effects: ApproveEffect,
+});
+```
+
+`pick` is on `object` too. It keeps the invariants that read only the fields kept (and, on a sum, its discriminant), and naming a field no case declares fails to compile.
+
 ## 2. Generate unanswered examples
 
 ```sh

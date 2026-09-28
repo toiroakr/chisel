@@ -12,6 +12,7 @@ export {
   number,
   object,
   record,
+  states,
   string,
   time,
   variants,

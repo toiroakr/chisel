@@ -1,6 +1,6 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { InvariantRule, Rule, TermOf } from "./rule.js";
-import { conjuncts, describeRule, holds, satisfy, selfTerm } from "./rule.js";
+import { conjuncts, describeRule, holds, rootsRead, satisfy, selfTerm } from "./rule.js";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -116,6 +116,8 @@ export interface ObjectSchema<Shape extends ObjectShape>
   extends Schema<InferShape<Shape>> {
   readonly kind: "object";
   readonly shape: Shape;
+  // Keeps the fields named and the invariants that read nothing else.
+  pick<const Keys extends keyof Shape & string>(...keys: Keys[]): ObjectSchema<Pick<Shape, Keys>>;
 }
 
 export type VariantTable = Readonly<Record<string, ObjectSchema<ObjectShape>>>;
@@ -134,6 +136,18 @@ export type VariantValue<
   Tag extends keyof Variants & string,
 > = Readonly<Record<Discriminant, Tag>> & Infer<Variants[Tag]>;
 
+type ShapeOf<Variant> = Variant extends ObjectSchema<infer Shape> ? Shape : never;
+
+type FieldOf<Variants extends VariantTable> = {
+  [Tag in keyof Variants]: keyof ShapeOf<Variants[Tag]> & string;
+}[keyof Variants];
+
+type PickedVariants<Variants extends VariantTable, Keys extends string> = {
+  readonly [Tag in keyof Variants]: ObjectSchema<
+    Pick<ShapeOf<Variants[Tag]>, Keys & keyof ShapeOf<Variants[Tag]>>
+  >;
+};
+
 export interface VariantsSchema<
   Discriminant extends string,
   Variants extends VariantTable,
@@ -145,6 +159,11 @@ export interface VariantsSchema<
   placeholderFor<Tag extends keyof Variants & string>(
     tag: Tag,
   ): VariantValue<Discriminant, Variants, Tag>;
+  // Keeps every case, each with the named fields it declares, and the
+  // invariants that read nothing else.
+  pick<const Keys extends FieldOf<Variants>>(
+    ...keys: Keys[]
+  ): VariantsSchema<Discriminant, PickedVariants<Variants, Keys>>;
 }
 
 export type AnyVariantsSchema = VariantsSchema<any, any>;
@@ -170,7 +189,7 @@ function invalid(path: string, message: string): ValidationResult<never> {
 
 type SchemaCore<S extends AnySchema> = Omit<
   S,
-  "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
+  "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length" | "pick"
 >;
 
 const ORDERED_KINDS = new Set(["number", "integer", "instant", "date", "time", "datetime"]);
@@ -217,7 +236,46 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       length: (length: number) => refine(v => v.$length().$eq(length)),
     });
   }
+  if (core.kind === "object") {
+    const { shape } = core as unknown as ObjectSchema<ObjectShape>;
+    Object.assign(schema, {
+      pick: (...keys: string[]) => {
+        const unknown = keys.find(key => !Object.hasOwn(shape, key));
+        if (unknown !== undefined) {
+          throw new Error(`pick names ${unknown}, which the object does not declare`);
+        }
+        return carrying(object(Object.fromEntries(keys.map(key => [key, shape[key]!]))), invariants, keys);
+      },
+    });
+  }
+  if (core.kind === "variants") {
+    const { discriminant, variants: table } = core as unknown as AnyVariantsSchema;
+    const cases = Object.entries(table as VariantTable);
+    Object.assign(schema, {
+      pick: (...keys: string[]) => {
+        const unknown = keys.find(key => cases.every(([, variant]) => !Object.hasOwn(variant.shape, key)));
+        if (unknown !== undefined) {
+          throw new Error(`pick names ${unknown}, which no case declares`);
+        }
+        const picked = cases.map(([tag, variant]) => [
+          tag,
+          variant.pick(...keys.filter(key => Object.hasOwn(variant.shape, key))),
+        ]);
+        return carrying(variants(discriminant, Object.fromEntries(picked)), invariants, [discriminant, ...keys]);
+      },
+    });
+  }
   return schema as unknown as S;
+}
+
+// An invariant reading a field pick left out cannot be held any more, so only
+// those reading the fields kept (or an element of one) come along.
+function carrying<S extends AnySchema>(schema: S, invariants: readonly Rule[], kept: readonly string[]): S {
+  return invariants
+    .filter(rule =>
+      [...rootsRead(rule)].every(root => root === undefined || root.startsWith("#each") || kept.includes(root)),
+    )
+    .reduce<S>((carried, rule) => carried.refine(() => rule), schema);
 }
 
 export function string(): StringSchema {
@@ -523,6 +581,28 @@ export function variants<
       Tag
     >;
   }
+}
+
+// One shape in every state: the states are the cases a use case is measured
+// over, and which fields a state holds is left to the fields' own optionality.
+export function states<
+  const Discriminant extends string,
+  const Tag extends string,
+  const Shape extends ObjectShape,
+>(
+  discriminant: Discriminant,
+  tags: readonly [Tag, ...Tag[]],
+  shape: Shape,
+): VariantsSchema<Discriminant, { readonly [State in Tag]: ObjectSchema<Shape> }> {
+  const repeated = tags.find((tag, index) => tags.indexOf(tag) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`states names ${repeated} twice`);
+  }
+  const each = object(shape);
+  return variants(
+    discriminant,
+    Object.fromEntries(tags.map(tag => [tag, each])) as { readonly [State in Tag]: ObjectSchema<Shape> },
+  );
 }
 
 export function isVariantsSchema(schema: AnySchema): schema is AnyVariantsSchema {

@@ -10,7 +10,9 @@ import {
   literal,
   number,
   object,
+  positionsOf,
   record,
+  states,
   string,
   time,
   variants,
@@ -520,5 +522,115 @@ describe("Tags and VariantOf", () => {
     };
 
     expect(variant.url).toBe("https://example.com");
+  });
+});
+
+describe("pick", () => {
+  it("keeps only the fields named, refusing the ones left out", () => {
+    const Report = object({ applicant: string(), amount: int(), urgent: boolean() }).pick("amount");
+
+    expect([
+      Report.parse({ amount: 3000 }),
+      Report.parse({ amount: 3000, urgent: true }),
+    ]).toStrictEqual([
+      { success: true, value: { amount: 3000 } },
+      { success: false, issues: [{ path: "$.urgent", message: "Unexpected key" }] },
+    ]);
+  });
+
+  it("keeps the invariants that read only the fields kept", () => {
+    const Report = object({ amount: int(), limit: int(), note: string() })
+      .refine(v => v.amount.$lte(v.limit))
+      .refine(v => v.note.$length().$gte(1));
+
+    expect([
+      Report.pick("amount", "limit").parse({ amount: 8000, limit: 5000 }),
+      Report.pick("amount").parse({ amount: 8000 }),
+    ]).toStrictEqual([
+      { success: false, issues: [{ path: "$", message: "Invariant violated: $.amount <= $.limit" }] },
+      { success: true, value: { amount: 8000 } },
+    ]);
+  });
+
+  it("keeps every case of a sum, each with the fields named that it declares", () => {
+    const Report = variants("status", {
+      draft: object({ amount: int() }),
+      submitted: object({ amount: int(), submittedOn: date() }),
+    }).pick("submittedOn");
+
+    expect({
+      tags: Report.variantTags,
+      draft: Report.parse({ status: "draft" }),
+      submitted: Report.parse({ status: "submitted", submittedOn: Temporal.PlainDate.from("2026-09-28") }),
+    }).toStrictEqual({
+      tags: ["draft", "submitted"],
+      draft: { success: true, value: { status: "draft" } },
+      submitted: {
+        success: true,
+        value: { status: "submitted", submittedOn: Temporal.PlainDate.from("2026-09-28") },
+      },
+    });
+  });
+
+  it("keeps an invariant of a sum on its discriminant", () => {
+    const Report = variants("status", {
+      draft: object({ amount: int() }),
+      settled: object({ amount: int() }),
+    })
+      .refine(v => v.status.$ne("settled"))
+      .pick("amount");
+
+    expect(Report.parse({ status: "settled", amount: 1 }).success).toBe(false);
+  });
+
+  it("leaves no position for a field left out", () => {
+    const Report = states("status", ["draft", "submitted"], { amount: int(), urgent: boolean() });
+
+    expect(positionsOf(Report.pick("amount")).map(position => position.path)).toStrictEqual([
+      "@draft.amount",
+      "@submitted.amount",
+    ]);
+  });
+
+  it("refuses at compile time a field no case declares", () => {
+    const Report = object({ amount: int() });
+
+    // @ts-expect-error the object declares no field named urgent
+    expect(() => Report.pick("urgent")).toThrow(new Error("pick names urgent, which the object does not declare"));
+  });
+});
+
+describe("states", () => {
+  it("gives every state the one shape", () => {
+    const Report = states("status", ["draft", "submitted", "approved"], {
+      amount: int(),
+      approver: string().optional(),
+    });
+
+    expect({
+      tags: Report.variantTags,
+      draft: Report.parse({ status: "draft", amount: 3000, approver: "mgr-1" }),
+      approved: Report.parse({ status: "approved", amount: 3000 }),
+      unknown: Report.parse({ status: "settled", amount: 3000 }).success,
+    }).toStrictEqual({
+      tags: ["draft", "submitted", "approved"],
+      draft: { success: true, value: { status: "draft", amount: 3000, approver: "mgr-1" } },
+      approved: { success: true, value: { status: "approved", amount: 3000 } },
+      unknown: false,
+    });
+  });
+
+  it("types every state with the one shape", () => {
+    const Report = states("status", ["draft", "submitted"], { amount: int() });
+    const submitted: VariantOf<typeof Report, "submitted"> = { status: "submitted", amount: 1 };
+    const tags: Tags<typeof Report>[] = ["draft", "submitted"];
+
+    expect({ submitted, tags }).toStrictEqual({ submitted: { status: "submitted", amount: 1 }, tags: ["draft", "submitted"] });
+  });
+
+  it("refuses a state named twice", () => {
+    expect(() => states("status", ["draft", "draft"], { amount: int() })).toThrow(
+      new Error("states names draft twice"),
+    );
   });
 });

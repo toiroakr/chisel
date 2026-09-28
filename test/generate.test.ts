@@ -13,6 +13,7 @@ import {
   number,
   object,
   record,
+  states,
   string,
   variants,
 } from "../src/index.js";
@@ -361,6 +362,32 @@ describe("guard points generate cannot compose", () => {
       "@入力済み.数量 − @入力済み.上限 ON (= 0)",
       "@入力済み.数量 − @入力済み.上限 IN (< 0)",
       "@入力済み.数量 − @入力済み.上限 OUT (> 1)",
+    ]);
+  });
+});
+
+describe("a behavior over some fields of a model", () => {
+  const 報告書 = states("状態", ["下書き", "申請中"], { 金額: int(), 至急: boolean() });
+  const 結果 = variants("結果", { 承認: object({}) });
+  const 作用 = variants("種類", {});
+
+  it("asks for rows at every field of the model when it takes the model whole", () => {
+    const 承認する = behavior("承認する", { input: 報告書, result: 結果, effects: 作用 });
+
+    expect(generate(承認する).rows.map(row => row.name)).toStrictEqual([
+      "承認する: 下書き",
+      "承認する: 申請中",
+      "承認する: @下書き.至急 = true",
+      "承認する: @申請中.至急 = true",
+    ]);
+  });
+
+  it("asks for no row at a field pick left out", () => {
+    const 承認する = behavior("承認する", { input: 報告書.pick("金額"), result: 結果, effects: 作用 });
+
+    expect(generate(承認する).rows.map(row => row.name)).toStrictEqual([
+      "承認する: 下書き",
+      "承認する: 申請中",
     ]);
   });
 });
