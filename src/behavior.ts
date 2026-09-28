@@ -114,7 +114,24 @@ export interface Behavior<
   readonly effects: EffectSchema;
   readonly requires: Requires;
   readonly ensures: readonly EnsuresClause[];
+  readonly disregards: Readonly<Record<string, readonly (readonly string[])[]>>;
 }
+
+type KeysOfEvery<T> = T extends unknown ? keyof T : never;
+
+type ValueAt<T, K> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
+
+type Merged<T, Keys extends PropertyKey> = { readonly [K in Keys]: ValueAt<T, K> };
+
+type Fielded<T> = Merged<T, KeysOfEvery<T>>;
+
+type Disregarded<T> = (input: TermOf<T>) => readonly Term<unknown>[];
+
+export type Disregards<InputSchema extends AnyVariantsSchema> = {
+  readonly [Key in Tags<InputSchema> | "$default"]?: Key extends Tags<InputSchema>
+    ? Disregarded<VariantOf<InputSchema, Key>>
+    : Disregarded<Fielded<Infer<InputSchema>>>;
+};
 
 export type AnyBehavior = Behavior<AnyVariantsSchema, Schema<unknown>, AnyVariantsSchema, Requirements>;
 
@@ -227,6 +244,7 @@ export function behavior<
   readonly ensures?: (
     clause: EnsuresBuilder<Infer<InputSchema>, ResultSchema>,
   ) => readonly EnsuresClause[];
+  readonly disregards?: Disregards<NoInfer<InputSchema>>;
 }): Behavior<InputSchema, ResultSchema, EffectSchema, Requires> {
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
   const repeated = clauses.find(
@@ -251,7 +269,37 @@ export function behavior<
     effects: options.effects,
     requires: options.requires ?? ({} as Requires),
     ensures: clauses,
+    disregards: disregardedPaths(name, options.input, options.disregards ?? {}),
   };
+}
+
+function disregardedPaths(
+  name: string,
+  input: AnyVariantsSchema,
+  written: Readonly<Record<string, ((input: never) => readonly Term<unknown>[]) | undefined>>,
+): Readonly<Record<string, readonly (readonly string[])[]>> {
+  const pathsOf = (builder: (input: never) => readonly Term<unknown>[]) =>
+    builder(selfTerm() as never).map(term => termData(term).path);
+  const byDefault = written.$default === undefined ? [] : pathsOf(written.$default);
+  const covered = input.variantTags.filter(tag => written[tag] === undefined);
+  const declares = (tag: string, keys: readonly string[]) =>
+    schemaAtPath(input.variants[tag] as Schema<unknown>, keys) !== undefined;
+  const stray = byDefault.find(keys => !covered.some(tag => declares(tag, keys)));
+  if (stray !== undefined) {
+    throw new SpecificationError(
+      `${name} disregards ${stray.join(".")}, which no case $default covers declares`,
+    );
+  }
+  return Object.fromEntries(
+    input.variantTags.flatMap(tag => {
+      const builder = written[tag];
+      if (builder !== undefined) {
+        return [[tag, pathsOf(builder)]];
+      }
+      const paths = byDefault.filter(keys => declares(tag, keys));
+      return paths.length === 0 ? [] : [[tag, paths]];
+    }),
+  );
 }
 
 function ensuresBuilder<Input, ResultSchema extends Schema<unknown>>(): EnsuresBuilder<

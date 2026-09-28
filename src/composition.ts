@@ -171,6 +171,7 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
     effects: mergedEffects(first, second),
     requires: mergedRequires(first, second),
     ensures: [],
+    disregards: first.disregards,
     pair: [first, second],
     departed: [...departing, ...departedOf(second)],
   };

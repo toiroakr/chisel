@@ -335,7 +335,7 @@ export async function check(
   const verifiedResults = new Set<string>();
   const observedEffects = new Set<string>();
   const verifiedEffects = new Set<string>();
-  const positions = positionsOf(definition.input);
+  const positions = measuredPositionsOf(definition);
   const coveredClasses = positions.map(() => new Set<string>());
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
@@ -825,7 +825,7 @@ export function generate(
     });
   }
 
-  for (const position of positionsOf(definition.input)) {
+  for (const position of measuredPositionsOf(definition)) {
     if (position.kind !== "divided") {
       continue;
     }
@@ -848,7 +848,7 @@ export function generate(
     }
   }
 
-  for (const position of positionsOf(definition.input)) {
+  for (const position of measuredPositionsOf(definition)) {
     for (const border of position.borders) {
       for (const point of border.points) {
         if (point.status !== "owed" || point.witness === undefined) {
@@ -1310,4 +1310,16 @@ function coverage(
     excluded: all.filter(value => excluded.includes(value)),
     total: counted.length,
   };
+}
+
+function measuredPositionsOf(definition: AnyBehavior): readonly Position[] {
+  const disregarded = Object.entries(definition.disregards).flatMap(([tag, paths]) =>
+    paths.map(keys => `@${tag}${keys.map(key => `.${key}`).join("")}`),
+  );
+  return positionsOf(definition.input).filter(
+    position =>
+      !disregarded.some(
+        prefix => position.path === prefix || /^[.[?@{]/.test(position.path.slice(prefix.length)) && position.path.startsWith(prefix),
+      ),
+  );
 }
