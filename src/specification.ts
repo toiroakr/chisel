@@ -30,8 +30,8 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { describeRule, describeTerm, isTerm, termData } from "./rule.js";
-import type { Term } from "./rule.js";
+import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
+import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
 import { feasibilityOf } from "./feasibility.js";
@@ -342,6 +342,7 @@ export async function check(
   const positions = measuredPositionsOf(
     definition,
     new Set(guardPartitions.map(partition => partition.path)),
+    guardReadSegmentsOf(specification.implementation),
   );
   const coveredClasses = positions.map(() => new Set<string>());
   const answeredGivens: unknown[] = [];
@@ -836,6 +837,7 @@ export function generate(
       partition => partition.path,
     ),
   );
+  const guardRead = guardReadSegmentsOf(implementation);
   const refused = excludedCases(definition.input);
   for (const tag of definition.input.variantTags.filter(
     tag => !existing.has(tag) && !refused.includes(tag),
@@ -847,7 +849,7 @@ export function generate(
     });
   }
 
-  for (const position of measuredPositionsOf(definition, guardDivided)) {
+  for (const position of measuredPositionsOf(definition, guardDivided, guardRead)) {
     if (position.kind !== "divided") {
       continue;
     }
@@ -870,7 +872,7 @@ export function generate(
     }
   }
 
-  for (const position of measuredPositionsOf(definition, guardDivided)) {
+  for (const position of measuredPositionsOf(definition, guardDivided, guardRead)) {
     for (const border of position.borders) {
       for (const point of border.points) {
         if (point.status !== "owed" || point.witness === undefined) {
@@ -1360,20 +1362,81 @@ function isDisregarded(definition: AnyBehavior, position: Position): boolean {
 // A term steps through an optional or a nested case without naming it, so the
 // markers for those are left out before its keys are compared with a position's.
 function isUnder(position: Position, prefix: readonly string[]): boolean {
-  const [inputCase, ...rest] = position.segments;
-  const named = [inputCase, ...rest.filter(segment => segment !== "?" && !segment.startsWith("@"))];
+  const named = namedSegments(position);
   return prefix.every((segment, index) => named[index] === segment);
 }
 
-// A disregarded position a guard divides is kept rather than dropped, since the
+function segmentsRead(rule: Rule, root: readonly string[], elements: ReadonlyMap<string, readonly string[]>): (readonly string[])[] {
+  const trailOf = (term: unknown): readonly string[] | undefined => {
+    if (!isTerm(term)) {
+      return undefined;
+    }
+    const [head, ...rest] = termData(term).path;
+    if (head === undefined || head === DEPS) {
+      return undefined;
+    }
+    const base = elements.get(head);
+    return base !== undefined
+      ? [...base, ...rest.map(key => `.${key}`)]
+      : [...root, `.${head}`, ...rest.map(key => `.${key}`)];
+  };
+  switch (rule.kind) {
+    case "compare":
+      return [rule.left, rule.right].flatMap(term => {
+        const trail = trailOf(term);
+        return trail === undefined ? [] : [trail];
+      });
+    case "all":
+    case "any": {
+      const of = trailOf(rule.of);
+      return of === undefined
+        ? []
+        : [of, ...segmentsRead(rule.each, root, new Map([...elements, [rule.element, [...of, "[]"]]]))];
+    }
+    case "and":
+    case "or":
+      return rule.rules.flatMap(inner => segmentsRead(inner, root, elements));
+    case "not":
+      return segmentsRead(rule.rule, root, elements);
+  }
+}
+
+function guardReadSegmentsOf(implementation: AnyImplementation | undefined): readonly (readonly string[])[] {
+  if (implementation === undefined) {
+    return [];
+  }
+  return Object.entries(implementation.cases).flatMap(([tag, decision]) => {
+    if (decision.kind !== "rules") {
+      return [];
+    }
+    const root = [`@${tag}`];
+    const matched =
+      typeof decision.otherwise === "function"
+        ? []
+        : [[...root, ...termData(decision.otherwise.on).path.slice(0, -1).map(key => `.${key}`)]];
+    return [...decision.guards.flatMap(item => segmentsRead(item.condition, root, new Map())), ...matched];
+  });
+}
+
+function namedSegments(position: Position): readonly string[] {
+  const [inputCase, ...rest] = position.segments;
+  return [inputCase!, ...rest.filter(segment => segment !== "?" && !segment.startsWith("@"))];
+}
+
+// A disregarded position a guard reads is kept rather than dropped, since the
 // guard's classes are attached to it; only what its type and invariants owe goes.
 function measuredPositionsOf(
   definition: AnyBehavior,
   guardDivided: ReadonlySet<string> = new Set(),
+  guardRead: readonly (readonly string[])[] = [],
 ): readonly Position[] {
   return positionsOf(definition.input).flatMap((position): Position[] => {
     if (!isDisregarded(definition, position)) {
       return [position];
+    }
+    const named = namedSegments(position);
+    if (guardRead.some(trail => isDeepStrictEqual(trail, named))) {
+      return [{ ...position, borders: [] }];
     }
     if (!guardDivided.has(position.path)) {
       return [];
@@ -1501,11 +1564,12 @@ async function disregardBroken(
     };
   }
   for (const { choice, varied } of combinations) {
-    const changed = await runTraced(implementation, varied as never, standIns as never).then(
-      traced => !isDeepStrictEqual(traced.execution, answered),
-      () => true,
+    const outcome = await runTraced(implementation, varied as never, standIns as never).then(
+      (traced): { readonly text: string; readonly error?: string } | undefined =>
+        isDeepStrictEqual(traced.execution, answered) ? undefined : { text: "its answer changed" },
+      (error: unknown) => ({ text: "it threw", error: error instanceof Error ? error.message : String(error) }),
     );
-    if (changed) {
+    if (outcome !== undefined) {
       const moved = axes.flatMap((axis, index) => {
         const move = choice[index];
         return move === undefined ? [] : [{ path: axis.path, label: move.label }];
@@ -1514,9 +1578,9 @@ async function disregardBroken(
         kind: "broken",
         failure: {
           name: row.name,
-          message: `${definition.name} disregards ${moved.map(item => item.path).join(", ")}, but its answer changed when ${moved
+          message: `${definition.name} disregards ${moved.map(item => item.path).join(", ")}, but ${outcome.text} when ${moved
             .map(item => `${item.path} was ${item.label}`)
-            .join(" and ")}`,
+            .join(" and ")}${outcome.error === undefined ? "" : `: ${outcome.error}`}`,
         },
       };
     }

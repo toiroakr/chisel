@@ -642,3 +642,60 @@ describe("the limit on disregarded combinations counts only those the input can 
     ]);
   });
 });
+
+describe("disregards and a guard that reads a field with finite classes", () => {
+  it("still offers the rows for the classes of a disregarded boolean a guard reads", () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 至急: boolean() }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.至急] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("至急でなければ承認", {
+          guards: r => [r.至急.$eq(false).$else(() => ({ result: { 結果: "保留" }, effects: [] }))],
+          run: () => ({ result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    expect(generate(承認する, 実装).rows.map(row => row.name)).toContain("承認する: @提出済み.至急 = true");
+  });
+});
+
+describe("a rerun that throws", () => {
+  it("reports the error a varied row threw rather than a changed answer", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 至急: boolean() }) }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.至急] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("至急は扱えない", {
+          run: r => {
+            if (r.至急) {
+              throw new Error("至急は未対応");
+            }
+            return { result: {}, effects: [] };
+          },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          通常: { given: { 状態: "提出済み", 至急: false }, expect: { result: {}, effects: [] } },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "承認する disregards @提出済み.至急, but it threw when @提出済み.至急 was true: 至急は未対応",
+    ]);
+  });
+});
