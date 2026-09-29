@@ -5,6 +5,7 @@ import {
   behavior,
   boolean,
   check,
+  dependency,
   examples,
   generate,
   implement,
@@ -655,6 +656,30 @@ describe("disregards and a guard that reads a field with finite classes", () => 
       cases: {
         提出済み: action("至急でなければ承認", {
           guards: r => [r.至急.$eq(false).$else(() => ({ result: { 結果: "保留" }, effects: [] }))],
+          run: () => ({ result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    expect(generate(承認する, 実装).rows.map(row => row.name)).toContain("承認する: @提出済み.至急 = true");
+  });
+});
+
+describe("a guard quantifying over a dependency", () => {
+  it("keeps the classes of an input field read inside the quantifier", () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 至急: boolean() }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      requires: { 許可: dependency(array(boolean())) },
+      disregards: { $default: r => [r.至急] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("許可された至急なら承認", {
+          guards: (r, deps) => [
+            deps.許可.$any(value => r.至急.$eq(value)).$else(() => ({ result: { 結果: "保留" }, effects: [] })),
+          ],
           run: () => ({ result: { 結果: "承認" }, effects: [] }),
         }),
       },

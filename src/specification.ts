@@ -1366,7 +1366,13 @@ function isUnder(position: Position, prefix: readonly string[]): boolean {
   return prefix.every((segment, index) => named[index] === segment);
 }
 
-function segmentsRead(rule: Rule, root: readonly string[], elements: ReadonlyMap<string, readonly string[]>): (readonly string[])[] {
+// An element name maps to its trail, or to undefined when the quantifier ranges
+// over something other than the input, such as a value dependency.
+function segmentsRead(
+  rule: Rule,
+  root: readonly string[],
+  elements: ReadonlyMap<string, readonly string[] | undefined>,
+): (readonly string[])[] {
   const trailOf = (term: unknown): readonly string[] | undefined => {
     if (!isTerm(term)) {
       return undefined;
@@ -1375,10 +1381,11 @@ function segmentsRead(rule: Rule, root: readonly string[], elements: ReadonlyMap
     if (head === undefined || head === DEPS) {
       return undefined;
     }
-    const base = elements.get(head);
-    return base !== undefined
-      ? [...base, ...rest.map(key => `.${key}`)]
-      : [...root, `.${head}`, ...rest.map(key => `.${key}`)];
+    if (elements.has(head)) {
+      const base = elements.get(head);
+      return base === undefined ? undefined : [...base, ...rest.map(key => `.${key}`)];
+    }
+    return [...root, `.${head}`, ...rest.map(key => `.${key}`)];
   };
   switch (rule.kind) {
     case "compare":
@@ -1389,9 +1396,12 @@ function segmentsRead(rule: Rule, root: readonly string[], elements: ReadonlyMap
     case "all":
     case "any": {
       const of = trailOf(rule.of);
-      return of === undefined
-        ? []
-        : [of, ...segmentsRead(rule.each, root, new Map([...elements, [rule.element, [...of, "[]"]]]))];
+      const inner = segmentsRead(
+        rule.each,
+        root,
+        new Map([...elements, [rule.element, of === undefined ? undefined : [...of, "[]"]]]),
+      );
+      return of === undefined ? inner : [of, ...inner];
     }
     case "and":
     case "or":
