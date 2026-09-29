@@ -14,9 +14,12 @@ export type ValidationResult<T> =
 export interface Schema<T> {
   readonly kind: string;
   readonly invariants: readonly Rule[];
+  // What the value means, for the people reading the specification.
+  readonly description?: string;
   parse(value: unknown, path?: string): ValidationResult<T>;
   placeholder(name?: string): unknown;
   refine(rule: InvariantRule<T>): this;
+  describe(text: string): this;
   // Typed through `this` rather than T: naming T here would make Schema<T>
   // invariant in T, and StringSchema would stop being an AnySchema.
   optional<Self extends AnySchema>(this: Self): OptionalSchema<Infer<Self>>;
@@ -170,7 +173,7 @@ function invalid(path: string, message: string): ValidationResult<never> {
 
 type SchemaCore<S extends AnySchema> = Omit<
   S,
-  "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
+  "invariants" | "refine" | "describe" | "optional" | "min" | "max" | "gt" | "lt" | "length"
 >;
 
 const ORDERED_KINDS = new Set(["number", "integer", "instant", "date", "time", "datetime"]);
@@ -196,6 +199,9 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
+    },
+    describe(text: string) {
+      return refinable<S>({ ...core, description: text }, invariants);
     },
     optional() {
       return optional(schema as unknown as S);
@@ -419,6 +425,8 @@ function optional<T>(schema: Schema<T>): OptionalSchema<T> {
   return refinable<OptionalSchema<T>>({
     kind: "optional",
     schema,
+    // A field reads the same whether it may be left out or not.
+    ...(schema.description === undefined ? {} : { description: schema.description }),
     parse,
     placeholder: () => undefined,
   });
