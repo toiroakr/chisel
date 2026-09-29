@@ -1387,6 +1387,9 @@ function measuredPositionsOf(
 }
 
 const DISREGARD_COMBINATION_LIMIT = 255;
+// Not the combinations alone: moves are tried before a combination is known to
+// be one the input can hold, so the candidates tried that way are bounded too.
+const DISREGARD_CANDIDATE_LIMIT = 4096;
 
 interface DisregardMove {
   readonly label: string;
@@ -1457,14 +1460,14 @@ async function disregardBroken(
           },
         ];
   });
-  const count = axes.reduce((total, axis) => total * (axis.moves.length + 1), 1) - 1;
-  if (count > DISREGARD_COMBINATION_LIMIT) {
+  const candidates = axes.reduce((total, axis) => total * (axis.moves.length + 1), 1) - 1;
+  if (candidates > DISREGARD_CANDIDATE_LIMIT) {
     return {
       kind: "not checked",
       incompleteness: {
         kind: "disregards not checked",
         subject: row.name,
-        reason: `disregardsの組み合わせが${count}通りあり、上限の${DISREGARD_COMBINATION_LIMIT}通りを超えるため確かめていない`,
+        reason: `disregardsの組み合わせの候補が${candidates}通りあり、上限の${DISREGARD_CANDIDATE_LIMIT}通りを超えるため数えていない`,
       },
     };
   }
@@ -1474,19 +1477,30 @@ async function disregardBroken(
       [[]],
     )
     .filter(choice => choice.some(move => move !== undefined))
+    .flatMap(choice => {
+      const varied = choice.reduce<unknown>((given, move) => (move === undefined ? given : move.apply(given)), row.given);
+      const holds = axes.every((axis, index) => {
+        const move = choice[index];
+        return move === undefined ? axis.unmoved(varied) : move.reached(varied);
+      });
+      return holds && definition.input.parse(varied).success ? [{ choice, varied }] : [];
+    })
     .sort(
       (left, right) =>
-        left.filter(move => move !== undefined).length - right.filter(move => move !== undefined).length,
+        left.choice.filter(move => move !== undefined).length -
+        right.choice.filter(move => move !== undefined).length,
     );
-  for (const choice of combinations) {
-    const varied = choice.reduce<unknown>((given, move) => (move === undefined ? given : move.apply(given)), row.given);
-    const holds = axes.every((axis, index) => {
-      const move = choice[index];
-      return move === undefined ? axis.unmoved(varied) : move.reached(varied);
-    });
-    if (!holds || !definition.input.parse(varied).success) {
-      continue;
-    }
+  if (combinations.length > DISREGARD_COMBINATION_LIMIT) {
+    return {
+      kind: "not checked",
+      incompleteness: {
+        kind: "disregards not checked",
+        subject: row.name,
+        reason: `disregardsの組み合わせが${combinations.length}通りあり、上限の${DISREGARD_COMBINATION_LIMIT}通りを超えるため確かめていない`,
+      },
+    };
+  }
+  for (const { choice, varied } of combinations) {
     const changed = await runTraced(implementation, varied as never, standIns as never).then(
       traced => !isDeepStrictEqual(traced.execution, answered),
       () => true,

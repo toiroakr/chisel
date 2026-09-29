@@ -582,3 +582,63 @@ describe("check holds what disregards drops from a field a guard divides", () =>
     ]);
   });
 });
+
+describe("the limit on disregarded combinations counts only those the input can hold", () => {
+  it("checks a row whose combinations are few once those the input cannot hold are left out", async () => {
+    const 任意の旗 = Object.fromEntries(
+      Array.from({ length: 4 }, (_, index) => [`旗${index + 1}`, boolean().optional()]),
+    );
+    const 受け付ける = behavior("受け付ける", {
+      input: variants("状態", { 提出済み: object(任意の旗) }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 提出済み: r => [r] },
+    });
+    const 実装 = implement(受け付ける, {
+      cases: { 提出済み: action("受け付ける", { run: () => ({ result: {}, effects: [] }) }) },
+    });
+
+    const report = await check(
+      spec("受付", {
+        examples: examples(受け付ける, {
+          旗なし: { given: { 状態: "提出済み" } as never, expect: { result: {}, effects: [] } },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect(report.incompleteness).toStrictEqual([]);
+  });
+
+  it("does not count the combinations of a row whose candidates exceed what it tries", async () => {
+    const 旗 = Object.fromEntries(Array.from({ length: 13 }, (_, index) => [`旗${index + 1}`, boolean()]));
+    const 受け付ける = behavior("受け付ける", {
+      input: variants("状態", { 提出済み: object(旗) }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 提出済み: r => [r] },
+    });
+    const 実装 = implement(受け付ける, {
+      cases: { 提出済み: action("受け付ける", { run: () => ({ result: {}, effects: [] }) }) },
+    });
+
+    const report = await check(
+      spec("受付", {
+        examples: examples(受け付ける, {
+          全部倒れた: {
+            given: {
+              状態: "提出済み",
+              ...Object.fromEntries(Array.from({ length: 13 }, (_, index) => [`旗${index + 1}`, false])),
+            } as never,
+            expect: { result: {}, effects: [] },
+          },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect(report.incompleteness.map(item => item.reason)).toStrictEqual([
+      "disregardsの組み合わせの候補が8191通りあり、上限の4096通りを超えるため数えていない",
+    ]);
+  });
+});
