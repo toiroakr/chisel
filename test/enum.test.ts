@@ -35,6 +35,18 @@ describe("enum", () => {
     });
   });
 
+  it("says what each value means, where it is given", () => {
+    const 状態 = enumOf(["DRAFT", "SUBMITTED"], { labels: { DRAFT: "下書き", SUBMITTED: "申請中" } });
+
+    expect(状態.labels).toStrictEqual({ DRAFT: "下書き", SUBMITTED: "申請中" });
+    expect(状態.parse("DRAFT")).toStrictEqual({ success: true, value: "DRAFT" });
+    expect(状態.parse("下書き").success).toBe(false);
+    expect("labels" in 費目).toBe(false);
+    expect(() => enumOf(["DRAFT"], { labels: { DONE: "完了" } as never })).toThrow(
+      new Error("enum labels DONE, which it does not name"),
+    );
+  });
+
   it("refuses no value, and a value named twice", () => {
     expect(() => enumOf([] as never)).toThrow(new Error("enum names no value"));
     expect(() => enumOf(["交通費", "交通費"])).toThrow(new Error("enum names 交通費 twice"));

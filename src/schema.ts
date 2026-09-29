@@ -75,6 +75,8 @@ export interface DateTimeSchema extends Schema<TemporalTypes.PlainDateTime>, Val
 export interface EnumSchema<T extends string> extends Schema<T> {
   readonly kind: "enum";
   readonly values: readonly T[];
+  // What each value means, where the specification says so.
+  readonly labels?: { readonly [Value in T]?: string };
 }
 
 export interface LiteralSchema<T extends string | number | boolean | null>
@@ -339,7 +341,12 @@ function enumStep(values: readonly string[]): Step {
 
 // Exported as `enum`, a word a function may not be named. Each value is a class
 // of the position the enum stands at, the way a boolean is two.
-export function enumOf<const T extends string>(values: readonly [T, ...T[]]): EnumSchema<T> {
+// What each value means is its second argument, as zod takes its options there:
+// enum(["DRAFT", "SUBMITTED"], { labels: { DRAFT: "下書き", SUBMITTED: "申請中" } }).
+export function enumOf<const T extends string>(
+  values: readonly [T, ...T[]],
+  options: { readonly labels?: { readonly [Value in T]?: string } } = {},
+): EnumSchema<T> {
   if (values.length === 0) {
     throw new Error("enum names no value");
   }
@@ -347,9 +354,15 @@ export function enumOf<const T extends string>(values: readonly [T, ...T[]]): En
   if (repeated !== undefined) {
     throw new Error(`enum names ${repeated} twice`);
   }
+  const { labels } = options;
+  const unknown = Object.keys(labels ?? {}).find(key => !(values as readonly string[]).includes(key));
+  if (unknown !== undefined) {
+    throw new Error(`enum labels ${unknown}, which it does not name`);
+  }
   return refinable<EnumSchema<T>>({
     kind: "enum",
     values,
+    ...(labels === undefined ? {} : { labels }),
     parse,
     placeholder: () => values[0],
   });
