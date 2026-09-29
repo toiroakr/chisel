@@ -141,6 +141,16 @@ describe("chisel check with a composition", () => {
   });
 });
 
+describe("chisel check with disregards it did not check", () => {
+  it("prints each row whose disregarded combinations it did not try, apart from rows it could not run", async () => {
+    const result = await run(["check", fixture("test/fixtures/disregards-not-checked.ts")]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^  ! disregardsを確かめていない行: 全部倒れた — disregardsの組み合わせが511通りあり、上限の255通りを超えるため確かめていない$/m,
+    );
+  });
+});
+
 describe("chisel check with an external implementation", () => {
   it("prints each row it could not run and why", async () => {
     const result = await run(["check", fixture("test/fixtures/external.ts")]);

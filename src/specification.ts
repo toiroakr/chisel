@@ -161,7 +161,7 @@ export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 export type CoverageStatus = "met" | "gap" | "answer owed" | "no row owed" | "undecided";
 
 export interface Incompleteness {
-  readonly kind: "row not run" | "row did not come back";
+  readonly kind: "row not run" | "row did not come back" | "disregards not checked";
   readonly subject: string;
   readonly reason: string;
 }
@@ -541,9 +541,18 @@ export async function check(
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
-          failures.push(
-            ...(await disregardBroken(implementation, row, actual, standIns(row))),
+          const disregard = await disregardBroken(
+            implementation,
+            row,
+            actual,
+            standIns(row),
+            new Set(guardPartitions.map(partition => partition.path)),
           );
+          if (disregard.kind === "broken") {
+            failures.push(disregard.failure);
+          } else if (disregard.kind === "not checked") {
+            incompleteness.push(disregard.incompleteness);
+          }
         }
       }
       const open = openDecisionIn(implementation, error);
@@ -727,7 +736,10 @@ export async function check(
   const verdict: Verdict =
     !adequate || armGap
       ? "not_satisfied"
-      : comparisons.status === "partial" || armUndecided || externals.length > 0
+      : comparisons.status === "partial" ||
+          armUndecided ||
+          externals.length > 0 ||
+          incompleteness.some(item => item.kind === "disregards not checked")
         ? "undetermined"
         : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")
@@ -1361,43 +1373,93 @@ function measuredPositionsOf(
   );
 }
 
+const DISREGARD_COMBINATION_LIMIT = 255;
+
+type DisregardCheck =
+  | { readonly kind: "held" }
+  | { readonly kind: "broken"; readonly failure: ExampleFailure }
+  | { readonly kind: "not checked"; readonly incompleteness: Incompleteness };
+
 async function disregardBroken(
   implementation: AnyImplementation,
   row: Example<AnyBehavior>,
   answered: unknown,
   standIns: unknown,
-): Promise<ExampleFailure[]> {
+  guardDivided: ReadonlySet<string>,
+): Promise<DisregardCheck> {
   const definition = implementation.behavior;
   const tag = tagOf(definition.input, row.given);
-  const failures: ExampleFailure[] = [];
-  for (const position of positionsOf(definition.input)) {
+  const axes = positionsOf(definition.input).flatMap(position => {
     if (
       position.kind !== "divided" ||
       !isUnder(position, [`@${tag}`]) ||
+      guardDivided.has(position.path) ||
       !isDisregarded(definition, position)
     ) {
-      continue;
+      return [];
     }
     const taken = position.classify(row.given);
-    for (const className of position.classes) {
-      if (taken.includes(className) || position.excluded.includes(className)) {
-        continue;
-      }
-      const varied = position.place(row.given, className);
-      if (!definition.input.parse(varied).success) {
-        continue;
-      }
-      const changed = await runTraced(implementation, varied as never, standIns as never).then(
-        traced => !isDeepStrictEqual(traced.execution, answered),
-        () => true,
+    const others = position.classes.filter(
+      className => !taken.includes(className) && !position.excluded.includes(className),
+    );
+    return others.length === 0 ? [] : [{ position, taken, others }];
+  });
+  const count = axes.reduce((total, axis) => total * (axis.others.length + 1), 1) - 1;
+  if (count > DISREGARD_COMBINATION_LIMIT) {
+    return {
+      kind: "not checked",
+      incompleteness: {
+        kind: "disregards not checked",
+        subject: row.name,
+        reason: `disregardsの組み合わせが${count}通りあり、上限の${DISREGARD_COMBINATION_LIMIT}通りを超えるため確かめていない`,
+      },
+    };
+  }
+  const combinations = axes
+    .reduce<(string | undefined)[][]>(
+      (partial, axis) =>
+        partial.flatMap(choice => [undefined, ...axis.others].map(className => [...choice, className])),
+      [[]],
+    )
+    .filter(choice => choice.some(className => className !== undefined))
+    .sort(
+      (left, right) =>
+        left.filter(className => className !== undefined).length -
+        right.filter(className => className !== undefined).length,
+    );
+  for (const choice of combinations) {
+    const varied = axes.reduce<unknown>(
+      (given, axis, index) =>
+        choice[index] === undefined ? given : axis.position.place(given, choice[index]!),
+      row.given,
+    );
+    const holds = axes.every((axis, index) => {
+      const found = axis.position.classify(varied);
+      return choice[index] === undefined
+        ? isDeepStrictEqual(found, axis.taken)
+        : found.includes(choice[index]!);
+    });
+    if (!holds || !definition.input.parse(varied).success) {
+      continue;
+    }
+    const changed = await runTraced(implementation, varied as never, standIns as never).then(
+      traced => !isDeepStrictEqual(traced.execution, answered),
+      () => true,
+    );
+    if (changed) {
+      const moved = axes.flatMap((axis, index) =>
+        choice[index] === undefined ? [] : [{ path: axis.position.path, className: choice[index]! }],
       );
-      if (changed) {
-        failures.push({
+      return {
+        kind: "broken",
+        failure: {
           name: row.name,
-          message: `${definition.name} disregards ${position.path}, but its answer changed when it was ${className}`,
-        });
-      }
+          message: `${definition.name} disregards ${moved.map(item => item.path).join(", ")}, but its answer changed when ${moved
+            .map(item => `${item.path} was ${item.className}`)
+            .join(" and ")}`,
+        },
+      };
     }
   }
-  return failures;
+  return { kind: "held" };
 }

@@ -207,7 +207,7 @@ describe("check holds an implementation to what its behavior disregards", () => 
     expect(report.failures).toStrictEqual([
       {
         name: "通常",
-        message: "承認する disregards @提出済み.至急, but its answer changed when it was true",
+        message: "承認する disregards @提出済み.至急, but its answer changed when @提出済み.至急 was true",
       },
     ]);
   });
@@ -220,6 +220,127 @@ describe("check holds an implementation to what its behavior disregards", () => 
     const report = await check(spec("承認", { examples: 通常の行, implementation: いつも承認 }));
 
     expect(report.failures).toStrictEqual([]);
+  });
+});
+
+describe("check holds disregarded fields together", () => {
+  const 旗 = (count: number) =>
+    object(Object.fromEntries(Array.from({ length: count }, (_, index) => [`旗${index + 1}`, boolean()])));
+  const 承認するを = (count: number) =>
+    behavior("承認する", {
+      input: variants("状態", { 提出済み: 旗(count) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { 提出済み: r => [r] },
+    });
+  const 全部立つと保留 = (定義: ReturnType<typeof 承認するを>) =>
+    implement(定義, {
+      cases: {
+        提出済み: action("全部立つと保留", {
+          run: r =>
+            Object.entries(r).every(([key, value]) => key === "状態" || value === true)
+              ? { result: { 結果: "保留" }, effects: [] }
+              : { result: { 結果: "承認" }, effects: [] },
+        }),
+      },
+    });
+  const 全部倒れた行 = (定義: ReturnType<typeof 承認するを>, count: number) =>
+    examples(定義, {
+      全部倒れた: {
+        given: {
+          状態: "提出済み",
+          ...Object.fromEntries(Array.from({ length: count }, (_, index) => [`旗${index + 1}`, false])),
+        } as never,
+        expect: { result: { 結果: "承認" }, effects: [] },
+      },
+    });
+
+  it("fails a row whose answer changes only when two disregarded fields move together", async () => {
+    const 定義 = 承認するを(2);
+
+    const report = await check(spec("承認", { examples: 全部倒れた行(定義, 2), implementation: 全部立つと保留(定義) }));
+
+    expect(report.failures).toStrictEqual([
+      {
+        name: "全部倒れた",
+        message:
+          "承認する disregards @提出済み.旗1, @提出済み.旗2, but its answer changed when @提出済み.旗1 was true and @提出済み.旗2 was true",
+      },
+    ]);
+  });
+
+  it("fails a row whose answer changes only when three disregarded fields move together", async () => {
+    const 定義 = 承認するを(3);
+
+    const report = await check(spec("承認", { examples: 全部倒れた行(定義, 3), implementation: 全部立つと保留(定義) }));
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "承認する disregards @提出済み.旗1, @提出済み.旗2, @提出済み.旗3, but its answer changed when @提出済み.旗1 was true and @提出済み.旗2 was true and @提出済み.旗3 was true",
+    ]);
+  });
+
+  it("does not try a combination the input cannot hold, such as a field of a case the sum is not in", async () => {
+    const 支払う = behavior("支払う", {
+      input: variants("状態", {
+        確定: object({ 支払: variants("方法", { 現金: object({}), カード: object({ 分割: boolean() }) }) }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 確定: r => [r] },
+    });
+    const 実装 = implement(支払う, {
+      cases: { 確定: action("払う", { run: () => ({ result: {}, effects: [] }) }) },
+    });
+
+    const report = await check(
+      spec("支払", {
+        examples: examples(支払う, {
+          現金: { given: { 状態: "確定", 支払: { 方法: "現金" } }, expect: { result: {}, effects: [] } },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+
+  it("reports a row with more combinations than it tries as not checked, leaving the verdict undetermined", async () => {
+    const 受け付ける = behavior("受け付ける", {
+      input: variants("状態", { 提出済み: 旗(9) }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 提出済み: r => [r] },
+    });
+    const 実装 = implement(受け付ける, {
+      cases: { 提出済み: action("受け付ける", { run: () => ({ result: {}, effects: [] }) }) },
+    });
+
+    const report = await check(
+      spec("受付", {
+        examples: examples(受け付ける, {
+          全部倒れた: {
+            given: {
+              状態: "提出済み",
+              ...Object.fromEntries(Array.from({ length: 9 }, (_, index) => [`旗${index + 1}`, false])),
+            } as never,
+            expect: { result: {}, effects: [] },
+          },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect({ failures: report.failures, incompleteness: report.incompleteness, verdict: report.verdict }).toStrictEqual({
+      failures: [],
+      incompleteness: [
+        {
+          kind: "disregards not checked",
+          subject: "全部倒れた",
+          reason: "disregardsの組み合わせが511通りあり、上限の255通りを超えるため確かめていない",
+        },
+      ],
+      verdict: "undetermined",
+    });
   });
 });
 

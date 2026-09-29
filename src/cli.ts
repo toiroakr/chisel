@@ -188,7 +188,9 @@ function formatReport(report: AdequacyReport): string {
     lines.push(`  ! 制御未決定: ${gap.effect} — ${gap.reason}`);
   }
   for (const item of report.incompleteness) {
-    if (!report.failures.some(failure => failure.name === item.subject)) {
+    if (item.kind === "disregards not checked") {
+      lines.push(`  ! disregardsを確かめていない行: ${item.subject} — ${item.reason}`);
+    } else if (!report.failures.some(failure => failure.name === item.subject)) {
       lines.push(`  ! 実行できなかった行: ${item.subject} — ${item.reason}`);
     }
   }
