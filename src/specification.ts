@@ -546,7 +546,6 @@ export async function check(
             row,
             actual,
             standIns(row),
-            new Set(guardPartitions.map(partition => partition.path)),
           );
           if (disregard.kind === "broken") {
             failures.push(disregard.failure);
@@ -1405,14 +1404,12 @@ async function disregardBroken(
   row: Example<AnyBehavior>,
   answered: unknown,
   standIns: unknown,
-  guardDivided: ReadonlySet<string>,
 ): Promise<DisregardCheck> {
   const definition = implementation.behavior;
   const tag = tagOf(definition.input, row.given);
   const axes = positionsOf(definition.input).flatMap(position => {
     if (
       !isUnder(position, [`@${tag}`]) ||
-      guardDivided.has(position.path) ||
       !isDisregarded(definition, position)
     ) {
       return [];

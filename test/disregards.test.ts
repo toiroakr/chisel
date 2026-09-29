@@ -533,3 +533,52 @@ describe("disregards and fields named like Object.prototype members", () => {
     ).toThrow("承認する disregards toString, which no case $default covers declares");
   });
 });
+
+describe("disregards through a nested sum", () => {
+  it("takes a $default field every case of a nested sum declares", () => {
+    const 支払う = behavior("支払う", {
+      input: variants("状態", {
+        確定: object({
+          支払: variants("方法", { 現金: object({ 参照番号: string() }), カード: object({ 参照番号: string() }) }),
+        }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.支払.参照番号] },
+    });
+
+    expect(支払う.disregards).toStrictEqual({ 確定: [["支払", "参照番号"]] });
+  });
+});
+
+describe("check holds what disregards drops from a field a guard divides", () => {
+  it("fails a row whose answer changes at an invariant border point of a guarded disregarded field", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 金額: int().min(0) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.金額] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("上限内でゼロなら承認", {
+          guards: r => [r.金額.$lte(100).$else(() => ({ result: { 結果: "保留" }, effects: [] }))],
+          run: r => (r.金額 === 0 ? { result: { 結果: "承認" }, effects: [] } : { result: { 結果: "保留" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          ゼロ: { given: { 状態: "提出済み", 金額: 0 }, expect: { result: { 結果: "承認" }, effects: [] } },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "承認する disregards @提出済み.金額, but its answer changed when @提出済み.金額 was IN (> 0)",
+    ]);
+  });
+});

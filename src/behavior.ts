@@ -2,6 +2,9 @@ import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
   Infer,
+  ObjectSchema,
+  ObjectShape,
+  OptionalSchema,
   Schema,
   Tags,
   VariantOf,
@@ -286,7 +289,7 @@ function disregardedPaths(
   const byDefault = written.$default === undefined ? [] : pathsOf(written.$default);
   const covered = input.variantTags.filter(tag => ownAt(written, tag) === undefined);
   const declares = (tag: string, keys: readonly string[]) =>
-    schemaAtPath(input.variants[tag] as Schema<unknown>, keys) !== undefined;
+    reachesPath(input.variants[tag] as Schema<unknown>, keys);
   const stray = byDefault.find(keys => !covered.some(tag => declares(tag, keys)));
   if (stray !== undefined) {
     throw new SpecificationError(
@@ -365,6 +368,29 @@ export function implement<B extends AnyBehavior>(
     cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+// Not schemaAtPath: that stops at a sum so a match selects its discriminant,
+// while a term reaches a field through a nested sum any of whose cases declares it.
+function reachesPath(schema: Schema<unknown>, keys: readonly string[]): boolean {
+  const unwrapped =
+    (schema as { readonly kind?: string }).kind === "optional"
+      ? (schema as OptionalSchema<unknown>).schema
+      : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) {
+    return true;
+  }
+  if (isVariantsSchema(unwrapped)) {
+    return Object.values(unwrapped.variants).some(variant =>
+      reachesPath(variant as Schema<unknown>, keys),
+    );
+  }
+  if ((unwrapped as { readonly kind?: string }).kind !== "object") {
+    return false;
+  }
+  const { shape } = unwrapped as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) && reachesPath(shape[key]!, rest);
 }
 
 // A case may be named like an Object.prototype member, such as toString, so a
