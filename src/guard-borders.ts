@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
@@ -37,6 +38,7 @@ import type {
 
 export interface GuardBorder {
   readonly path: string;
+  readonly segments: readonly string[];
   readonly comparison: CompareRule;
   readonly border: Border;
   readonly origin?: {
@@ -62,8 +64,8 @@ export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
 export function guardBordersOf(implementation: AnyImplementation): readonly GuardBorder[] {
   const input = implementation.behavior.input;
   const positions = positionsOf(input, { containers: true });
-  const at = (path: string): Position | undefined =>
-    positions.find(position => position.path === path);
+  const at = (segments: readonly string[]): Position | undefined =>
+    positions.find(position => isDeepStrictEqual(position.segments, segments));
   return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
@@ -83,13 +85,13 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
   );
 }
 
-type PositionAt = (path: string) => Position | undefined;
+type PositionAt = (segments: readonly string[]) => Position | undefined;
 
 export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
   const input = definition.input;
   const positions = positionsOf(input);
-  const at = (path: string): Position | undefined =>
-    positions.find(position => position.path === path);
+  const at = (segments: readonly string[]): Position | undefined =>
+    positions.find(position => isDeepStrictEqual(position.segments, segments));
   return definition.ensures.flatMap(clause =>
     conjuncts(clause.rule).flatMap(part => {
       const onInput = unrooted(part);
@@ -125,12 +127,14 @@ export interface GuardClass {
 
 export interface GuardPartition {
   readonly path: string;
+  readonly segments: readonly string[];
   readonly classes: readonly GuardClass[];
   readonly excluded: readonly string[];
 }
 
 interface Threshold {
   readonly path: string;
+  readonly segments: readonly string[];
   readonly schema: AnySchema;
   readonly inherited: readonly Rule[];
   readonly rule: CompareRule;
@@ -148,11 +152,12 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
           ),
         ),
   );
-  const paths = [...new Set(thresholds.map(threshold => threshold.path))];
-  return paths.flatMap(path => {
-    const atPath = thresholds.filter(threshold => threshold.path === path);
+  const trails = [...new Set(thresholds.map(threshold => JSON.stringify(threshold.segments)))];
+  return trails.flatMap(trail => {
+    const atPath = thresholds.filter(threshold => JSON.stringify(threshold.segments) === trail);
     const partition = partitionAt(
-      path,
+      atPath[0]!.path,
+      atPath[0]!.segments,
       atPath[0]!.schema,
       atPath[0]!.inherited,
       atPath.map(threshold => threshold.rule),
@@ -164,6 +169,7 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
 interface Frame {
   readonly scope: AnySchema;
   readonly path: string;
+  readonly segments: readonly string[];
   readonly label: string;
 }
 
@@ -173,7 +179,7 @@ interface Frames {
 }
 
 function framesAt(scope: AnySchema, path: string, label: string): Frames {
-  return { root: { scope, path, label }, elements: {} };
+  return { root: { scope, path, segments: [path], label }, elements: {} };
 }
 
 function locate(
@@ -201,6 +207,7 @@ function enter(rule: Rule & { readonly kind: "all" | "any" }, frames: Frames): F
       [rule.element]: {
         scope: (collection as ArraySchema<unknown>).element,
         path: `${frame.path}${suffix}[]`,
+        segments: [...segmentsOf(frame, keys), "[]"],
         label: `${frame.label}${suffix}[]`,
       },
     },
@@ -215,6 +222,12 @@ function labelsOf(frames: Frames): ElementLabels {
 
 function pathOf(frame: Frame, keys: readonly string[]): string {
   return `${frame.path}${keys.map(key => `.${key}`).join("")}`;
+}
+
+// The rendered path is for reports; positions are found by segments, since a
+// key holding "." renders the same as the nested path it spells.
+function segmentsOf(frame: Frame, keys: readonly string[]): readonly string[] {
+  return [...frame.segments, ...keys.map(key => `.${key}`)];
 }
 
 function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
@@ -240,6 +253,7 @@ function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
     : [
         {
           path: pathOf(frame, keys),
+          segments: segmentsOf(frame, keys),
           schema,
           inherited: inheritedAt(frame.scope, keys),
           rule,
@@ -254,6 +268,7 @@ interface Edge {
 
 function partitionAt(
   path: string,
+  segments: readonly string[],
   schema: AnySchema,
   inherited: readonly Rule[],
   rules: readonly CompareRule[],
@@ -331,7 +346,7 @@ function partitionAt(
     }
     classes.push({ name, witness, contains });
   }
-  return { path, classes, excluded };
+  return { path, segments, classes, excluded };
 }
 
 export function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {
@@ -426,12 +441,14 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
         inheritedAt(frame.scope, keys).every(inherited => holds(inherited, coordinate))),
   });
   const positionPath = pathOf(frame, keys);
+  const positionSegments = segmentsOf(frame, keys);
   return borders.map(border => ({
     path: positionPath,
+    segments: positionSegments,
     comparison: rule,
     border,
     coordinateOf: reached => readOperand(term, reached.scope),
-    compose: (given, coordinate) => at(positionPath)?.write(given, measure, coordinate),
+    compose: (given, coordinate) => at(positionSegments)?.write(given, measure, coordinate),
   }));
 }
 
@@ -453,6 +470,7 @@ function between(
       measure,
       standsIn,
       path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
+      segments: segmentsOf(frame, keys),
       kind: measure === "length" ? "integer" : schema?.kind,
     };
   });
@@ -482,6 +500,7 @@ function between(
   };
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,
+    segments: (first.standsIn ? second : first).segments,
     comparison: rule,
     border,
     coordinateOf: reached => {
@@ -491,10 +510,10 @@ function between(
     },
     compose: (given, coordinate, deps) => {
       const [moving, fixed, sign] = first.standsIn ? [second, first, -1] : [first, second, 1];
-      const moved = moving.standsIn ? undefined : at(moving.path);
+      const moved = moving.standsIn ? undefined : at(moving.segments);
       const other = fixed.standsIn
         ? readOperand(fixed.term, withDeps({}, deps))
-        : at(fixed.path)?.valuesIn(given)[0];
+        : at(fixed.segments)?.valuesIn(given)[0];
       if (moved === undefined || other === undefined) {
         return undefined;
       }
@@ -506,7 +525,7 @@ function between(
         }
         // Moving this side would carry it past an end of the day, so the other
         // side is moved against the value this one already holds instead.
-        const held = fixed.standsIn ? undefined : at(fixed.path);
+        const held = fixed.standsIn ? undefined : at(fixed.segments);
         const current = moved.valuesIn(given)[0];
         const counter = current === undefined ? undefined : moment.shift(current, -amount);
         return held === undefined || counter === undefined

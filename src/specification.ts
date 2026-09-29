@@ -355,7 +355,7 @@ export async function check(
       : guardPartitionsOf(specification.implementation);
   const positions = measuredPositionsOf(
     definition,
-    new Set(guardPartitions.map(partition => partition.path)),
+    new Set(guardPartitions.map(partition => trailKey(partition.segments))),
     guardReadSegmentsOf(specification.implementation),
   );
   const coveredClasses = positions.map(() => new Set<string>());
@@ -618,7 +618,9 @@ export async function check(
         ];
   });
   const partitions = positions.map((position, index): PartitionCoverage => {
-    const drawn = guardPartitions.find(partition => partition.path === position.path);
+    const drawn = guardPartitions.find(partition =>
+      isDeepStrictEqual(partition.segments, position.segments),
+    );
     if (drawn !== undefined && position.kind !== "divided") {
       const values = answeredGivens.flatMap(given => position.valuesIn(given));
       const names = drawn.classes.map(item => item.name);
@@ -696,7 +698,7 @@ export async function check(
   borders.push(...guardBorders);
   const ensuresBorders = ensuresBordersOf(definition).map((drawn): BorderCoverage => {
     const coordinates = answeredGivens
-      .filter(given => drawn.path.startsWith(`@${tagOf(definition.input, given)}.`))
+      .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
       .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
     return {
       path: drawn.path,
@@ -849,7 +851,7 @@ export function generate(
   };
   const guardDivided = new Set(
     (implementation === undefined ? [] : guardPartitionsOf(implementation)).map(
-      partition => partition.path,
+      partition => trailKey(partition.segments),
     ),
   );
   const guardRead = guardReadSegmentsOf(implementation);
@@ -910,10 +912,10 @@ export function generate(
   }
 
   const positionsByPath = new Map(
-    positionsOf(definition.input).map(position => [position.path, position] as const),
+    positionsOf(definition.input).map(position => [trailKey(position.segments), position] as const),
   );
   for (const drawn of implementation === undefined ? [] : guardPartitionsOf(implementation)) {
-    const position = positionsByPath.get(drawn.path);
+    const position = positionsByPath.get(trailKey(drawn.segments));
     if (position === undefined) {
       continue;
     }
@@ -1008,7 +1010,7 @@ export function generate(
       const matched = last.distinction;
       const keys = termData(matched.on).path;
       const position = positionsByPath.get(
-        `@${caseTag}${keys.slice(0, -1).map(key => `.${key}`).join("")}`,
+        trailKey([`@${caseTag}`, ...keys.slice(0, -1).map(key => `.${key}`)]),
       );
       const origin = origins.find(given =>
         wayOf(given, withFrom(given).with)?.steps.some(step => step.distinction === matched),
@@ -1081,7 +1083,9 @@ function pairablesOf(
         },
       ];
     }
-    const drawn = guardPartitions.find(partition => partition.path === position.path);
+    const drawn = guardPartitions.find(partition =>
+      isDeepStrictEqual(partition.segments, position.segments),
+    );
     if (drawn === undefined) {
       return [];
     }
@@ -1376,6 +1380,12 @@ function isDisregarded(definition: AnyBehavior, position: Position): boolean {
 
 // A term steps through an optional or a nested case without naming it, so the
 // markers for those are left out before its keys are compared with a position's.
+// Positions are keyed by their segments, not their rendered path, since a key
+// holding "." renders the same as the nested path it spells.
+function trailKey(segments: readonly string[]): string {
+  return JSON.stringify(segments);
+}
+
 function isUnder(position: Position, prefix: readonly string[]): boolean {
   const named = namedSegments(position);
   return prefix.every((segment, index) => named[index] === segment);
@@ -1463,7 +1473,7 @@ function measuredPositionsOf(
     if (guardRead.some(trail => named.every((segment, index) => trail[index] === segment))) {
       return [{ ...position, borders: [] }];
     }
-    if (!guardDivided.has(position.path)) {
+    if (!guardDivided.has(trailKey(position.segments))) {
       return [];
     }
     return [

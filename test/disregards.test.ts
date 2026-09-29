@@ -936,3 +936,30 @@ describe("the limits of the disregards check are the caller's", () => {
     ]);
   });
 });
+
+describe("a guard reads a nested field apart from a key that spells its path", () => {
+  it("attaches a guard's classes to the nested field only, leaving a disregarded key holding a dot out", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", {
+        提出済み: object({ "注文.メモ": int(), 注文: object({ メモ: int() }) }),
+      }),
+      result: variants("結果", { 承認: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r["注文.メモ"]] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("上限内なら承認", {
+          guards: r => [r.注文.メモ.$lte(100).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
+          run: () => ({ result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(spec("承認", { examples: examples(承認する, {}), implementation: 実装 }));
+
+    expect(report.partitions.map(partition => [partition.path, partition.kind])).toStrictEqual([
+      ["@提出済み.注文.メモ", "divided"],
+    ]);
+  });
+});
