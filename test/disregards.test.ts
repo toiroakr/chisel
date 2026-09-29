@@ -936,6 +936,18 @@ describe("the limits of the disregards check are the caller's", () => {
       "disregardsの組み合わせの候補が3通りあり、上限の2通りを超えるため数えていない",
     ]);
   });
+
+  it("refuses a combinations limit that is not a positive integer", async () => {
+    await expect(check(受付, { disregards: { combinations: Number.NaN } })).rejects.toThrow(
+      "disregards.combinations must be a positive integer, but was NaN",
+    );
+  });
+
+  it("refuses a candidates limit that is not a positive integer", async () => {
+    await expect(check(受付, { disregards: { candidates: 0 } })).rejects.toThrow(
+      "disregards.candidates must be a positive integer, but was 0",
+    );
+  });
 });
 
 describe("a guard reads a nested field apart from a key that spells its path", () => {

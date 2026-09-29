@@ -22,6 +22,7 @@ import {
   guardScope,
 } from "./guard-borders.js";
 import {
+  SpecificationError,
   TodoDecision,
   brokenEnsures,
   comparisonsReached,
@@ -334,8 +335,8 @@ export async function check(
   options: CheckOptions = {},
 ): Promise<AdequacyReport> {
   const limits = {
-    combinations: options.disregards?.combinations ?? DISREGARD_COMBINATION_LIMIT,
-    candidates: options.disregards?.candidates ?? DISREGARD_CANDIDATE_LIMIT,
+    combinations: disregardLimit("combinations", options.disregards?.combinations, DISREGARD_COMBINATION_LIMIT),
+    candidates: disregardLimit("candidates", options.disregards?.candidates, DISREGARD_CANDIDATE_LIMIT),
   };
   const definition = specification.examples.behavior;
   const coveredInputs = new Set<string>();
@@ -1488,6 +1489,16 @@ const DISREGARD_COMBINATION_LIMIT = 255;
 // Not the combinations alone: moves are tried before a combination is known to
 // be one the input can hold, so the candidates tried that way are bounded too.
 const DISREGARD_CANDIDATE_LIMIT = 4096;
+
+function disregardLimit(name: string, given: number | undefined, fallback: number): number {
+  if (given === undefined) {
+    return fallback;
+  }
+  if (!Number.isSafeInteger(given) || given <= 0) {
+    throw new SpecificationError(`disregards.${name} must be a positive integer, but was ${given}`);
+  }
+  return given;
+}
 
 interface DisregardMove {
   readonly label: string;
