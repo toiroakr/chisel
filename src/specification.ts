@@ -1366,15 +1366,25 @@ function isUnder(position: Position, prefix: readonly string[]): boolean {
   return prefix.every((segment, index) => named[index] === segment);
 }
 
-// A position a guard divides is kept even when disregarded: the guard reads it,
-// so its classes are the guard's obligation, not the type's.
+// A disregarded position a guard divides is kept rather than dropped, since the
+// guard's classes are attached to it; only what its type and invariants owe goes.
 function measuredPositionsOf(
   definition: AnyBehavior,
   guardDivided: ReadonlySet<string> = new Set(),
 ): readonly Position[] {
-  return positionsOf(definition.input).filter(
-    position => guardDivided.has(position.path) || !isDisregarded(definition, position),
-  );
+  return positionsOf(definition.input).flatMap((position): Position[] => {
+    if (!isDisregarded(definition, position)) {
+      return [position];
+    }
+    if (!guardDivided.has(position.path)) {
+      return [];
+    }
+    return [
+      position.kind === "divided"
+        ? { ...position, classes: [], excluded: [], borders: [] }
+        : { ...position, borders: [] },
+    ];
+  });
 }
 
 const DISREGARD_COMBINATION_LIMIT = 255;

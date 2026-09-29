@@ -27,7 +27,7 @@ Issue #28（複数の behavior が 1 つのレコードのモデルを共有し�
 - **`$each` は作っていない**：配列の要素のフィールド（`r.明細.$each.領収書`）を指す手段は足していない。刈れるのは、フィールド全体（`r.明細`）か、配列を通らない入れ子のフィールドまで。
 - **`compose`**：合成した behavior は、最初の stage の `disregards` をそのまま引き継ぐ（合成の入力は最初の stage の入力なので）。
 - **`Behavior.disregards` は省略不可のフィールドにした**：`behavior()` が必ず `{}` 以上を入れる。計測する側が `undefined` を気にしなくて済むようにするため。その代わり、`Behavior` を自分で組み立てる `composition.ts` にも足す必要があった（`dependency.ts` の `kind: "behavior"` は型の判定で、組み立てではないので触っていない）。
-- **guard が分割する位置は、disregards に書いても刈らない**：`check` の partitions は、guard が引いた分割（`金額 <= 100` のしきい値で分けたクラスなど）を位置に対応付けて数えている。そのため、位置ごと刈ると guard の分割まで report から消え、一方で `generate` は guard の分割の行を出す、という食い違いになっていた。guard が読むフィールドは答えに関係するので、guard が分割する位置は `check` でも `generate` でも刈らないことにした（CodeRabbit の指摘。テストあり）。
+- **guard が分割する位置は、disregards に書いても刈らない**：`check` の partitions は、guard が引いた分割（`金額 <= 100` のしきい値で分けたクラスなど）を位置に対応付けて数えている。そのため、位置ごと刈ると guard の分割まで report から消え、一方で `generate` は guard の分割の行を出す、という食い違いになっていた。guard が読むフィールドは答えに関係するので、guard が分割する位置は `check` でも `generate` でも刈らないことにした（CodeRabbit の指摘。テストあり）。ただし残すのは guard の分割だけで、その位置の型由来の種類と invariant の境界（`int().min(0)` の「0 ちょうど」など）は刈ったままにする。最初は位置ごと残したので、それらの行まで戻っていた（Copilot の指摘。テストあり）。
 - **invariant の矛盾（`modelIssues`）は刈らない**：最初は `check` の `positions` をまとめて刈った位置に差し替えたので、刈ったフィールドの invariant が矛盾していても（`int().min(10).max(5)` など）、`modelIssues` から消えていた。モデルの矛盾は behavior がそのフィールドを見るかどうかと関係ない事実なので、`modelIssues` だけは全フィールドから作るように直した（advisor の指摘。テストあり）。
 
 ### `cases.$default`
