@@ -724,3 +724,29 @@ describe("a rerun that throws", () => {
     ]);
   });
 });
+
+describe("the ancestors of a field a guard reads", () => {
+  it("keeps the classes of a disregarded optional whose field a guard reads", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 詳細: object({ 至急: boolean() }).optional() }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.詳細] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("至急でなければ承認", {
+          guards: r => [r.詳細.至急.$eq(false).$else(() => ({ result: { 結果: "保留" }, effects: [] }))],
+          run: () => ({ result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(spec("承認", { examples: examples(承認する, {}), implementation: 実装 }));
+
+    expect(report.partitions.map(partition => partition.path)).toStrictEqual([
+      "@提出済み.詳細",
+      "@提出済み.詳細?.至急",
+    ]);
+  });
+});

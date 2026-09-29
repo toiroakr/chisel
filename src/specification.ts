@@ -1445,7 +1445,7 @@ function measuredPositionsOf(
       return [position];
     }
     const named = namedSegments(position);
-    if (guardRead.some(trail => isDeepStrictEqual(trail, named))) {
+    if (guardRead.some(trail => named.every((segment, index) => trail[index] === segment))) {
       return [{ ...position, borders: [] }];
     }
     if (!guardDivided.has(position.path)) {
