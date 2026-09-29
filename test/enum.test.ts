@@ -98,6 +98,29 @@ describe("an enum in the rules", () => {
     expect(report.verdict).toBe("satisfied");
   });
 
+  it("does not read a guard ordering it against a value", async () => {
+    const report = await check(
+      spec("申請する", {
+        examples: examples(申請する, {
+          タクシー: { given: { 状態: "下書き", 費目: "交通費", 金額: 1200 }, expect: 受ける() },
+        }),
+        implementation: implement(申請する, {
+          cases: {
+            下書き: action("宿泊費より前の費目", {
+              guards: r => [r.費目.$lt("宿泊費").$else(断る)],
+              run: 受ける,
+            }),
+          },
+        }),
+      }),
+    );
+
+    expect(report.measures.comparisons).toStrictEqual({
+      status: "partial",
+      notRead: ['宿泊費より前の費目: $.費目 < "宿泊費"'],
+    });
+  });
+
   it("asks for a row in each value no row stands in", () => {
     const { rows } = generate(
       examples(申請する, {

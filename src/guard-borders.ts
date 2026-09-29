@@ -622,7 +622,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
             rule.operator === "!=" ||
             differenceCarrier(kinds[0], kinds[1]) !== undefined
           : kinds[0] === "boolean" ||
-            kinds[0] === "enum" ||
+            // An enum's values are ordered by their text, not as they were named,
+            // so only an equality with one of them is read.
+            (kinds[0] === "enum" && (rule.operator === "==" || rule.operator === "!=")) ||
             kinds[0] === "variants" ||
             kinds[0] === "literal" ||
             (kinds[0] !== undefined &&
