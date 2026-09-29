@@ -39,7 +39,7 @@ import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
-import type { Position } from "./partition.js";
+import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 import type { AnySchema } from "./schema.js";
@@ -1493,54 +1493,56 @@ async function disregardBroken(
     ]);
   const keptOriginally = readKept(row.given);
   const axes = positionsOf(definition.input).flatMap(position => {
-    if (
-      !isUnder(position, [`@${tag}`]) ||
-      !isDisregarded(definition, position)
-    ) {
+    if (!isUnder(position, [`@${tag}`]) || !isDisregarded(definition, position)) {
       return [];
     }
-    const taken = position.kind === "divided" ? position.classify(row.given) : [];
-    const coordinates = (given: unknown) =>
-      position.borders.map(border => coordinatesIn(position, border.measure, given));
-    const original = coordinates(row.given);
-    const classMoves: DisregardMove[] =
-      position.kind !== "divided"
-        ? []
-        : position.classes
-            .filter(className => !taken.includes(className) && !position.excluded.includes(className))
-            .map(className => ({
-              label: className,
-              apply: given => position.place(given, className),
-              reached: varied => position.classify(varied).includes(className),
-            }));
-    const pointMoves: DisregardMove[] = position.borders.flatMap((border, index) =>
-      border.points.flatMap(point =>
-        point.status !== "owed" ||
-        point.witness === undefined ||
-        original[index]!.some(value => point.contains(value))
+    return position.instancesIn(row.given).flatMap(instance => {
+      const classes = position.kind === "divided" ? position : undefined;
+      const located = instance as DividedInstance;
+      const classified = (given: unknown) => (classes === undefined ? [] : located.classify(given));
+      const taken = classified(row.given);
+      const coordinates = (given: unknown) =>
+        position.borders.map(border => coordinatesIn(instance, border.measure, given));
+      const original = coordinates(row.given);
+      const classMoves: DisregardMove[] =
+        classes === undefined
           ? []
-          : [
-              {
-                label: `${point.role} (${point.relation})`,
-                apply: (given: unknown) => position.write(given, border.measure, point.witness),
-                reached: (varied: unknown) =>
-                  coordinatesIn(position, border.measure, varied).some(value => point.contains(value)),
-              },
-            ],
-      ),
-    );
-    const moves = [...classMoves, ...pointMoves];
-    return moves.length === 0
-      ? []
-      : [
-          {
-            path: position.path,
-            moves,
-            unmoved: (varied: unknown) =>
-              (position.kind !== "divided" || isDeepStrictEqual(position.classify(varied), taken)) &&
-              isDeepStrictEqual(coordinates(varied), original),
-          },
-        ];
+          : classes.classes
+              .filter(className => !taken.includes(className) && !classes.excluded.includes(className))
+              .map(className => ({
+                label: className,
+                apply: given => located.place(given, className),
+                reached: varied => located.classify(varied).includes(className),
+              }));
+      const pointMoves: DisregardMove[] = position.borders.flatMap((border, index) =>
+        border.points.flatMap(point =>
+          point.status !== "owed" ||
+          point.witness === undefined ||
+          original[index]!.some(value => point.contains(value))
+            ? []
+            : [
+                {
+                  label: `${point.role} (${point.relation})`,
+                  apply: (given: unknown) => instance.write(given, border.measure, point.witness),
+                  reached: (varied: unknown) =>
+                    coordinatesIn(instance, border.measure, varied).some(value => point.contains(value)),
+                },
+              ],
+        ),
+      );
+      const moves = [...classMoves, ...pointMoves];
+      return moves.length === 0
+        ? []
+        : [
+            {
+              path: instance.path,
+              moves,
+              unmoved: (varied: unknown) =>
+                isDeepStrictEqual(classified(varied), taken) &&
+                isDeepStrictEqual(coordinates(varied), original),
+            },
+          ];
+    });
   });
   const candidates = axes.reduce((total, axis) => total * (axis.moves.length + 1), 1) - 1;
   if (candidates > DISREGARD_CANDIDATE_LIMIT) {
@@ -1571,11 +1573,13 @@ async function disregardBroken(
         ? [{ choice, varied }]
         : [];
     })
-    .sort(
-      (left, right) =>
-        left.choice.filter(move => move !== undefined).length -
-        right.choice.filter(move => move !== undefined).length,
-    );
+    .sort((left, right) => {
+      const moved = (choice: readonly (DisregardMove | undefined)[]) =>
+        choice.flatMap((move, index) => (move === undefined ? [] : [index]));
+      const [a, b] = [moved(left.choice), moved(right.choice)];
+      const first = a.findIndex((index, at) => index !== b[at]);
+      return a.length - b.length || (first === -1 ? 0 : a[first]! - b[first]!);
+    });
   if (combinations.length > DISREGARD_COMBINATION_LIMIT) {
     return {
       kind: "not checked",

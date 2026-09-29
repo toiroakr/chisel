@@ -12,6 +12,7 @@ import {
   implement,
   int,
   object,
+  record,
   spec,
   string,
   variants,
@@ -830,5 +831,75 @@ describe("check moves only what disregards names", () => {
     );
 
     expect(report.failures).toStrictEqual([]);
+  });
+});
+
+describe("check holds each element of a disregarded array and each entry of a record", () => {
+  it("fails a row whose answer changes only through the second element of a disregarded array", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 明細: array(object({ 至急: boolean() })) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.明細] },
+    });
+    const 二件目が至急なら保留 = implement(承認する, {
+      cases: {
+        提出済み: action("二件目が至急なら保留", {
+          run: r =>
+            r.明細[1]?.至急 === true ? { result: { 結果: "保留" }, effects: [] } : { result: { 結果: "承認" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          二件: {
+            given: { 状態: "提出済み", 明細: [{ 至急: false }, { 至急: false }] },
+            expect: { result: { 結果: "承認" }, effects: [] },
+          },
+        }),
+        implementation: 二件目が至急なら保留,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "承認する disregards @提出済み.明細[1].至急, but its answer changed when @提出済み.明細[1].至急 was true",
+    ]);
+  });
+
+  it("fails a row whose answer changes only when one entry of a disregarded record differs from the others", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 担当: record(boolean()) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.担当] },
+    });
+    const 揃っていなければ保留 = implement(承認する, {
+      cases: {
+        提出済み: action("揃っていなければ保留", {
+          run: r =>
+            new Set(Object.values(r.担当)).size > 1
+              ? { result: { 結果: "保留" }, effects: [] }
+              : { result: { 結果: "承認" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          二人: {
+            given: { 状態: "提出済み", 担当: { 甲: false, 乙: false } },
+            expect: { result: { 結果: "承認" }, effects: [] },
+          },
+        }),
+        implementation: 揃っていなければ保留,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      '承認する disregards @提出済み.担当{"甲"}, but its answer changed when @提出済み.担当{"甲"} was true',
+    ]);
   });
 });
