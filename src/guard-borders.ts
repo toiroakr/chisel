@@ -44,6 +44,7 @@ export interface GuardBorder {
   readonly origin?: {
     readonly decision: RulesDecision<unknown, unknown, unknown>;
     readonly scope: AnySchema;
+    readonly tag: string;
   };
   coordinateOf(reached: ComparisonReached): unknown;
   compose(given: unknown, coordinate: unknown, deps?: unknown): unknown;
@@ -78,7 +79,7 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
           ).map(
             drawn => ({
               ...drawn,
-              origin: { decision, scope: guardScope(implementation.behavior, tag) },
+              origin: { decision, scope: guardScope(implementation.behavior, tag), tag },
             }),
           ),
         ),

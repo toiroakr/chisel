@@ -4,6 +4,7 @@ import {
   behavior,
   check,
   examples,
+  generate,
   implement,
   int,
   match,
@@ -161,5 +162,48 @@ describe("$default and a match over the cases it decides", () => {
         },
       }),
     ).toThrow("match in 方法ごとに受け付ける has a case 小切手 the sum does not");
+  });
+});
+
+describe("the guard borders of a $default decision stay with each case it decides", () => {
+  const 精算する = behavior("精算する", {
+    input: variants("状態", { 国内: object({ 金額: int() }), 海外: object({ 金額: int() }) }),
+    result: variants("結果", { 精算: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 上限内なら精算 = implement(精算する, {
+    cases: {
+      $default: action("上限内なら精算", {
+        guards: r => [r.金額.$lte(100).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
+        run: () => ({ result: { 結果: "精算" }, effects: [] }),
+      }),
+    },
+  });
+  const 国内だけ = examples(精算する, {
+    国内ON: { given: { 状態: "国内", 金額: 100 }, expect: { result: { 結果: "精算" }, effects: [] } },
+    国内OFF: { given: { 状態: "国内", 金額: 101 }, expect: { result: { 結果: "却下" }, effects: [] } },
+    海外: { given: { 状態: "海外", 金額: 50 }, expect: { result: { 結果: "精算" }, effects: [] } },
+  });
+
+  it("does not count a row of one case as meeting the border the guard draws in another", async () => {
+    const report = await check(spec("精算", { examples: 国内だけ, implementation: 上限内なら精算 }));
+
+    expect(
+      report.borders
+        .filter(border => border.path === "@海外.金額")
+        .flatMap(border => border.points.filter(point => point.status === "gap").map(point => point.role)),
+    ).toStrictEqual(["ON", "OFF", "OUT"]);
+  });
+
+  it("offers the rows of a case's border though another case's rows stand at it", () => {
+    expect(
+      generate(国内だけ, 上限内なら精算)
+        .rows.filter(row => (row.given as { 状態: string }).状態 === "海外")
+        .map(row => row.name),
+    ).toStrictEqual([
+      "精算する: @海外.金額 = 100 < v",
+      "精算する: @海外.金額 ON (= 100)",
+      "精算する: @海外.金額 OUT (> 101)",
+    ]);
   });
 });

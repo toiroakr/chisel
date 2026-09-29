@@ -363,7 +363,7 @@ export async function check(
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
   const armsOwed: ArmTaken[] = [];
-  const reached: ComparisonReached[] = [];
+  const reached: { readonly tag: string | undefined; readonly comparison: ComparisonReached }[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
   const fakeIssues = fakeIssuesOf(definition.requires, definition.name, specification.fakes);
@@ -537,7 +537,9 @@ export async function check(
         async input => {
           const traced = await runTraced(implementation, input, standIns(row) as never);
           armsMet.push(...traced.arms);
-          reached.push(...traced.comparisons);
+          reached.push(
+            ...traced.comparisons.map(comparison => ({ tag: tagOf(definition.input, input), comparison })),
+          );
           if (traced.way !== undefined) {
             waysMet.push(traced.way);
           }
@@ -679,8 +681,8 @@ export async function check(
     specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
   ).map((drawn): BorderCoverage => {
     const coordinates = reached
-      .filter(item => item.rule === drawn.comparison)
-      .map(item => drawn.coordinateOf(item));
+      .filter(item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag)
+      .map(item => drawn.coordinateOf(item.comparison));
     return {
       path: drawn.path,
       rule: drawn.border.rule,
@@ -938,9 +940,9 @@ export function generate(
 
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
-      comparisonsReached(implementation!, given, deps).filter(
-        item => item.rule === drawn.comparison,
-      );
+      tagOf(definition.input, given) === drawn.origin?.tag
+        ? comparisonsReached(implementation!, given, deps).filter(item => item.rule === drawn.comparison)
+        : [];
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
         continue;
