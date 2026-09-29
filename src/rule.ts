@@ -446,17 +446,17 @@ export function sizeOf(value: unknown): number {
     : Object.keys(value as object).length;
 }
 
-export function resize(current: unknown, size: number): unknown {
+export function resize(current: unknown, size: number, empty?: () => unknown): unknown {
   if (typeof current === "string") {
     return current.length >= size ? current.slice(0, size) : current.padEnd(size, "_");
   }
   if (Array.isArray(current)) {
-    const filler = current[current.length - 1];
+    const filler = current.length > 0 ? current[current.length - 1] : empty?.();
     return Array.from({ length: Math.max(size, 0) }, (_, index) => current[index] ?? filler);
   }
   if (typeof current === "object" && current !== null) {
     const entries = Object.entries(current);
-    const filler = entries[entries.length - 1]?.[1];
+    const filler = entries.length > 0 ? entries[entries.length - 1]![1] : empty?.();
     return Object.fromEntries(
       Array.from(
         { length: Math.max(size, 0) },

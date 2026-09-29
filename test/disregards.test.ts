@@ -1109,3 +1109,64 @@ describe("check moves a disregarded field away from what it holds", () => {
     ]);
   });
 });
+
+describe("check grows an empty disregarded container at the points its invariant owes", () => {
+  it("fails a row whose answer changes only once an empty disregarded array holds an element", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ タグ: array(string()).min(0) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.タグ] },
+    });
+    const タグがあれば保留 = implement(承認する, {
+      cases: {
+        提出済み: action("タグがあれば保留", {
+          run: r => (r.タグ.length === 0 ? { result: { 結果: "承認" }, effects: [] } : { result: { 結果: "保留" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          タグなし: { given: { 状態: "提出済み", タグ: [] }, expect: { result: { 結果: "承認" }, effects: [] } },
+        }),
+        implementation: タグがあれば保留,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "承認する disregards @提出済み.タグ, but its answer changed when @提出済み.タグ was IN (> 0)",
+    ]);
+  });
+
+  it("fails a row whose answer changes only once an empty disregarded record holds an entry", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 担当: record(string()).min(0) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.担当] },
+    });
+    const 担当がいれば保留 = implement(承認する, {
+      cases: {
+        提出済み: action("担当がいれば保留", {
+          run: r =>
+            Object.keys(r.担当).length === 0
+              ? { result: { 結果: "承認" }, effects: [] }
+              : { result: { 結果: "保留" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          担当なし: { given: { 状態: "提出済み", 担当: {} }, expect: { result: { 結果: "承認" }, effects: [] } },
+        }),
+        implementation: 担当がいれば保留,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.name)).toStrictEqual(["担当なし"]);
+  });
+});

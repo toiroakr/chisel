@@ -279,7 +279,7 @@ function positionAt(
       [],
       field,
     );
-    return withOwnBorders(path, borders, focus, elements, reading);
+    return withOwnBorders(path, borders, focus, elements, reading, () => element.placeholder(field));
   }
   if (schema.kind === "record") {
     const every: Step = {
@@ -313,7 +313,9 @@ function positionAt(
       [],
       field,
     );
-    return withOwnBorders(path, borders, focus, values, reading);
+    return withOwnBorders(path, borders, focus, values, reading, () =>
+      (schema as RecordSchema<unknown>).value.placeholder(field),
+    );
   }
   if (schema.kind === "object") {
     return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, reading, inherited);
@@ -361,6 +363,7 @@ function withOwnBorders(
   focus: Focus,
   inner: readonly Position[],
   reading: Reading,
+  empty: () => unknown,
 ): Position[] {
   if (borders.length === 0 && !reading.containers) {
     return [...inner];
@@ -372,22 +375,22 @@ function withOwnBorders(
       segments: path,
       borders,
       valuesIn: focus.reach,
-      write: writer(focus),
+      write: writer(focus, empty),
       instancesIn: given =>
         focus.instances(given).map(({ focus: located, trail }) => ({
           path: trail.join(""),
           valuesIn: located.reach,
-          write: writer(located),
+          write: writer(located, empty),
         })),
     },
     ...inner,
   ];
 }
 
-function writer(focus: Focus): Position["write"] {
+function writer(focus: Focus, empty?: () => unknown): Position["write"] {
   return (given, measure, coordinate) =>
     focus.update(given, current =>
-      measure === "length" ? resize(current, coordinate as number) : coordinate,
+      measure === "length" ? resize(current, coordinate as number, empty) : coordinate,
     );
 }
 
