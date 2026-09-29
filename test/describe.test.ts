@@ -18,13 +18,21 @@ describe("describe", () => {
     expect(金額.describe("立て替えた金額").description).toBe("立て替えた金額");
   });
 
+  it("is kept by refine on a sum", () => {
+    const 報告書 = variants("状態", { 下書き: object({ 金額: int() }) })
+      .describe("経費報告書")
+      .refine(v => v.状態.$eq("下書き"));
+
+    expect(報告書.description).toBe("経費報告書");
+  });
+
   it("is carried by an optional field", () => {
     expect(string().describe("差し戻しの理由").optional().description).toBe("差し戻しの理由");
     expect(string().optional().describe("メモ").description).toBe("メモ");
     expect(string().optional().description).toBeUndefined();
   });
 
-  it("names each case of a sum", () => {
+  it("is kept on each case a sum holds", () => {
     const 報告書 = variants("状態", {
       下書き: object({ 申請者: string() }).describe("まだ申請していない"),
       申請中: object({ 申請者: string() }).describe("承認を待っている"),
