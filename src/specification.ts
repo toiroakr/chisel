@@ -1564,8 +1564,9 @@ async function disregardBroken(
               path: instance.path,
               moves,
               unmoved: (varied: unknown) =>
-                isDeepStrictEqual(classified(varied), taken) &&
-                isDeepStrictEqual(coordinates(varied), original),
+                (isDeepStrictEqual(classified(varied), taken) &&
+                  isDeepStrictEqual(coordinates(varied), original)) ||
+                (classified(varied).length === 0 && coordinates(varied).every(values => values.length === 0)),
             },
           ];
     });

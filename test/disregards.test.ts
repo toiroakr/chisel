@@ -988,3 +988,112 @@ describe("a match reads the field it selects on", () => {
     expect(generate(払う, 実装).rows.map(row => row.name)).toContain("払う: @確定.支払 = カード");
   });
 });
+
+describe("check moves a disregarded field away from what it holds", () => {
+  it("fails a row whose answer changes only when a disregarded optional object is left out", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 詳細: object({ 至急: boolean() }).optional() }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.詳細] },
+    });
+    const 詳細がなければ保留 = implement(承認する, {
+      cases: {
+        提出済み: action("詳細がなければ保留", {
+          run: r =>
+            r.詳細 === undefined ? { result: { 結果: "保留" }, effects: [] } : { result: { 結果: "承認" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          詳細あり: {
+            given: { 状態: "提出済み", 詳細: { 至急: false } },
+            expect: { result: { 結果: "承認" }, effects: [] },
+          },
+        }),
+        implementation: 詳細がなければ保留,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([
+      {
+        name: "詳細あり",
+        message: "承認する disregards @提出済み.詳細, but its answer changed when @提出済み.詳細 was なし",
+      },
+    ]);
+  });
+
+  it("fails a row whose answer changes only when a disregarded array is shortened past the elements it holds", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 明細: array(object({ 至急: boolean() })).min(1) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.明細] },
+    });
+    const 一件なら保留 = implement(承認する, {
+      cases: {
+        提出済み: action("一件なら保留", {
+          run: r =>
+            r.明細.length === 1 ? { result: { 結果: "保留" }, effects: [] } : { result: { 結果: "承認" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          二件: {
+            given: { 状態: "提出済み", 明細: [{ 至急: false }, { 至急: false }] },
+            expect: { result: { 結果: "承認" }, effects: [] },
+          },
+        }),
+        implementation: 一件なら保留,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.name)).toStrictEqual(["二件"]);
+  });
+
+  it("fails a row whose answer changes only when a disregarded sum field takes a case without the row's fields", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", {
+        提出済み: object({
+          支払: variants("方法", { カード: object({ 至急: boolean() }), 現金: object({}) }),
+        }),
+      }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.支払] },
+    });
+    const 現金なら保留 = implement(承認する, {
+      cases: {
+        提出済み: action("現金なら保留", {
+          run: r =>
+            r.支払.方法 === "現金" ? { result: { 結果: "保留" }, effects: [] } : { result: { 結果: "承認" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          カード: {
+            given: { 状態: "提出済み", 支払: { 方法: "カード", 至急: false } },
+            expect: { result: { 結果: "承認" }, effects: [] },
+          },
+        }),
+        implementation: 現金なら保留,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([
+      {
+        name: "カード",
+        message: "承認する disregards @提出済み.支払, but its answer changed when @提出済み.支払 was 現金",
+      },
+    ]);
+  });
+});
