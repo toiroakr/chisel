@@ -22,6 +22,7 @@ import {
   guardScope,
 } from "./guard-borders.js";
 import {
+  SpecificationError,
   TodoDecision,
   brokenEnsures,
   comparisonsReached,
@@ -30,8 +31,8 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { describeRule, describeTerm, isTerm, termData } from "./rule.js";
-import type { Term } from "./rule.js";
+import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
+import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
 import { feasibilityOf } from "./feasibility.js";
@@ -39,7 +40,7 @@ import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
-import type { Position } from "./partition.js";
+import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 import type { AnySchema } from "./schema.js";
@@ -161,7 +162,7 @@ export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 export type CoverageStatus = "met" | "gap" | "answer owed" | "no row owed" | "undecided";
 
 export interface Incompleteness {
-  readonly kind: "row not run" | "row did not come back";
+  readonly kind: "row not run" | "row did not come back" | "disregards not checked";
   readonly subject: string;
   readonly reason: string;
 }
@@ -320,9 +321,23 @@ export function isSpecification(value: unknown): value is Specification {
   );
 }
 
+export interface CheckOptions {
+  // How far the disregards check goes, a policy of the caller rather than of
+  // the check: past either limit a row is not tried and is reported as such.
+  readonly disregards?: {
+    readonly combinations?: number;
+    readonly candidates?: number;
+  };
+}
+
 export async function check(
   specification: Specification,
+  options: CheckOptions = {},
 ): Promise<AdequacyReport> {
+  const limits = {
+    combinations: disregardLimit("combinations", options.disregards?.combinations, DISREGARD_COMBINATION_LIMIT),
+    candidates: disregardLimit("candidates", options.disregards?.candidates, DISREGARD_CANDIDATE_LIMIT),
+  };
   const definition = specification.examples.behavior;
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
@@ -335,12 +350,20 @@ export async function check(
   const verifiedResults = new Set<string>();
   const observedEffects = new Set<string>();
   const verifiedEffects = new Set<string>();
-  const positions = positionsOf(definition.input);
+  const guardPartitions =
+    specification.implementation === undefined
+      ? []
+      : guardPartitionsOf(specification.implementation);
+  const positions = measuredPositionsOf(
+    definition,
+    new Set(guardPartitions.map(partition => trailKey(partition.segments))),
+    guardReadSegmentsOf(specification.implementation),
+  );
   const coveredClasses = positions.map(() => new Set<string>());
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
   const armsOwed: ArmTaken[] = [];
-  const reached: ComparisonReached[] = [];
+  const reached: { readonly tag: string | undefined; readonly comparison: ComparisonReached }[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
   const fakeIssues = fakeIssuesOf(definition.requires, definition.name, specification.fakes);
@@ -514,7 +537,9 @@ export async function check(
         async input => {
           const traced = await runTraced(implementation, input, standIns(row) as never);
           armsMet.push(...traced.arms);
-          reached.push(...traced.comparisons);
+          reached.push(
+            ...traced.comparisons.map(comparison => ({ tag: tagOf(definition.input, input), comparison })),
+          );
           if (traced.way !== undefined) {
             waysMet.push(traced.way);
           }
@@ -534,6 +559,18 @@ export async function check(
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
+          const disregard = await disregardBroken(
+            implementation,
+            row,
+            actual,
+            standIns(row),
+            limits,
+          );
+          if (disregard.kind === "broken") {
+            failures.push(disregard.failure);
+          } else if (disregard.kind === "not checked") {
+            incompleteness.push(disregard.incompleteness);
+          }
         }
       }
       const open = openDecisionIn(implementation, error);
@@ -573,7 +610,7 @@ export async function check(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
-  const modelIssues = positions.flatMap(position => {
+  const modelIssues = positionsOf(definition.input).flatMap(position => {
     const emptied = emptiedBy(position.borders);
     return emptied === undefined
       ? []
@@ -583,12 +620,10 @@ export async function check(
             .join(", ")})`,
         ];
   });
-  const guardPartitions =
-    specification.implementation === undefined
-      ? []
-      : guardPartitionsOf(specification.implementation);
   const partitions = positions.map((position, index): PartitionCoverage => {
-    const drawn = guardPartitions.find(partition => partition.path === position.path);
+    const drawn = guardPartitions.find(partition =>
+      isDeepStrictEqual(partition.segments, position.segments),
+    );
     if (drawn !== undefined && position.kind !== "divided") {
       const values = answeredGivens.flatMap(given => position.valuesIn(given));
       const names = drawn.classes.map(item => item.name);
@@ -646,8 +681,8 @@ export async function check(
     specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
   ).map((drawn): BorderCoverage => {
     const coordinates = reached
-      .filter(item => item.rule === drawn.comparison)
-      .map(item => drawn.coordinateOf(item));
+      .filter(item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag)
+      .map(item => drawn.coordinateOf(item.comparison));
     return {
       path: drawn.path,
       rule: drawn.border.rule,
@@ -666,7 +701,7 @@ export async function check(
   borders.push(...guardBorders);
   const ensuresBorders = ensuresBordersOf(definition).map((drawn): BorderCoverage => {
     const coordinates = answeredGivens
-      .filter(given => drawn.path.startsWith(`@${tagOf(definition.input, given)}.`))
+      .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
       .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
     return {
       path: drawn.path,
@@ -721,7 +756,10 @@ export async function check(
   const verdict: Verdict =
     !adequate || armGap
       ? "not_satisfied"
-      : comparisons.status === "partial" || armUndecided || externals.length > 0
+      : comparisons.status === "partial" ||
+          armUndecided ||
+          externals.length > 0 ||
+          incompleteness.some(item => item.kind === "disregards not checked")
         ? "undetermined"
         : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")
@@ -814,6 +852,12 @@ export function generate(
       notComposed.push(`${row.name}: ${parsed.issues[0]!.message}`);
     }
   };
+  const guardDivided = new Set(
+    (implementation === undefined ? [] : guardPartitionsOf(implementation)).map(
+      partition => trailKey(partition.segments),
+    ),
+  );
+  const guardRead = guardReadSegmentsOf(implementation);
   const refused = excludedCases(definition.input);
   for (const tag of definition.input.variantTags.filter(
     tag => !existing.has(tag) && !refused.includes(tag),
@@ -825,7 +869,7 @@ export function generate(
     });
   }
 
-  for (const position of positionsOf(definition.input)) {
+  for (const position of measuredPositionsOf(definition, guardDivided, guardRead)) {
     if (position.kind !== "divided") {
       continue;
     }
@@ -848,7 +892,7 @@ export function generate(
     }
   }
 
-  for (const position of positionsOf(definition.input)) {
+  for (const position of measuredPositionsOf(definition, guardDivided, guardRead)) {
     for (const border of position.borders) {
       for (const point of border.points) {
         if (point.status !== "owed" || point.witness === undefined) {
@@ -871,10 +915,10 @@ export function generate(
   }
 
   const positionsByPath = new Map(
-    positionsOf(definition.input).map(position => [position.path, position] as const),
+    positionsOf(definition.input).map(position => [trailKey(position.segments), position] as const),
   );
   for (const drawn of implementation === undefined ? [] : guardPartitionsOf(implementation)) {
-    const position = positionsByPath.get(drawn.path);
+    const position = positionsByPath.get(trailKey(drawn.segments));
     if (position === undefined) {
       continue;
     }
@@ -896,9 +940,9 @@ export function generate(
 
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
-      comparisonsReached(implementation!, given, deps).filter(
-        item => item.rule === drawn.comparison,
-      );
+      tagOf(definition.input, given) === drawn.origin?.tag
+        ? comparisonsReached(implementation!, given, deps).filter(item => item.rule === drawn.comparison)
+        : [];
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
         continue;
@@ -969,7 +1013,7 @@ export function generate(
       const matched = last.distinction;
       const keys = termData(matched.on).path;
       const position = positionsByPath.get(
-        `@${caseTag}${keys.slice(0, -1).map(key => `.${key}`).join("")}`,
+        trailKey([`@${caseTag}`, ...keys.slice(0, -1).map(key => `.${key}`)]),
       );
       const origin = origins.find(given =>
         wayOf(given, withFrom(given).with)?.steps.some(step => step.distinction === matched),
@@ -1042,7 +1086,9 @@ function pairablesOf(
         },
       ];
     }
-    const drawn = guardPartitions.find(partition => partition.path === position.path);
+    const drawn = guardPartitions.find(partition =>
+      isDeepStrictEqual(partition.segments, position.segments),
+    );
     if (drawn === undefined) {
       return [];
     }
@@ -1115,13 +1161,13 @@ function measureRules(
   if (implementation.external !== undefined) {
     return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
-  const decisions = Object.values(implementation.cases);
-  const notRead = decisions.flatMap(decision =>
+  const decided = decisionsWithCases(implementation);
+  const notRead = decided.flatMap(([decision]) =>
     decision.kind === "decision" ? [decision.id] : [],
   );
   const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
     taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
-  const rules = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+  const rules = decided.flatMap(([decision, tags]) =>
     decision.kind !== "rules"
       ? []
       : waysOf(decision).map((way): RuleCoverage => {
@@ -1132,7 +1178,10 @@ function measureRules(
           if (took(owed, decision.id, way.steps)) {
             return { ...base, status: "answer owed" };
           }
-          return { ...base, ...unmetStatus([feasibilityOf(way, scopeOf(implementation, tag))]) };
+          return {
+            ...base,
+            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag)))),
+          };
         }),
   );
   if (notRead.length === 0) {
@@ -1154,20 +1203,22 @@ function measureArms(
   if (implementation.external !== undefined) {
     return { status: "unavailable", reason: "not measured", notRead: [implementation.behavior.name] };
   }
-  const decisions = Object.values(implementation.cases);
-  const notRead = decisions.flatMap(decision =>
+  const decided = decisionsWithCases(implementation);
+  const notRead = decided.flatMap(([decision]) =>
     decision.kind === "decision" ? [decision.id] : [],
   );
   const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
-  const arms = Object.entries(implementation.cases).flatMap(([tag, decision]) => {
+  const arms = decided.flatMap(([decision, tags]) => {
     if (decision.kind !== "rules") {
       return [];
     }
-    const ways = waysOf(decision).map(way => ({
-      way,
-      feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
-    }));
+    const ways = tags.flatMap(tag =>
+      waysOf(decision).map(way => ({
+        way,
+        feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
+      })),
+    );
     const through = (index: number, arm: string) =>
       ways.filter(({ way }) =>
         index === decision.guards.length
@@ -1212,6 +1263,18 @@ function measureArms(
   return arms.length === 0
     ? { status: "unavailable", reason: "not measured", notRead }
     : { status: "partial", arms, notRead };
+}
+
+// Not one entry per case: $default hands one decision to several cases, and
+// listing it per case would owe each of its arms once for every case it decides.
+function decisionsWithCases(
+  implementation: AnyImplementation,
+): readonly (readonly [AnyImplementation["cases"][string], readonly string[]])[] {
+  const grouped = new Map<AnyImplementation["cases"][string], string[]>();
+  for (const [tag, decision] of Object.entries(implementation.cases)) {
+    grouped.set(decision, [...(grouped.get(decision) ?? []), tag]);
+  }
+  return [...grouped];
 }
 
 function stagesOf(implementation: AnyImplementation): AnyImplementation[] {
@@ -1310,4 +1373,284 @@ function coverage(
     excluded: all.filter(value => excluded.includes(value)),
     total: counted.length,
   };
+}
+
+function isDisregarded(definition: AnyBehavior, position: Position): boolean {
+  return Object.entries(definition.disregards).some(([tag, paths]) =>
+    paths.some(keys => isUnder(position, [`@${tag}`, ...keys.map(key => `.${key}`)])),
+  );
+}
+
+// A term steps through an optional or a nested case without naming it, so the
+// markers for those are left out before its keys are compared with a position's.
+// Positions are keyed by their segments, not their rendered path, since a key
+// holding "." renders the same as the nested path it spells.
+function trailKey(segments: readonly string[]): string {
+  return JSON.stringify(segments);
+}
+
+function isUnder(position: Position, prefix: readonly string[]): boolean {
+  const named = namedSegments(position);
+  return prefix.every((segment, index) => named[index] === segment);
+}
+
+// An element name maps to its trail, or to undefined when the quantifier ranges
+// over something other than the input, such as a value dependency.
+function segmentsRead(
+  rule: Rule,
+  root: readonly string[],
+  elements: ReadonlyMap<string, readonly string[] | undefined>,
+): (readonly string[])[] {
+  const trailOf = (term: unknown): readonly string[] | undefined => {
+    if (!isTerm(term)) {
+      return undefined;
+    }
+    const [head, ...rest] = termData(term).path;
+    if (head === undefined || head === DEPS) {
+      return undefined;
+    }
+    if (elements.has(head)) {
+      const base = elements.get(head);
+      return base === undefined ? undefined : [...base, ...rest.map(key => `.${key}`)];
+    }
+    return [...root, `.${head}`, ...rest.map(key => `.${key}`)];
+  };
+  switch (rule.kind) {
+    case "compare":
+      return [rule.left, rule.right].flatMap(term => {
+        const trail = trailOf(term);
+        return trail === undefined ? [] : [trail];
+      });
+    case "all":
+    case "any": {
+      const of = trailOf(rule.of);
+      const inner = segmentsRead(
+        rule.each,
+        root,
+        new Map([...elements, [rule.element, of === undefined ? undefined : [...of, "[]"]]]),
+      );
+      return of === undefined ? inner : [of, ...inner];
+    }
+    case "and":
+    case "or":
+      return rule.rules.flatMap(inner => segmentsRead(inner, root, elements));
+    case "not":
+      return segmentsRead(rule.rule, root, elements);
+  }
+}
+
+function guardReadSegmentsOf(implementation: AnyImplementation | undefined): readonly (readonly string[])[] {
+  if (implementation === undefined) {
+    return [];
+  }
+  return Object.entries(implementation.cases).flatMap(([tag, decision]) => {
+    if (decision.kind !== "rules") {
+      return [];
+    }
+    const root = [`@${tag}`];
+    const matched =
+      typeof decision.otherwise === "function"
+        ? []
+        : [[...root, ...termData(decision.otherwise.on).path.map(key => `.${key}`)]];
+    return [...decision.guards.flatMap(item => segmentsRead(item.condition, root, new Map())), ...matched];
+  });
+}
+
+function namedSegments(position: Position): readonly string[] {
+  const [inputCase, ...rest] = position.segments;
+  return [inputCase!, ...rest.filter(segment => segment !== "?" && !segment.startsWith("@"))];
+}
+
+// A disregarded position a guard reads is kept rather than dropped, since the
+// guard's classes are attached to it; only what its type and invariants owe goes.
+function measuredPositionsOf(
+  definition: AnyBehavior,
+  guardDivided: ReadonlySet<string> = new Set(),
+  guardRead: readonly (readonly string[])[] = [],
+): readonly Position[] {
+  return positionsOf(definition.input).flatMap((position): Position[] => {
+    if (!isDisregarded(definition, position)) {
+      return [position];
+    }
+    const named = namedSegments(position);
+    if (guardRead.some(trail => named.every((segment, index) => trail[index] === segment))) {
+      return [{ ...position, borders: [] }];
+    }
+    if (!guardDivided.has(trailKey(position.segments))) {
+      return [];
+    }
+    return [
+      position.kind === "divided"
+        ? { ...position, classes: [], excluded: [], borders: [] }
+        : { ...position, borders: [] },
+    ];
+  });
+}
+
+const DISREGARD_COMBINATION_LIMIT = 255;
+// Not the combinations alone: moves are tried before a combination is known to
+// be one the input can hold, so the candidates tried that way are bounded too.
+const DISREGARD_CANDIDATE_LIMIT = 4096;
+
+function disregardLimit(name: string, given: number | undefined, fallback: number): number {
+  if (given === undefined) {
+    return fallback;
+  }
+  if (!Number.isSafeInteger(given) || given <= 0) {
+    throw new SpecificationError(`disregards.${name} must be a positive integer, but was ${given}`);
+  }
+  return given;
+}
+
+interface DisregardMove {
+  readonly label: string;
+  apply(given: unknown): unknown;
+  reached(varied: unknown): boolean;
+}
+
+type DisregardCheck =
+  | { readonly kind: "held" }
+  | { readonly kind: "broken"; readonly failure: ExampleFailure }
+  | { readonly kind: "not checked"; readonly incompleteness: Incompleteness };
+
+async function disregardBroken(
+  implementation: AnyImplementation,
+  row: Example<AnyBehavior>,
+  answered: unknown,
+  standIns: unknown,
+  limits: { readonly combinations: number; readonly candidates: number },
+): Promise<DisregardCheck> {
+  const definition = implementation.behavior;
+  const tag = tagOf(definition.input, row.given);
+  const kept = positionsOf(definition.input).filter(
+    position => isUnder(position, [`@${tag}`]) && !isDisregarded(definition, position),
+  );
+  const readKept = (given: unknown) =>
+    kept.map(position => [
+      position.kind === "divided" ? position.classify(given) : [],
+      position.borders.map(border => coordinatesIn(position, border.measure, given)),
+    ]);
+  const keptOriginally = readKept(row.given);
+  const axes = positionsOf(definition.input).flatMap(position => {
+    if (!isUnder(position, [`@${tag}`]) || !isDisregarded(definition, position)) {
+      return [];
+    }
+    return position.instancesIn(row.given).flatMap(instance => {
+      const classes = position.kind === "divided" ? position : undefined;
+      const located = instance as DividedInstance;
+      const classified = (given: unknown) => (classes === undefined ? [] : located.classify(given));
+      const taken = classified(row.given);
+      const coordinates = (given: unknown) =>
+        position.borders.map(border => coordinatesIn(instance, border.measure, given));
+      const original = coordinates(row.given);
+      const classMoves: DisregardMove[] =
+        classes === undefined
+          ? []
+          : classes.classes
+              .filter(className => !taken.includes(className) && !classes.excluded.includes(className))
+              .map(className => ({
+                label: className,
+                apply: given => located.place(given, className),
+                reached: varied => located.classify(varied).includes(className),
+              }));
+      const pointMoves: DisregardMove[] = position.borders.flatMap((border, index) =>
+        border.points.flatMap(point =>
+          point.status !== "owed" ||
+          point.witness === undefined ||
+          original[index]!.some(value => point.contains(value))
+            ? []
+            : [
+                {
+                  label: `${point.role} (${point.relation})`,
+                  apply: (given: unknown) => instance.write(given, border.measure, point.witness),
+                  reached: (varied: unknown) =>
+                    coordinatesIn(instance, border.measure, varied).some(value => point.contains(value)),
+                },
+              ],
+        ),
+      );
+      const moves = [...classMoves, ...pointMoves];
+      return moves.length === 0
+        ? []
+        : [
+            {
+              path: instance.path,
+              moves,
+              unmoved: (varied: unknown) =>
+                (isDeepStrictEqual(classified(varied), taken) &&
+                  isDeepStrictEqual(coordinates(varied), original)) ||
+                (classified(varied).length === 0 && coordinates(varied).every(values => values.length === 0)),
+            },
+          ];
+    });
+  });
+  const candidates = axes.reduce((total, axis) => total * (axis.moves.length + 1), 1) - 1;
+  if (candidates > limits.candidates) {
+    return {
+      kind: "not checked",
+      incompleteness: {
+        kind: "disregards not checked",
+        subject: row.name,
+        reason: `disregardsの組み合わせの候補が${candidates}通りあり、上限の${limits.candidates}通りを超えるため数えていない`,
+      },
+    };
+  }
+  const combinations = axes
+    .reduce<(DisregardMove | undefined)[][]>(
+      (partial, axis) => partial.flatMap(choice => [undefined, ...axis.moves].map(move => [...choice, move])),
+      [[]],
+    )
+    .filter(choice => choice.some(move => move !== undefined))
+    .flatMap(choice => {
+      const varied = choice.reduce<unknown>((given, move) => (move === undefined ? given : move.apply(given)), row.given);
+      const holds = axes.every((axis, index) => {
+        const move = choice[index];
+        return move === undefined ? axis.unmoved(varied) : move.reached(varied);
+      });
+      return holds &&
+        isDeepStrictEqual(readKept(varied), keptOriginally) &&
+        definition.input.parse(varied).success
+        ? [{ choice, varied }]
+        : [];
+    })
+    .sort((left, right) => {
+      const moved = (choice: readonly (DisregardMove | undefined)[]) =>
+        choice.flatMap((move, index) => (move === undefined ? [] : [index]));
+      const [a, b] = [moved(left.choice), moved(right.choice)];
+      const first = a.findIndex((index, at) => index !== b[at]);
+      return a.length - b.length || (first === -1 ? 0 : a[first]! - b[first]!);
+    });
+  if (combinations.length > limits.combinations) {
+    return {
+      kind: "not checked",
+      incompleteness: {
+        kind: "disregards not checked",
+        subject: row.name,
+        reason: `disregardsの組み合わせが${combinations.length}通りあり、上限の${limits.combinations}通りを超えるため確かめていない`,
+      },
+    };
+  }
+  for (const { choice, varied } of combinations) {
+    const outcome = await runTraced(implementation, varied as never, standIns as never).then(
+      (traced): { readonly text: string; readonly error?: string } | undefined =>
+        isDeepStrictEqual(traced.execution, answered) ? undefined : { text: "its answer changed" },
+      (error: unknown) => ({ text: "it threw", error: error instanceof Error ? error.message : String(error) }),
+    );
+    if (outcome !== undefined) {
+      const moved = axes.flatMap((axis, index) => {
+        const move = choice[index];
+        return move === undefined ? [] : [{ path: axis.path, label: move.label }];
+      });
+      return {
+        kind: "broken",
+        failure: {
+          name: row.name,
+          message: `${definition.name} disregards ${moved.map(item => item.path).join(", ")}, but ${outcome.text} when ${moved
+            .map(item => `${item.path} was ${item.label}`)
+            .join(" and ")}${outcome.error === undefined ? "" : `: ${outcome.error}`}`,
+        },
+      };
+    }
+  }
+  return { kind: "held" };
 }

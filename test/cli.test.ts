@@ -141,6 +141,42 @@ describe("chisel check with a composition", () => {
   });
 });
 
+describe("chisel check with disregards it did not check", () => {
+  it("prints each row whose disregarded combinations it did not try, apart from rows it could not run", async () => {
+    const result = await run(["check", fixture("test/fixtures/disregards-not-checked.ts")]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^  ! disregardsを確かめていない行: 全部倒れた — disregardsの組み合わせが511通りあり、上限の255通りを超えるため確かめていない$/m,
+    );
+  });
+});
+
+describe("chisel check with the limits of the disregards check", () => {
+  it("takes the limit on the combinations it tries from an option", async () => {
+    const result = await run([
+      "check",
+      fixture("test/fixtures/disregards-not-checked.ts"),
+      "--disregard-combinations",
+      "1000",
+    ]);
+
+    expect(stdoutOf(result)).not.toMatch(/disregardsを確かめていない行/);
+  });
+
+  it("takes the limit on the candidates it counts from an option", async () => {
+    const result = await run([
+      "check",
+      fixture("test/fixtures/disregards-not-checked.ts"),
+      "--disregard-candidates",
+      "10",
+    ]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^  ! disregardsを確かめていない行: 全部倒れた — disregardsの組み合わせの候補が511通りあり、上限の10通りを超えるため数えていない$/m,
+    );
+  });
+});
+
 describe("chisel check with an external implementation", () => {
   it("prints each row it could not run and why", async () => {
     const result = await run(["check", fixture("test/fixtures/external.ts")]);

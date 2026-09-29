@@ -52,11 +52,21 @@ const checkCommand = defineCommand({
     json: arg(z.boolean().default(false), {
       description: "レポートをJSONで出力する",
     }),
+    disregardCombinations: arg(z.coerce.number().int().positive().optional(), {
+      description: "disregardsの確認で試す組み合わせの上限（既定は255）",
+    }),
+    disregardCandidates: arg(z.coerce.number().int().positive().optional(), {
+      description: "disregardsの確認で数える候補の上限（既定は4096）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
+    const disregards = {
+      ...(args.disregardCombinations === undefined ? {} : { combinations: args.disregardCombinations }),
+      ...(args.disregardCandidates === undefined ? {} : { candidates: args.disregardCandidates }),
+    };
     const reports = await Promise.all(
-      targets.map(target => check(target.specification)),
+      targets.map(target => check(target.specification, { disregards })),
     );
     if (args.json) {
       const document = reportDocument(reports, { id: resolve(args.file), name: args.file });
@@ -188,7 +198,9 @@ function formatReport(report: AdequacyReport): string {
     lines.push(`  ! 制御未決定: ${gap.effect} — ${gap.reason}`);
   }
   for (const item of report.incompleteness) {
-    if (!report.failures.some(failure => failure.name === item.subject)) {
+    if (item.kind === "disregards not checked") {
+      lines.push(`  ! disregardsを確かめていない行: ${item.subject} — ${item.reason}`);
+    } else if (!report.failures.some(failure => failure.name === item.subject)) {
       lines.push(`  ! 実行できなかった行: ${item.subject} — ${item.reason}`);
     }
   }

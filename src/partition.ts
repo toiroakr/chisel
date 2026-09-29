@@ -28,6 +28,7 @@ export type Position = DividedPosition | UndividedPosition;
 export interface DividedPosition {
   readonly kind: "divided";
   readonly path: string;
+  readonly segments: readonly string[];
   readonly classes: readonly string[];
   readonly excluded: readonly string[];
   readonly borders: readonly Border[];
@@ -35,10 +36,24 @@ export interface DividedPosition {
   write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
   classify(given: unknown): readonly string[];
   place(given: unknown, className: string): unknown;
+  instancesIn(given: unknown): readonly DividedInstance[];
+}
+
+// One place a position's value sits in a given value: each element of an array
+// and each entry of a record is its own, so one can be moved without the others.
+export interface PositionInstance {
+  readonly path: string;
+  valuesIn(given: unknown): readonly unknown[];
+  write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
+}
+
+export interface DividedInstance extends PositionInstance {
+  classify(given: unknown): readonly string[];
+  place(given: unknown, className: string): unknown;
 }
 
 export function coordinatesIn(
-  position: Position,
+  position: Position | PositionInstance,
   measure: Border["measure"],
   given: unknown,
 ): readonly unknown[] {
@@ -51,15 +66,69 @@ export function coordinatesIn(
 export interface UndividedPosition {
   readonly kind: "not-derivable" | "bounded";
   readonly path: string;
+  readonly segments: readonly string[];
   readonly borders: readonly Border[];
   valuesIn(given: unknown): readonly unknown[];
   write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
+  instancesIn(given: unknown): readonly PositionInstance[];
 }
 
 interface Focus {
   reach(given: unknown): readonly unknown[];
   update(given: unknown, change: (value: unknown) => unknown): unknown;
+  instances(given: unknown): readonly Located[];
 }
+
+interface Located {
+  readonly focus: Focus;
+  readonly trail: readonly string[];
+}
+
+interface Step {
+  reach(value: unknown): readonly unknown[];
+  update(value: unknown, change: (value: unknown) => unknown): unknown;
+}
+
+function through(outer: Focus, inner: Step): Focus {
+  const focus: Focus = {
+    reach: given => outer.reach(given).flatMap(value => inner.reach(value)),
+    update: (given, change) => outer.update(given, value => inner.update(value, change)),
+    instances: () => [{ focus, trail: [] }],
+  };
+  return focus;
+}
+
+// `whole` reaches every value the step holds and writes as coverage needs (the
+// first element, every entry); `each` names the steps that reach one of them.
+function descend(
+  parent: Focus,
+  whole: Step,
+  each: (value: unknown) => readonly (readonly [Step, string])[],
+): Focus {
+  return {
+    ...through(parent, whole),
+    instances: given =>
+      parent.instances(given).flatMap(({ focus, trail }) =>
+        each(focus.reach(given)[0]).map(([step, label]) => ({
+          focus: through(focus, step),
+          trail: [...trail, label],
+        })),
+      ),
+  };
+}
+
+function rootFocus(): Focus {
+  const focus: Focus = {
+    reach: given => [given],
+    update: (given, change) => change(given),
+    instances: () => [{ focus, trail: [] }],
+  };
+  return focus;
+}
+
+// Segments rather than one rendered string, so a key holding "." or "[]" never
+// reads as the nested path it happens to spell.
+type Trail = readonly string[];
 
 interface Reading {
   readonly containers: boolean;
@@ -69,34 +138,31 @@ export function positionsOf(
   input: AnyVariantsSchema,
   reading: Reading = { containers: false },
 ): readonly Position[] {
-  return underCases(
-    input,
-    "",
-    {
-      reach: given => [given],
-      update: (given, change) => change(given),
-    },
-    reading,
-  );
+  return underCases(input, [], rootFocus(), reading);
 }
 
 function underCases(
   schema: AnyVariantsSchema,
-  path: string,
+  path: Trail,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
 ): Position[] {
   const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
-  return schema.variantTags.flatMap(tag =>
-    fieldsOf(schema.variants[tag] as ObjectSchema<ObjectShape>, `${path}@${tag}`, {
-      reach: given => focus.reach(given).filter(value => tagOf(schema, value) === tag),
-      update: (given, change) =>
-        focus.update(given, value =>
-          change(tagOf(schema, value) === tag ? value : schema.placeholderFor(tag)),
-        ),
-    }, reading, rules),
-  );
+  return schema.variantTags.flatMap(tag => {
+    const narrowed: Step = {
+      reach: value => (tagOf(schema, value) === tag ? [value] : []),
+      update: (value, change) =>
+        change(tagOf(schema, value) === tag ? value : schema.placeholderFor(tag)),
+    };
+    return fieldsOf(
+      schema.variants[tag] as ObjectSchema<ObjectShape>,
+      [...path, `@${tag}`],
+      descend(focus, narrowed, () => [[narrowed, `@${tag}`]]),
+      reading,
+      rules,
+    );
+  });
 }
 
 export function excludedCases(schema: AnyVariantsSchema, inherited: readonly Rule[] = []): string[] {
@@ -111,45 +177,44 @@ export function excludedCases(schema: AnyVariantsSchema, inherited: readonly Rul
 
 function fieldsOf(
   schema: ObjectSchema<ObjectShape>,
-  path: string,
+  path: Trail,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
 ): Position[] {
   const rules = [...schema.invariants.flatMap(conjuncts), ...inherited];
-  return Object.entries(schema.shape).flatMap(([key, field]) =>
-    positionAt(
-      field,
-      `${path}.${key}`,
-      {
-        reach: given =>
-          focus.reach(given).map(value => (value as Readonly<Record<string, unknown>>)[key]),
-        update: (given, change) =>
-          focus.update(given, value => {
-            const record = value as Readonly<Record<string, unknown>>;
-            const next = change(record[key]);
-            if (next === undefined) {
-              const { [key]: _removed, ...rest } = record;
-              return rest;
-            }
-            return { ...record, [key]: next };
-          }),
+  return Object.entries(schema.shape).flatMap(([key, field]) => {
+    const member: Step = {
+      reach: value => [(value as Readonly<Record<string, unknown>>)[key]],
+      update: (value, change) => {
+        const record = value as Readonly<Record<string, unknown>>;
+        const next = change(record[key]);
+        if (next === undefined) {
+          const { [key]: _removed, ...rest } = record;
+          return rest;
+        }
+        return { ...record, [key]: next };
       },
+    };
+    return positionAt(
+      field,
+      [...path, `.${key}`],
+      descend(focus, member, () => [[member, `.${key}`]]),
       reading,
       rules.flatMap(rule => {
         const inner = stepInto(rule, key);
         return inner === undefined ? [] : [inner];
       }),
       key,
-    ),
-  );
+    );
+  });
 }
 
 // `field` is the key of the object field holding this position, carried down
 // rather than read back from `path`, since a key may itself hold ".", "[]" or "?".
 function positionAt(
   schema: AnySchema,
-  path: string,
+  path: Trail,
   focus: Focus,
   reading: Reading,
   inherited: readonly Rule[] = [],
@@ -171,12 +236,8 @@ function positionAt(
       ),
       ...positionAt(
         inner,
-        `${path}?`,
-        {
-          reach: given => focus.reach(given).filter(value => value !== undefined),
-          update: (given, change) =>
-            focus.update(given, value => change(value === undefined ? inner.placeholder(field) : value)),
-        },
+        [...path, "?"],
+        descend(focus, present(inner, field), () => [[present(inner, field), "?"]]),
         reading,
         [],
         field,
@@ -194,35 +255,67 @@ function positionAt(
   }
   if (schema.kind === "array") {
     const element = (schema as ArraySchema<unknown>).element;
-    const elements = positionAt(element, `${path}[]`, {
-      reach: given => focus.reach(given).flatMap(value => (Array.isArray(value) ? value : [])),
-      update: (given, change) =>
-        focus.update(given, value => {
-          const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder(field)];
-          return items.map((item, index) => (index === 0 ? change(item) : item));
-        }),
-    }, reading, [], field);
-    return withOwnBorders(path, borders, focus, elements, reading);
+    const first: Step = {
+      reach: value => (Array.isArray(value) ? value : []),
+      update: (value, change) => {
+        const items = Array.isArray(value) && value.length > 0 ? value : [element.placeholder(field)];
+        return items.map((item, index) => (index === 0 ? change(item) : item));
+      },
+    };
+    const at = (index: number): Step => ({
+      reach: value => (Array.isArray(value) && index < value.length ? [value[index]] : []),
+      update: (value, change) =>
+        (value as readonly unknown[]).map((item, other) => (other === index ? change(item) : item)),
+    });
+    const elements = positionAt(
+      element,
+      [...path, "[]"],
+      descend(focus, first, value =>
+        Array.isArray(value) && value.length > 0
+          ? value.map((_, index) => [at(index), `[${index}]`] as const)
+          : [[first, "[0]"]],
+      ),
+      reading,
+      [],
+      field,
+    );
+    return withOwnBorders(path, borders, focus, elements, reading, () => element.placeholder(field));
   }
   if (schema.kind === "record") {
-    const values = positionAt((schema as RecordSchema<unknown>).value, `${path}{}`, {
-      reach: given =>
-        focus
-          .reach(given)
-          .flatMap(value =>
-            typeof value === "object" && value !== null ? Object.values(value) : [],
-          ),
-      update: (given, change) =>
-        focus.update(given, value => {
-          const entries = Object.entries((value ?? {}) as Readonly<Record<string, unknown>>);
-          const present =
-            entries.length > 0
-              ? entries
-              : [["<key>", (schema as RecordSchema<unknown>).value.placeholder(field)] as const];
-          return Object.fromEntries(present.map(([key, item]) => [key, change(item)]));
-        }),
-    }, reading, [], field);
-    return withOwnBorders(path, borders, focus, values, reading);
+    const every: Step = {
+      reach: value => (typeof value === "object" && value !== null ? Object.values(value) : []),
+      update: (value, change) => {
+        const entries = Object.entries((value ?? {}) as Readonly<Record<string, unknown>>);
+        const present =
+          entries.length > 0
+            ? entries
+            : [["<key>", (schema as RecordSchema<unknown>).value.placeholder(field)] as const];
+        return Object.fromEntries(present.map(([key, item]) => [key, change(item)]));
+      },
+    };
+    const entry = (key: string): Step => ({
+      reach: value => [(value as Readonly<Record<string, unknown>>)[key]],
+      update: (value, change) => ({
+        ...(value as Readonly<Record<string, unknown>>),
+        [key]: change((value as Readonly<Record<string, unknown>>)[key]),
+      }),
+    });
+    const values = positionAt(
+      (schema as RecordSchema<unknown>).value,
+      [...path, "{}"],
+      descend(focus, every, value => {
+        const keys = typeof value === "object" && value !== null ? Object.keys(value) : [];
+        return keys.length > 0
+          ? keys.map(key => [entry(key), `{${JSON.stringify(key)}}`] as const)
+          : [[every, `{${JSON.stringify("<key>")}}`]];
+      }),
+      reading,
+      [],
+      field,
+    );
+    return withOwnBorders(path, borders, focus, values, reading, () =>
+      (schema as RecordSchema<unknown>).value.placeholder(field),
+    );
   }
   if (schema.kind === "object") {
     return fieldsOf(schema as ObjectSchema<ObjectShape>, path, focus, reading, inherited);
@@ -249,20 +342,28 @@ function positionAt(
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
-      path,
+      path: path.join(""),
+      segments: path,
       borders,
       valuesIn: focus.reach,
       write: writer(focus),
+      instancesIn: given =>
+        focus.instances(given).map(({ focus: located, trail }) => ({
+          path: trail.join(""),
+          valuesIn: located.reach,
+          write: writer(located),
+        })),
     },
   ];
 }
 
 function withOwnBorders(
-  path: string,
+  path: Trail,
   borders: readonly Border[],
   focus: Focus,
   inner: readonly Position[],
   reading: Reading,
+  empty: () => unknown,
 ): Position[] {
   if (borders.length === 0 && !reading.containers) {
     return [...inner];
@@ -270,19 +371,26 @@ function withOwnBorders(
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
-      path,
+      path: path.join(""),
+      segments: path,
       borders,
       valuesIn: focus.reach,
-      write: writer(focus),
+      write: writer(focus, empty),
+      instancesIn: given =>
+        focus.instances(given).map(({ focus: located, trail }) => ({
+          path: trail.join(""),
+          valuesIn: located.reach,
+          write: writer(located, empty),
+        })),
     },
     ...inner,
   ];
 }
 
-function writer(focus: Focus): Position["write"] {
+function writer(focus: Focus, empty?: () => unknown): Position["write"] {
   return (given, measure, coordinate) =>
     focus.update(given, current =>
-      measure === "length" ? resize(current, coordinate as number) : coordinate,
+      measure === "length" ? resize(current, coordinate as number, empty) : coordinate,
     );
 }
 
@@ -311,7 +419,7 @@ export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrie
 }
 
 function divided(
-  path: string,
+  path: Trail,
   classes: readonly string[],
   focus: Focus,
   classOf: (value: unknown) => string | undefined,
@@ -323,7 +431,8 @@ function divided(
 ): DividedPosition {
   return {
     kind: "divided",
-    path,
+    path: path.join(""),
+    segments: path,
     classes: [...classes],
     excluded: classes.filter(className =>
       refusal.rules.some(rule => !holds(rule, refusal.sample(className))),
@@ -337,5 +446,24 @@ function divided(
         .map(classOf)
         .filter((value): value is string => value !== undefined),
     place: (given, className) => focus.update(given, () => witness(className)),
+    instancesIn: given =>
+      focus.instances(given).map(({ focus: located, trail }) => ({
+        path: trail.join(""),
+        valuesIn: located.reach,
+        write: writer(located),
+        classify: inner =>
+          located
+            .reach(inner)
+            .map(classOf)
+            .filter((value): value is string => value !== undefined),
+        place: (inner, className) => located.update(inner, () => witness(className)),
+      })),
+  };
+}
+
+function present(inner: AnySchema, field: string | undefined): Step {
+  return {
+    reach: value => (value === undefined ? [] : [value]),
+    update: (value, change) => change(value === undefined ? inner.placeholder(field) : value),
   };
 }

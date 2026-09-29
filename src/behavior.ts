@@ -2,6 +2,9 @@ import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
   Infer,
+  ObjectSchema,
+  ObjectShape,
+  OptionalSchema,
   Schema,
   Tags,
   VariantOf,
@@ -114,7 +117,24 @@ export interface Behavior<
   readonly effects: EffectSchema;
   readonly requires: Requires;
   readonly ensures: readonly EnsuresClause[];
+  readonly disregards: Readonly<Record<string, readonly (readonly string[])[]>>;
 }
+
+type KeysOfEvery<T> = T extends unknown ? keyof T : never;
+
+type ValueAt<T, K> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
+
+type Merged<T, Keys extends PropertyKey> = { readonly [K in Keys]: ValueAt<T, K> };
+
+type Fielded<T> = Merged<T, KeysOfEvery<T>>;
+
+type Disregarded<T> = (input: TermOf<T>) => readonly Term<unknown>[];
+
+export type Disregards<InputSchema extends AnyVariantsSchema> = {
+  readonly [Key in Tags<InputSchema> | "$default"]?: Key extends Tags<InputSchema>
+    ? Disregarded<VariantOf<InputSchema, Key>>
+    : Disregarded<Fielded<Infer<InputSchema>>>;
+};
 
 export type AnyBehavior = Behavior<AnyVariantsSchema, Schema<unknown>, AnyVariantsSchema, Requirements>;
 
@@ -227,7 +247,11 @@ export function behavior<
   readonly ensures?: (
     clause: EnsuresBuilder<Infer<InputSchema>, ResultSchema>,
   ) => readonly EnsuresClause[];
+  readonly disregards?: Disregards<NoInfer<InputSchema>>;
 }): Behavior<InputSchema, ResultSchema, EffectSchema, Requires> {
+  if (options.input.variantTags.includes("$default")) {
+    throw new SpecificationError(`${name} cannot take a case named $default`);
+  }
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
   const repeated = clauses.find(
     (clause, index) => clauses.findIndex(other => other.name === clause.name) !== index,
@@ -251,7 +275,37 @@ export function behavior<
     effects: options.effects,
     requires: options.requires ?? ({} as Requires),
     ensures: clauses,
+    disregards: disregardedPaths(name, options.input, options.disregards ?? {}),
   };
+}
+
+function disregardedPaths(
+  name: string,
+  input: AnyVariantsSchema,
+  written: Readonly<Record<string, ((input: never) => readonly Term<unknown>[]) | undefined>>,
+): Readonly<Record<string, readonly (readonly string[])[]>> {
+  const pathsOf = (builder: (input: never) => readonly Term<unknown>[]) =>
+    builder(selfTerm() as never).map(term => termData(term).path);
+  const byDefault = written.$default === undefined ? [] : pathsOf(written.$default);
+  const covered = input.variantTags.filter(tag => ownAt(written, tag) === undefined);
+  const declares = (tag: string, keys: readonly string[]) =>
+    reachesPath(input.variants[tag] as Schema<unknown>, keys);
+  const stray = byDefault.find(keys => !covered.some(tag => declares(tag, keys)));
+  if (stray !== undefined) {
+    throw new SpecificationError(
+      `${name} disregards ${stray.join(".")}, which no case $default covers declares`,
+    );
+  }
+  return Object.fromEntries(
+    input.variantTags.flatMap(tag => {
+      const builder = ownAt(written, tag);
+      if (builder !== undefined) {
+        return [[tag, pathsOf(builder)]];
+      }
+      const paths = byDefault.filter(keys => declares(tag, keys));
+      return paths.length === 0 ? [] : [[tag, paths]];
+    }),
+  );
 }
 
 function ensuresBuilder<Input, ResultSchema extends Schema<unknown>>(): EnsuresBuilder<
@@ -286,22 +340,84 @@ export function brokenEnsures(
   );
 }
 
+type CaseDecision<B extends AnyBehavior, Input> =
+  | Decision<Input, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+  | RulesDecision<Input, BehaviorResult<B>, BehaviorEffect<B>, BehaviorDeps<B>>
+  | Todo;
+
+export type CasesWithDefault<B extends AnyBehavior> =
+  | ImplementationCases<B>
+  | (Partial<ImplementationCases<B>> & {
+      readonly $default: CaseDecision<B, BehaviorInput<B>>;
+    });
+
 export function implement<B extends AnyBehavior>(
   definition: B,
   options: NoInfer<{
-    readonly cases: ImplementationCases<B>;
+    readonly cases: CasesWithDefault<B>;
     readonly controls?: ControlTable<B["effects"]>;
   }>,
 ): Implementation<NoInfer<B>> {
-  for (const [tag, decision] of Object.entries(options.cases) as [string, unknown][]) {
-    checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
+  const cases = casesWithoutDefault(definition, options.cases);
+  const tagsOf = new Map<unknown, string[]>();
+  for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
+    tagsOf.set(decision, [...(tagsOf.get(decision) ?? []), tag]);
+  }
+  for (const [decision, tags] of tagsOf) {
+    checkMatch(definition, tags, decision as ImplementationCases<AnyBehavior>[string]);
   }
   return {
     kind: "implementation",
     behavior: definition,
-    cases: options.cases,
+    cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+// Not schemaAtPath: that stops at a sum so a match selects its discriminant,
+// while a term reaches a field through a nested sum any of whose cases declares it.
+function reachesPath(schema: Schema<unknown>, keys: readonly string[]): boolean {
+  const unwrapped =
+    (schema as { readonly kind?: string }).kind === "optional"
+      ? (schema as OptionalSchema<unknown>).schema
+      : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) {
+    return true;
+  }
+  if (isVariantsSchema(unwrapped)) {
+    return Object.values(unwrapped.variants).some(variant =>
+      reachesPath(variant as Schema<unknown>, keys),
+    );
+  }
+  if ((unwrapped as { readonly kind?: string }).kind !== "object") {
+    return false;
+  }
+  const { shape } = unwrapped as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) && reachesPath(shape[key]!, rest);
+}
+
+// A case may be named like an Object.prototype member, such as toString, so a
+// plain index would read the inherited method as the builder or decision written.
+function ownAt<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function casesWithoutDefault<B extends AnyBehavior>(
+  definition: B,
+  written: CasesWithDefault<B>,
+): ImplementationCases<B> {
+  const { $default: fallback, ...cases } = written as Readonly<Record<string, unknown>>;
+  if (fallback === undefined) {
+    return written as ImplementationCases<B>;
+  }
+  const left = definition.input.variantTags.filter(tag => ownAt(cases, tag) === undefined);
+  if (left.length === 0) {
+    throw new SpecificationError(`$default of ${definition.name} decides no case`);
+  }
+  return Object.fromEntries(
+    definition.input.variantTags.map(tag => [tag, ownAt(cases, tag) ?? fallback]),
+  ) as ImplementationCases<B>;
 }
 
 export function external<B extends AnyBehavior>(definition: B, reason: string): Implementation<B> {
@@ -316,32 +432,36 @@ export function external<B extends AnyBehavior>(definition: B, reason: string): 
 
 function checkMatch(
   definition: AnyBehavior,
-  tag: string,
+  tags: readonly string[],
   decision: ImplementationCases<AnyBehavior>[string],
 ): void {
   if (decision?.kind !== "rules" || typeof decision.otherwise === "function") {
     return;
   }
   const keys = termData(decision.otherwise.on).path;
-  const selected = schemaAtPath(
-    definition.input.variants[tag] as Schema<unknown>,
-    keys.slice(0, -1),
-  );
-  if (
-    selected === undefined ||
-    !isVariantsSchema(selected) ||
-    selected.discriminant !== keys[keys.length - 1]
-  ) {
-    throw new SpecificationError(
-      `match in ${decision.id} does not select the discriminant of a sum field`,
+  const sumTags = new Set<string>();
+  for (const tag of tags) {
+    const selected = schemaAtPath(
+      definition.input.variants[tag] as Schema<unknown>,
+      keys.slice(0, -1),
     );
+    if (
+      selected === undefined ||
+      !isVariantsSchema(selected) ||
+      selected.discriminant !== keys[keys.length - 1]
+    ) {
+      throw new SpecificationError(
+        `match in ${decision.id} does not select the discriminant of a sum field`,
+      );
+    }
+    selected.variantTags.forEach(caseTag => sumTags.add(caseTag));
   }
   const written = Object.keys(decision.otherwise.cases);
-  const missing = selected.variantTags.find(caseTag => !written.includes(caseTag));
+  const missing = [...sumTags].find(caseTag => !written.includes(caseTag));
   if (missing !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has no case for ${missing}`);
   }
-  const unknown = written.find(caseTag => !selected.variantTags.includes(caseTag));
+  const unknown = written.find(caseTag => !sumTags.has(caseTag));
   if (unknown !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the sum does not`);
   }

@@ -86,9 +86,11 @@ export type {
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
+  CasesWithDefault,
   ControlPolicy,
   ControlTable,
   Decision,
+  Disregards,
   EnsuresBuilder,
   EnsuresClause,
   Execution,
@@ -112,6 +114,7 @@ export {
 } from "./specification.js";
 export type {
   AdequacyReport,
+  CheckOptions,
   ArmCoverage,
   BehaviorWith,
   BorderCoverage,
