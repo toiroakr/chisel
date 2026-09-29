@@ -1448,7 +1448,7 @@ function guardReadSegmentsOf(implementation: AnyImplementation | undefined): rea
     const matched =
       typeof decision.otherwise === "function"
         ? []
-        : [[...root, ...termData(decision.otherwise.on).path.slice(0, -1).map(key => `.${key}`)]];
+        : [[...root, ...termData(decision.otherwise.on).path.map(key => `.${key}`)]];
     return [...decision.guards.flatMap(item => segmentsRead(item.condition, root, new Map())), ...matched];
   });
 }

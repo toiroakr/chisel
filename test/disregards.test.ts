@@ -11,6 +11,7 @@ import {
   generate,
   implement,
   int,
+  match,
   object,
   record,
   spec,
@@ -961,5 +962,29 @@ describe("a guard reads a nested field apart from a key that spells its path", (
     expect(report.partitions.map(partition => [partition.path, partition.kind])).toStrictEqual([
       ["@提出済み.注文.メモ", "divided"],
     ]);
+  });
+});
+
+describe("a match reads the field it selects on", () => {
+  const 答える = (結果: "済" | "保留") => () => ({ result: { 結果 }, effects: [] });
+
+  it("keeps the classes of a disregarded sum field a match selects on", () => {
+    const 払う = behavior("払う", {
+      input: variants("状態", {
+        確定: object({ 支払: variants("方法", { 現金: object({}), カード: object({}) }) }),
+      }),
+      result: variants("結果", { 済: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.支払] },
+    });
+    const 実装 = implement(払う, {
+      cases: {
+        確定: action("方法で分ける", {
+          run: match(r => r.支払.方法, { 現金: 答える("済"), カード: 答える("保留") }),
+        }),
+      },
+    });
+
+    expect(generate(払う, 実装).rows.map(row => row.name)).toContain("払う: @確定.支払 = カード");
   });
 });
