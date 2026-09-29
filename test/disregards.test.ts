@@ -5,6 +5,7 @@ import {
   behavior,
   boolean,
   check,
+  compose,
   dependency,
   examples,
   generate,
@@ -747,6 +748,57 @@ describe("the ancestors of a field a guard reads", () => {
     expect(report.partitions.map(partition => partition.path)).toStrictEqual([
       "@提出済み.詳細",
       "@提出済み.詳細?.至急",
+    ]);
+  });
+});
+
+describe("a composition takes its first stage's disregards", () => {
+  const 受け付ける = behavior("受け付ける", {
+    input: variants("状態", { 申込: object({ 数量: int(), 至急: boolean() }) }),
+    result: variants("結果", { 受付: object({ 数量: int(), 至急: boolean() }) }),
+    effects: variants("種類", {}),
+    disregards: { $default: r => [r.至急] },
+  });
+  const 見積もる = behavior("見積もる", {
+    input: variants("結果", { 受付: object({ 数量: int(), 至急: boolean() }) }),
+    result: variants("結果", { 見積: object({ 金額: int() }) }),
+    effects: variants("種類", {}),
+  });
+  const 受け付けるの実装 = implement(受け付ける, {
+    cases: {
+      申込: action("そのまま受け付ける", {
+        run: r => ({ result: { 結果: "受付", 数量: r.数量, 至急: r.至急 }, effects: [] }),
+      }),
+    },
+  });
+  const 見積もるの実装 = implement(見積もる, {
+    cases: {
+      受付: action("至急なら倍", {
+        run: r => ({ result: { 結果: "見積", 金額: r.数量 * (r.至急 ? 200 : 100) }, effects: [] }),
+      }),
+    },
+  });
+  const [受けて見積もる, 受けて見積もるの実装] = compose("受けて見積もる", [受け付けるの実装, 見積もるの実装]);
+
+  it("offers no row for the classes of a field the first stage disregards", () => {
+    expect(generate(受けて見積もる).rows.map(row => row.name)).toStrictEqual(["受けて見積もる: 申込"]);
+  });
+
+  it("fails a row whose final answer, after every stage, turns on a field the first stage disregards", async () => {
+    const report = await check(
+      spec("受けて見積もる", {
+        examples: examples(受けて見積もる, {
+          通常: {
+            given: { 状態: "申込", 数量: 1, 至急: false },
+            expect: { result: { 結果: "見積", 金額: 100 }, effects: [] },
+          },
+        }),
+        implementation: 受けて見積もるの実装,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "受けて見積もる disregards @申込.至急, but its answer changed when @申込.至急 was true",
     ]);
   });
 });
