@@ -1,5 +1,5 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
-import type { InvariantRule, Rule, TermOf } from "./rule.js";
+import type { InvariantRule, Rule, Step, TermOf } from "./rule.js";
 import { conjuncts, describeRule, holds, satisfy, selfTerm } from "./rule.js";
 
 export interface ValidationIssue {
@@ -200,9 +200,14 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         const { values } = core as unknown as EnumSchema<string>;
         return values.find(value => invariants.every(rule => holds(rule, value))) ?? core.placeholder(name);
       }
+      // A rule an object writes on an enum field moves it to the value named next.
+      const stepAt = (path: readonly string[]) => {
+        const at = schemaAtPath(schema as unknown as AnySchema, path);
+        return at?.kind === "enum" ? enumStep((at as EnumSchema<string>).values) : undefined;
+      };
       return invariants
         .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
+        .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
@@ -325,6 +330,11 @@ function plain(kind: string, type: PlainType, placeholder: string): AnySchema {
       value instanceof temporalPlain(type) ? valid(value) : invalid(path, `Expected a Temporal.${type}`),
     placeholder: () => temporalPlain(type).from(placeholder),
   });
+}
+
+function enumStep(values: readonly string[]): Step {
+  return (bound, direction) =>
+    values[(values.indexOf(bound as string) + direction + values.length) % values.length];
 }
 
 // Exported as `enum`, a word a function may not be named. Each value is a class

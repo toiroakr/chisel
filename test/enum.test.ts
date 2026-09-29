@@ -46,6 +46,12 @@ describe("enum", () => {
     expect(enumOf(["交通費"]).refine(v => v.$ne("交通費")).placeholder()).toBe("交通費");
   });
 
+  it("stands in the same way for a rule an object writes on its enum field", () => {
+    const 明細 = object({ 費目 }).refine(v => v.費目.$ne("交通費"));
+
+    expect(明細.placeholder()).toStrictEqual({ 費目: "宿泊費" });
+  });
+
   it("divides its position into its values, less the ones an invariant refuses", () => {
     const 申請 = variants("状態", {
       下書き: object({ 費目, 精算方法: enumOf(["振込", "現金"]).refine(v => v.$ne("現金")) }),
