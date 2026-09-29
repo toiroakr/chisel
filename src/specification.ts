@@ -1358,8 +1358,12 @@ function isDisregarded(definition: AnyBehavior, position: Position): boolean {
   );
 }
 
+// A term steps through an optional or a nested case without naming it, so the
+// markers for those are left out before its keys are compared with a position's.
 function isUnder(position: Position, prefix: readonly string[]): boolean {
-  return prefix.every((segment, index) => position.segments[index] === segment);
+  const [inputCase, ...rest] = position.segments;
+  const named = [inputCase, ...rest.filter(segment => segment !== "?" && !segment.startsWith("@"))];
+  return prefix.every((segment, index) => named[index] === segment);
 }
 
 // A position a guard divides is kept even when disregarded: the guard reads it,
@@ -1374,6 +1378,12 @@ function measuredPositionsOf(
 }
 
 const DISREGARD_COMBINATION_LIMIT = 255;
+
+interface DisregardMove {
+  readonly label: string;
+  apply(given: unknown): unknown;
+  reached(varied: unknown): boolean;
+}
 
 type DisregardCheck =
   | { readonly kind: "held" }
@@ -1391,20 +1401,56 @@ async function disregardBroken(
   const tag = tagOf(definition.input, row.given);
   const axes = positionsOf(definition.input).flatMap(position => {
     if (
-      position.kind !== "divided" ||
       !isUnder(position, [`@${tag}`]) ||
       guardDivided.has(position.path) ||
       !isDisregarded(definition, position)
     ) {
       return [];
     }
-    const taken = position.classify(row.given);
-    const others = position.classes.filter(
-      className => !taken.includes(className) && !position.excluded.includes(className),
+    const taken = position.kind === "divided" ? position.classify(row.given) : [];
+    const coordinates = (given: unknown) =>
+      position.borders.map(border => coordinatesIn(position, border.measure, given));
+    const original = coordinates(row.given);
+    const classMoves: DisregardMove[] =
+      position.kind !== "divided"
+        ? []
+        : position.classes
+            .filter(className => !taken.includes(className) && !position.excluded.includes(className))
+            .map(className => ({
+              label: className,
+              apply: given => position.place(given, className),
+              reached: varied => position.classify(varied).includes(className),
+            }));
+    const pointMoves: DisregardMove[] = position.borders.flatMap((border, index) =>
+      border.points.flatMap(point =>
+        point.status !== "owed" ||
+        point.witness === undefined ||
+        original[index]!.some(value => point.contains(value))
+          ? []
+          : [
+              {
+                label: `${point.role} (${point.relation})`,
+                apply: (given: unknown) => position.write(given, border.measure, point.witness),
+                reached: (varied: unknown) =>
+                  coordinatesIn(position, border.measure, varied).some(value => point.contains(value)),
+              },
+            ],
+      ),
     );
-    return others.length === 0 ? [] : [{ position, taken, others }];
+    const moves = [...classMoves, ...pointMoves];
+    return moves.length === 0
+      ? []
+      : [
+          {
+            path: position.path,
+            moves,
+            unmoved: (varied: unknown) =>
+              (position.kind !== "divided" || isDeepStrictEqual(position.classify(varied), taken)) &&
+              isDeepStrictEqual(coordinates(varied), original),
+          },
+        ];
   });
-  const count = axes.reduce((total, axis) => total * (axis.others.length + 1), 1) - 1;
+  const count = axes.reduce((total, axis) => total * (axis.moves.length + 1), 1) - 1;
   if (count > DISREGARD_COMBINATION_LIMIT) {
     return {
       kind: "not checked",
@@ -1416,28 +1462,20 @@ async function disregardBroken(
     };
   }
   const combinations = axes
-    .reduce<(string | undefined)[][]>(
-      (partial, axis) =>
-        partial.flatMap(choice => [undefined, ...axis.others].map(className => [...choice, className])),
+    .reduce<(DisregardMove | undefined)[][]>(
+      (partial, axis) => partial.flatMap(choice => [undefined, ...axis.moves].map(move => [...choice, move])),
       [[]],
     )
-    .filter(choice => choice.some(className => className !== undefined))
+    .filter(choice => choice.some(move => move !== undefined))
     .sort(
       (left, right) =>
-        left.filter(className => className !== undefined).length -
-        right.filter(className => className !== undefined).length,
+        left.filter(move => move !== undefined).length - right.filter(move => move !== undefined).length,
     );
   for (const choice of combinations) {
-    const varied = axes.reduce<unknown>(
-      (given, axis, index) =>
-        choice[index] === undefined ? given : axis.position.place(given, choice[index]!),
-      row.given,
-    );
+    const varied = choice.reduce<unknown>((given, move) => (move === undefined ? given : move.apply(given)), row.given);
     const holds = axes.every((axis, index) => {
-      const found = axis.position.classify(varied);
-      return choice[index] === undefined
-        ? isDeepStrictEqual(found, axis.taken)
-        : found.includes(choice[index]!);
+      const move = choice[index];
+      return move === undefined ? axis.unmoved(varied) : move.reached(varied);
     });
     if (!holds || !definition.input.parse(varied).success) {
       continue;
@@ -1447,15 +1485,16 @@ async function disregardBroken(
       () => true,
     );
     if (changed) {
-      const moved = axes.flatMap((axis, index) =>
-        choice[index] === undefined ? [] : [{ path: axis.position.path, className: choice[index]! }],
-      );
+      const moved = axes.flatMap((axis, index) => {
+        const move = choice[index];
+        return move === undefined ? [] : [{ path: axis.path, label: move.label }];
+      });
       return {
         kind: "broken",
         failure: {
           name: row.name,
           message: `${definition.name} disregards ${moved.map(item => item.path).join(", ")}, but its answer changed when ${moved
-            .map(item => `${item.path} was ${item.className}`)
+            .map(item => `${item.path} was ${item.label}`)
             .join(" and ")}`,
         },
       };

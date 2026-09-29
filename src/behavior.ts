@@ -284,7 +284,7 @@ function disregardedPaths(
   const pathsOf = (builder: (input: never) => readonly Term<unknown>[]) =>
     builder(selfTerm() as never).map(term => termData(term).path);
   const byDefault = written.$default === undefined ? [] : pathsOf(written.$default);
-  const covered = input.variantTags.filter(tag => written[tag] === undefined);
+  const covered = input.variantTags.filter(tag => ownAt(written, tag) === undefined);
   const declares = (tag: string, keys: readonly string[]) =>
     schemaAtPath(input.variants[tag] as Schema<unknown>, keys) !== undefined;
   const stray = byDefault.find(keys => !covered.some(tag => declares(tag, keys)));
@@ -295,7 +295,7 @@ function disregardedPaths(
   }
   return Object.fromEntries(
     input.variantTags.flatMap(tag => {
-      const builder = written[tag];
+      const builder = ownAt(written, tag);
       if (builder !== undefined) {
         return [[tag, pathsOf(builder)]];
       }
@@ -367,6 +367,12 @@ export function implement<B extends AnyBehavior>(
   };
 }
 
+// A case may be named like an Object.prototype member, such as toString, so a
+// plain index would read the inherited method as the builder or decision written.
+function ownAt<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 function casesWithoutDefault<B extends AnyBehavior>(
   definition: B,
   written: CasesWithDefault<B>,
@@ -375,12 +381,12 @@ function casesWithoutDefault<B extends AnyBehavior>(
   if (fallback === undefined) {
     return written as ImplementationCases<B>;
   }
-  const left = definition.input.variantTags.filter(tag => cases[tag] === undefined);
+  const left = definition.input.variantTags.filter(tag => ownAt(cases, tag) === undefined);
   if (left.length === 0) {
     throw new SpecificationError(`$default of ${definition.name} decides no case`);
   }
   return Object.fromEntries(
-    definition.input.variantTags.map(tag => [tag, cases[tag] ?? fallback]),
+    definition.input.variantTags.map(tag => [tag, ownAt(cases, tag) ?? fallback]),
   ) as ImplementationCases<B>;
 }
 

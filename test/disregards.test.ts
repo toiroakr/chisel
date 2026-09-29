@@ -421,3 +421,75 @@ describe("a case named $default", () => {
     ).toThrow("承認する cannot take a case named $default");
   });
 });
+
+describe("disregards and case names", () => {
+  it("takes a case named like an Object.prototype member when nothing is disregarded", () => {
+    expect(() =>
+      behavior("承認する", {
+        input: variants("状態", { toString: object({ 至急: boolean() }) }),
+        result: object({}),
+        effects: variants("種類", {}),
+      }),
+    ).not.toThrow();
+  });
+
+  it("lets $default cover a case named like an Object.prototype member", () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { toString: object({ 至急: boolean() }) }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { $default: (r: never) => [r] } as never,
+    });
+
+    expect(generate(承認する).rows.map(row => row.name)).toStrictEqual(["承認する: toString"]);
+  });
+});
+
+describe("disregards under an optional object", () => {
+  it("disregards a field of an object that is itself optional", () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", {
+        提出済み: object({ 詳細: object({ 至急: boolean() }).optional() }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+      disregards: { 提出済み: r => [r.詳細.至急] },
+    });
+
+    expect(generate(承認する).rows.map(row => row.name)).toStrictEqual([
+      "承認する: 提出済み",
+      "承認する: @提出済み.詳細 = あり",
+    ]);
+  });
+});
+
+describe("check holds a disregarded field an invariant bounds", () => {
+  it("fails a row whose answer changes at a point of the border the field would have owed", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 金額: int().min(0) }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { 提出済み: r => [r.金額] },
+    });
+    const 実装 = implement(承認する, {
+      cases: {
+        提出済み: action("金額があれば保留", {
+          run: r => (r.金額 > 0 ? { result: { 結果: "保留" }, effects: [] } : { result: { 結果: "承認" }, effects: [] }),
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          ゼロ: { given: { 状態: "提出済み", 金額: 0 }, expect: { result: { 結果: "承認" }, effects: [] } },
+        }),
+        implementation: 実装,
+      }),
+    );
+
+    expect(report.failures.map(failure => failure.message)).toStrictEqual([
+      "承認する disregards @提出済み.金額, but its answer changed when @提出済み.金額 was IN (> 0)",
+    ]);
+  });
+});
