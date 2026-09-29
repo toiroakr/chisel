@@ -3,11 +3,13 @@ import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
 import {
   bordersOf,
+  decimalUnitsCarrier,
   integerCarrier,
   nanosecondCarrier,
   normalize,
   numberCarrier,
 } from "./border.js";
+import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf } from "./partition.js";
 import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
@@ -25,11 +27,14 @@ import {
   stepInto,
   termData,
   withDeps,
+  decimalOfUnits,
+  decimalUnits,
 } from "./rule.js";
-import { object, schemaAtPath } from "./schema.js";
+import { int, object, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
+  DecimalSchema,
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
@@ -454,19 +459,25 @@ function between(
       standsIn,
       path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
       kind: measure === "length" ? "integer" : schema?.kind,
+      scale: measure === "value" && schema?.kind === "decimal" ? (schema as DecimalSchema).scale : 0,
     };
   });
   const [first, second] = sides as [(typeof sides)[number], (typeof sides)[number]];
-  const carrier = differenceCarrier(first.kind, second.kind);
+  const carrier = differenceCarrier(first, second);
   if (carrier === undefined || rule.operator === "==" || rule.operator === "!=") {
     return [];
   }
-  const moment = first.kind === second.kind ? MOMENTS[first.kind ?? ""] : undefined;
+  const moment =
+    first.kind === "decimal" || second.kind === "decimal"
+      ? decimalMoment(first, second)
+      : first.kind === second.kind
+        ? MOMENTS[first.kind ?? ""]
+        : undefined;
   const difference: CompareRule = {
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),
-    right: carrier === nanosecondCarrier ? 0n : 0,
+    right: carrier === nanosecondCarrier || first.kind === "decimal" || second.kind === "decimal" ? 0n : 0,
   };
   const borders = bordersOf([difference], () => carrier, {
     source: reading.source,
@@ -478,7 +489,7 @@ function between(
     if (value === undefined) {
       return undefined;
     }
-    return moment === undefined ? (value as number) : moment.read(value);
+    return moment === undefined ? (value as number) : moment.read(value, side);
   };
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,
@@ -490,13 +501,21 @@ function between(
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
     },
     compose: (given, coordinate, deps) => {
-      const [moving, fixed, sign] = first.standsIn ? [second, first, -1] : [first, second, 1];
+      // Move the side that can take every value of the difference: the finer of
+      // a decimal and an integer, and never a stand-in, which a row writes as given.
+      const moveSecond = first.standsIn || (!second.standsIn && second.scale > first.scale);
+      const [moving, fixed, sign] = moveSecond ? [second, first, -1] : [first, second, 1];
       const moved = moving.standsIn ? undefined : at(moving.path);
       const other = fixed.standsIn
         ? readOperand(fixed.term, withDeps({}, deps))
         : at(fixed.path)?.valuesIn(given)[0];
       if (moved === undefined || other === undefined) {
         return undefined;
+      }
+      if (moment?.write !== undefined) {
+        const units = (moment.read(other, fixed) as bigint) + BigInt(sign) * (coordinate as bigint);
+        const written = moment.write(units, moving, other);
+        return written === undefined ? undefined : moved.write(given, moving.measure, written);
       }
       if (moment !== undefined) {
         const amount = sign * Number(coordinate as number | bigint);
@@ -521,8 +540,26 @@ function between(
 }
 
 interface Moment {
-  read(value: unknown): number | bigint;
+  read(value: unknown, side?: Side): number | bigint;
   shift(value: unknown, amount: number): unknown;
+  // Writes a coordinate back as the value of a side, where the moment counts in
+  // units rather than shifting one value by another.
+  write?(units: bigint, side: Side, like: unknown): unknown;
+}
+
+// Reads two decimals as whole numbers of units of the finer scale of the two, so
+// their difference is exact, and writes one back where the other side's value
+// plus the difference lands on its own scale.
+function decimalMoment(first: Side, second: Side): Moment {
+  const scale = Math.max(first.scale, second.scale);
+  return {
+    read: value => decimalUnits(value as Decimal, scale, "floor"),
+    shift: () => undefined,
+    write: (units, side, like) => {
+      const coarser = 10n ** BigInt(scale - side.scale);
+      return units % coarser === 0n ? decimalOfUnits(like as Decimal, units / coarser, side.scale) : undefined;
+    },
+  };
 }
 
 interface Temporalish {
@@ -566,13 +603,24 @@ const MOMENTS: Readonly<Record<string, Moment>> = {
   },
 };
 
-function differenceCarrier(
-  first: string | undefined,
-  second: string | undefined,
-): Carrier | undefined {
+interface Side {
+  readonly kind: string | undefined;
+  // Digits after the decimal point, for a decimal; 0 for anything else.
+  readonly scale: number;
+}
+
+function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: second, scale: secondScale }: Side): Carrier | undefined {
   const numeric = (kind: string | undefined) => kind === "integer" || kind === "number";
   if (first === "integer" && second === "integer") {
     return integerCarrier;
+  }
+  // Two decimals count their difference in units of the finer scale; a decimal
+  // is not ordered against any other kind.
+  if (first === "decimal" && second === "decimal") {
+    return decimalUnitsCarrier(Math.max(firstScale, secondScale));
+  }
+  if (first === "decimal" || second === "decimal") {
+    return undefined;
   }
   if (numeric(first) && numeric(second)) {
     return numberCarrier;
@@ -612,20 +660,26 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
     }
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
-      const kinds = terms.map(term => {
+      const schemas = terms.map(term => {
         const { frame, keys } = locate(term, frames);
-        return termData(term).measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+        return termData(term).measure === "length" ? int() : schemaAt(frame.scope, keys);
       });
+      const sides = schemas.map(
+        (schema): Side => ({
+          kind: schema?.kind,
+          scale: schema?.kind === "decimal" ? (schema as DecimalSchema).scale : 0,
+        }),
+      );
+      const kind = schemas[0]?.kind;
       const readable =
         terms.length === 2
           ? rule.operator === "==" ||
             rule.operator === "!=" ||
-            differenceCarrier(kinds[0], kinds[1]) !== undefined
-          : kinds[0] === "boolean" ||
-            kinds[0] === "variants" ||
-            kinds[0] === "literal" ||
-            (kinds[0] !== undefined &&
-              carrierOf({ kind: kinds[0] } as AnySchema, "value") !== undefined);
+            differenceCarrier(sides[0]!, sides[1]!) !== undefined
+          : kind === "boolean" ||
+            kind === "variants" ||
+            kind === "literal" ||
+            (schemas[0] !== undefined && carrierOf(schemas[0], "value") !== undefined);
       return readable ? [] : [describeRule(rule, frames.root.label, labelsOf(frames))];
     }
   }

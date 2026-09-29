@@ -1,3 +1,5 @@
+import { isDecimal } from "./rule.js";
+
 export function formatTypeScriptValue(value: unknown): string {
   return format(value, 0);
 }
@@ -9,6 +11,9 @@ function format(value: unknown, level: number): string {
   const type = temporalTypeOf(value);
   if (type !== undefined) {
     return `Temporal.${type}.from(${JSON.stringify(String(value))})`;
+  }
+  if (isDecimal(value)) {
+    return `new Decimal(${JSON.stringify(value.toFixed())})`;
   }
   if (
     value === null ||

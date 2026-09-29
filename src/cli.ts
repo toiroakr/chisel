@@ -78,20 +78,23 @@ const generateCommand = defineCommand({
   args: z.object({ file: fileArg }),
   run: async args => {
     const targets = await loadTargets(args.file);
-    if (targets.some(target => target.synthesized)) {
-      console.log('import * as c from "chisel";\n');
-    }
-    for (const target of targets) {
+    const printed = targets.map(target => {
       const { rows: generated, notComposed } = generate(
         target.specification.examples,
         target.specification.implementation,
       );
-      console.log(
+      return [
         formatGeneratedExamples(target, generated),
-      );
-      for (const way of notComposed) {
-        console.log(`// 組み立てられなかった道筋: ${way}`);
-      }
+        ...notComposed.map(way => `// 組み立てられなかった道筋: ${way}`),
+      ];
+    });
+    if (targets.some(target => target.synthesized)) {
+      // A decimal's rows are written with decimal.js, which the file then imports.
+      const decimal = printed.flat().some(line => line.includes("new Decimal("));
+      console.log(`import * as c from "chisel";\n${decimal ? 'import { Decimal } from "decimal.js";\n' : ""}`);
+    }
+    for (const line of printed.flat()) {
+      console.log(line);
     }
   },
 });

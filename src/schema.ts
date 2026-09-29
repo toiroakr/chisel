@@ -1,6 +1,7 @@
+import { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { InvariantRule, Rule, TermOf } from "./rule.js";
-import { conjuncts, describeRule, holds, satisfy, selfTerm } from "./rule.js";
+import { conjuncts, decimalStep, describeRule, holds, isDecimal, satisfy, selfTerm } from "./rule.js";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -50,6 +51,12 @@ export interface NumberSchema extends Schema<number>, ValueBounds<number> {
 
 export interface IntSchema extends Schema<number>, ValueBounds<number> {
   readonly kind: "integer";
+}
+
+export interface DecimalSchema extends Schema<Decimal>, ValueBounds<Decimal> {
+  readonly kind: "decimal";
+  // How many digits a value may have after the decimal point.
+  readonly scale: number;
 }
 
 export interface BooleanSchema extends Schema<boolean> {
@@ -173,7 +180,7 @@ type SchemaCore<S extends AnySchema> = Omit<
   "invariants" | "refine" | "optional" | "min" | "max" | "gt" | "lt" | "length"
 >;
 
-const ORDERED_KINDS = new Set(["number", "integer", "instant", "date", "time", "datetime"]);
+const ORDERED_KINDS = new Set(["number", "integer", "decimal", "instant", "date", "time", "datetime"]);
 
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
   const schema = {
@@ -190,9 +197,15 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
     placeholder(name?: string) {
+      // A rule on a decimal, its own or one on a field of an object holding it,
+      // moves it by the unit of its last digit.
+      const stepAt = (path: readonly string[]) => {
+        const at = fieldOf(schema as unknown as AnySchema, path);
+        return at?.kind === "decimal" ? decimalStep((at as DecimalSchema).scale) : undefined;
+      };
       return invariants
         .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
+        .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
@@ -259,6 +272,32 @@ export function int(): IntSchema {
     return Number.isSafeInteger(value)
       ? valid(value as number)
       : invalid(path, "Expected an integer");
+  }
+}
+
+// A Decimal from decimal.js with at most `scale` digits after the point, such as
+// an amount in cents (`decimal(2)`), so the value next to a bound is known and
+// arithmetic on it is exact.
+export function decimal(scale: number): DecimalSchema {
+  if (!Number.isSafeInteger(scale) || scale < 0) {
+    throw new Error(`decimal takes a whole number of digits, not ${scale}`);
+  }
+  return refinable<DecimalSchema>({
+    kind: "decimal",
+    scale,
+    parse,
+    placeholder: () => new Decimal(0),
+  });
+
+  function parse(value: unknown, path = "$"): ValidationResult<Decimal> {
+    if (!isDecimal(value) || !value.isFinite()) {
+      return invalid(path, "Expected a Decimal");
+    }
+    if (value.decimalPlaces() > scale) {
+      return invalid(path, `Expected a Decimal with at most ${scale} decimal places`);
+    }
+    // -0 is 0: a Decimal keeps the sign of a zero, and a row writing 0 must match.
+    return valid(value.isZero() && value.isNegative() ? new Decimal(0) : value);
   }
 }
 
@@ -563,6 +602,21 @@ function temporalPlain(type: PlainType): { from(text: string): unknown; new (...
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
   return constructor;
+}
+
+// The schema a path reads, looked up through the cases of a sum as well, since a
+// rule written on the sum names a field its cases hold.
+function fieldOf(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  if (!isVariantsSchema(schema)) {
+    return schemaAtPath(schema, keys);
+  }
+  for (const each of Object.values(schema.variants) as AnySchema[]) {
+    const found = schemaAtPath(each, keys);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
