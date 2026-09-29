@@ -1483,6 +1483,15 @@ async function disregardBroken(
 ): Promise<DisregardCheck> {
   const definition = implementation.behavior;
   const tag = tagOf(definition.input, row.given);
+  const kept = positionsOf(definition.input).filter(
+    position => isUnder(position, [`@${tag}`]) && !isDisregarded(definition, position),
+  );
+  const readKept = (given: unknown) =>
+    kept.map(position => [
+      position.kind === "divided" ? position.classify(given) : [],
+      position.borders.map(border => coordinatesIn(position, border.measure, given)),
+    ]);
+  const keptOriginally = readKept(row.given);
   const axes = positionsOf(definition.input).flatMap(position => {
     if (
       !isUnder(position, [`@${tag}`]) ||
@@ -1556,7 +1565,11 @@ async function disregardBroken(
         const move = choice[index];
         return move === undefined ? axis.unmoved(varied) : move.reached(varied);
       });
-      return holds && definition.input.parse(varied).success ? [{ choice, varied }] : [];
+      return holds &&
+        isDeepStrictEqual(readKept(varied), keptOriginally) &&
+        definition.input.parse(varied).success
+        ? [{ choice, varied }]
+        : [];
     })
     .sort(
       (left, right) =>

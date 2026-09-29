@@ -802,3 +802,33 @@ describe("a composition takes its first stage's disregards", () => {
     ]);
   });
 });
+
+describe("check moves only what disregards names", () => {
+  it("does not report a change a disregarded child caused only by making its optional parent present", async () => {
+    const 承認する = behavior("承認する", {
+      input: variants("状態", { 提出済み: object({ 詳細: object({ 至急: boolean() }).optional() }) }),
+      result: variants("結果", { 承認: object({}), 保留: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { $default: r => [r.詳細.至急] },
+    });
+    const 詳細があれば保留 = implement(承認する, {
+      cases: {
+        提出済み: action("詳細があれば保留", {
+          run: r =>
+            r.詳細 === undefined ? { result: { 結果: "承認" }, effects: [] } : { result: { 結果: "保留" }, effects: [] },
+        }),
+      },
+    });
+
+    const report = await check(
+      spec("承認", {
+        examples: examples(承認する, {
+          詳細なし: { given: { 状態: "提出済み" }, expect: { result: { 結果: "承認" }, effects: [] } },
+        }),
+        implementation: 詳細があれば保留,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+});
