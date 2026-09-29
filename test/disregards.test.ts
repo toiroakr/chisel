@@ -903,3 +903,36 @@ describe("check holds each element of a disregarded array and each entry of a re
     ]);
   });
 });
+
+describe("the limits of the disregards check are the caller's", () => {
+  const 受け付ける = behavior("受け付ける", {
+    input: variants("状態", { 提出済み: object({ 甲: boolean(), 乙: boolean() }) }),
+    result: object({}),
+    effects: variants("種類", {}),
+    disregards: { 提出済み: r => [r] },
+  });
+  const 受付 = spec("受付", {
+    examples: examples(受け付ける, {
+      倒れた: { given: { 状態: "提出済み", 甲: false, 乙: false }, expect: { result: {}, effects: [] } },
+    }),
+    implementation: implement(受け付ける, {
+      cases: { 提出済み: action("受け付ける", { run: () => ({ result: {}, effects: [] }) }) },
+    }),
+  });
+
+  it("does not try a row with more combinations than the limit it is given", async () => {
+    const report = await check(受付, { disregards: { combinations: 2 } });
+
+    expect(report.incompleteness.map(item => item.reason)).toStrictEqual([
+      "disregardsの組み合わせが3通りあり、上限の2通りを超えるため確かめていない",
+    ]);
+  });
+
+  it("does not count a row with more candidates than the limit it is given", async () => {
+    const report = await check(受付, { disregards: { candidates: 2 } });
+
+    expect(report.incompleteness.map(item => item.reason)).toStrictEqual([
+      "disregardsの組み合わせの候補が3通りあり、上限の2通りを超えるため数えていない",
+    ]);
+  });
+});

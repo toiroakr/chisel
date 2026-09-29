@@ -320,9 +320,23 @@ export function isSpecification(value: unknown): value is Specification {
   );
 }
 
+export interface CheckOptions {
+  // How far the disregards check goes, a policy of the caller rather than of
+  // the check: past either limit a row is not tried and is reported as such.
+  readonly disregards?: {
+    readonly combinations?: number;
+    readonly candidates?: number;
+  };
+}
+
 export async function check(
   specification: Specification,
+  options: CheckOptions = {},
 ): Promise<AdequacyReport> {
+  const limits = {
+    combinations: options.disregards?.combinations ?? DISREGARD_COMBINATION_LIMIT,
+    candidates: options.disregards?.candidates ?? DISREGARD_CANDIDATE_LIMIT,
+  };
   const definition = specification.examples.behavior;
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
@@ -547,6 +561,7 @@ export async function check(
             row,
             actual,
             standIns(row),
+            limits,
           );
           if (disregard.kind === "broken") {
             failures.push(disregard.failure);
@@ -1480,6 +1495,7 @@ async function disregardBroken(
   row: Example<AnyBehavior>,
   answered: unknown,
   standIns: unknown,
+  limits: { readonly combinations: number; readonly candidates: number },
 ): Promise<DisregardCheck> {
   const definition = implementation.behavior;
   const tag = tagOf(definition.input, row.given);
@@ -1545,13 +1561,13 @@ async function disregardBroken(
     });
   });
   const candidates = axes.reduce((total, axis) => total * (axis.moves.length + 1), 1) - 1;
-  if (candidates > DISREGARD_CANDIDATE_LIMIT) {
+  if (candidates > limits.candidates) {
     return {
       kind: "not checked",
       incompleteness: {
         kind: "disregards not checked",
         subject: row.name,
-        reason: `disregardsの組み合わせの候補が${candidates}通りあり、上限の${DISREGARD_CANDIDATE_LIMIT}通りを超えるため数えていない`,
+        reason: `disregardsの組み合わせの候補が${candidates}通りあり、上限の${limits.candidates}通りを超えるため数えていない`,
       },
     };
   }
@@ -1580,13 +1596,13 @@ async function disregardBroken(
       const first = a.findIndex((index, at) => index !== b[at]);
       return a.length - b.length || (first === -1 ? 0 : a[first]! - b[first]!);
     });
-  if (combinations.length > DISREGARD_COMBINATION_LIMIT) {
+  if (combinations.length > limits.combinations) {
     return {
       kind: "not checked",
       incompleteness: {
         kind: "disregards not checked",
         subject: row.name,
-        reason: `disregardsの組み合わせが${combinations.length}通りあり、上限の${DISREGARD_COMBINATION_LIMIT}通りを超えるため確かめていない`,
+        reason: `disregardsの組み合わせが${combinations.length}通りあり、上限の${limits.combinations}通りを超えるため確かめていない`,
       },
     };
   }
