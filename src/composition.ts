@@ -284,6 +284,14 @@ function mismatchOf(
     if (named === undefined || named.kind === "optional") {
       return missing(`${path}.${taken.discriminant}`);
     }
+    // An enum names one case per value, so each value is taken as that case.
+    if (named.kind === "enum") {
+      return firstFound((named as EnumSchema<string>).values, value =>
+        taken.variantTags.includes(value)
+          ? mismatchOf(answered, taken.variants[value], path, { discriminant: taken.discriminant, tag: value })
+          : undeclared(`${path}@${value}`),
+      );
+    }
     const tag = named.kind === "literal" ? (named as LiteralSchema<string | number | boolean | null>).value : undefined;
     if (typeof tag !== "string") {
       return incompatible(

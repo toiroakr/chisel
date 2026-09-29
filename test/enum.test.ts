@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   action,
   behavior,
+  boolean,
   check,
   compose,
   enum as enumOf,
@@ -58,10 +59,21 @@ describe("enum", () => {
     expect(enumOf(["交通費"]).refine(v => v.$ne("交通費")).placeholder()).toBe("交通費");
   });
 
-  it("stands in the same way for a rule an object writes on its enum field", () => {
-    const 明細 = object({ 費目 }).refine(v => v.費目.$ne("交通費"));
+  it("stands in with a value every rule keeps, wherever the rule is written", () => {
+    const 順不同 = enumOf(["b", "a", "c"]);
 
-    expect(明細.placeholder()).toStrictEqual({ 費目: "宿泊費" });
+    expect(object({ 費目 }).refine(v => v.費目.$ne("交通費")).placeholder()).toStrictEqual({ 費目: "宿泊費" });
+    expect(object({ x: 順不同 }).refine(v => v.x.$gt("b")).placeholder()).toStrictEqual({ x: "c" });
+    expect(
+      object({ x: enumOf(["a", "b", "c"]).refine(v => v.$ne("b")) })
+        .refine(v => v.x.$ne("a"))
+        .placeholder(),
+    ).toStrictEqual({ x: "c" });
+    expect(
+      variants("k", { p: object({ x: 順不同, f: boolean() }) })
+        .refine(v => v.x.$ne("b"))
+        .placeholder(),
+    ).toStrictEqual({ k: "p", x: "a", f: false });
   });
 
   it("divides its position into its values, less the ones an invariant refuses", () => {
@@ -71,11 +83,13 @@ describe("enum", () => {
 
     expect(
       positionsOf(申請).map(position =>
-        position.kind === "divided" ? { path: position.path, classes: position.classes } : position.path,
+        position.kind === "divided"
+          ? { path: position.path, classes: position.classes, excluded: position.excluded }
+          : position.path,
       ),
     ).toStrictEqual([
-      { path: "@下書き.費目", classes: ["交通費", "宿泊費", "飲食費"] },
-      { path: "@下書き.精算方法", classes: ["振込", "現金"] },
+      { path: "@下書き.費目", classes: ["交通費", "宿泊費", "飲食費"], excluded: [] },
+      { path: "@下書き.精算方法", classes: ["振込", "現金"], excluded: ["現金"] },
     ]);
   });
 });
@@ -136,6 +150,27 @@ describe("an enum in the rules", () => {
     expect(report.measures.comparisons).toStrictEqual({
       status: "partial",
       notRead: ['宿泊費より前の費目: $.費目 < "宿泊費"'],
+    });
+  });
+
+  it("does not read a guard on its length, whose few values draw no border", async () => {
+    const report = await check(
+      spec("申請する", {
+        examples: examples(申請する, {
+          タクシー: { given: { 状態: "下書き", 費目: "交通費", 金額: 1200 }, expect: 受ける() },
+        }),
+        implementation: implement(申請する, {
+          cases: {
+            下書き: action("長い費目", { guards: r => [r.費目.$length().$gte(4).$else(断る)], run: 受ける }),
+          },
+        }),
+      }),
+    );
+
+    expect(report.borders).toStrictEqual([]);
+    expect(report.measures.comparisons).toStrictEqual({
+      status: "partial",
+      notRead: ["長い費目: length($.費目) >= 4"],
     });
   });
 
@@ -201,6 +236,41 @@ describe("a match on an enum field", () => {
     ]);
   });
 
+  it("owes no row to the arm of a value an invariant refuses", async () => {
+    const 通貨で分ける = behavior("通貨で分ける", {
+      input: variants("状態", { 申請: object({ 通貨: enumOf(["JPY", "USD", "EUR"]).refine(v => v.$ne("EUR")) }) }),
+      result: variants("結果", { 申請した: object({}), 領収書が要る: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(
+      spec("通貨で分ける", {
+        examples: examples(通貨で分ける, {
+          円: { given: { 状態: "申請", 通貨: "JPY" }, expect: 受ける() },
+          ドル: { given: { 状態: "申請", 通貨: "USD" }, expect: 断る() },
+        }),
+        implementation: implement(通貨で分ける, {
+          cases: { 申請: action("通貨で分ける", { run: match(r => r.通貨, { JPY: 受ける, USD: 断る, EUR: 断る }) }) },
+        }),
+      }),
+    );
+
+    const arms = report.measures.arms.status === "complete" ? report.measures.arms.arms : [];
+    expect(arms.find(arm => arm.arm === "EUR")?.status).toBe("no row owed");
+    expect(report.verdict).toBe("satisfied");
+  });
+
+  it("refuses at run time a match naming a value the enum does not", () => {
+    expect(() =>
+      implement(申請する, {
+        cases: {
+          下書き: action("費目で分ける", {
+            run: match(r => r.費目, { 交通費: 受ける, 宿泊費: 断る, 飲食費: 断る, 消耗品: 断る } as never),
+          }),
+        },
+      }),
+    ).toThrow(new SpecificationError("match in 費目で分ける has a case 消耗品 the enum does not"));
+  });
+
   it("refuses at run time a match whose cases are not the enum's values", () => {
     expect(() =>
       implement(申請する, {
@@ -239,6 +309,33 @@ describe("an enum between two stages", () => {
     expect(() => compose("広い enum へ", [費目を答える(費目), 受け取る(enumOf(["交通費", "宿泊費", "飲食費", "消耗品"]))])).not.toThrow();
   });
 
+  it("names the case of a sum the next stage takes, one per value", () => {
+    const 決める = (種類: AnySchema) =>
+      external(
+        behavior("決める", {
+          input: variants("状態", { 申込: object({}) }),
+          result: variants("結果", { 決めた: object({ 支払: object({ 種類, 番号: string() }) }) }),
+          effects: variants("種類", {}),
+        }),
+        "別のチーム",
+      );
+    const 払う = external(
+      behavior("払う", {
+        input: variants("結果", {
+          決めた: object({ 支払: variants("種類", { カード: object({ 番号: string() }), 振込: object({ 番号: string() }) }) }),
+        }),
+        result: variants("結果", { 払った: object({}) }),
+        effects: variants("種類", {}),
+      }),
+      "別のチーム",
+    );
+
+    expect(() => compose("支払", [決める(enumOf(["カード", "振込"])), 払う])).not.toThrow();
+    expect(() => compose("支払", [決める(enumOf(["カード", "現金"])), 払う])).toThrow(
+      new SpecificationError("決める answers @決めた.支払@現金, which 払う does not declare"),
+    );
+  });
+
   it("refuses a narrower enum, and a string into an enum", () => {
     expect(() => compose("狭い enum へ", [費目を答える(費目), 受け取る(enumOf(["交通費", "宿泊費"]))])).toThrow(
       new SpecificationError(
@@ -264,5 +361,49 @@ describe("an enum in what a behavior ensures", () => {
 
     const report = await check(spec("仕分ける", { examples: examples(仕分ける, {}) }));
     expect(report.ensures.rules.map(rule => rule.classification)).toStrictEqual(["exact match"]);
+  });
+});
+
+describe("a value an invariant refuses, beyond enums", () => {
+  const 答え = variants("結果", { ok: object({}) });
+  const ok = () => ({ result: { 結果: "ok" as const }, effects: [] });
+
+  it("owes no row to the arm of a boolean it refuses", async () => {
+    const 至急 = behavior("至急", {
+      input: variants("状態", { 申請: object({ 至急: boolean().refine(v => v.$eq(true)) }) }),
+      result: 答え,
+      effects: variants("種類", {}),
+    });
+    const report = await check(
+      spec("至急", {
+        examples: examples(至急, { 至急: { given: { 状態: "申請", 至急: true }, expect: ok() } }),
+        implementation: implement(至急, { cases: { 申請: action("至急なら", { guards: r => [r.至急.$eq(true).$else(ok)], run: ok }) } }),
+      }),
+    );
+
+    const arms = report.measures.arms.status === "complete" ? report.measures.arms.arms : [];
+    expect(arms.find(arm => arm.arm === "else")?.status).toBe("no row owed");
+  });
+
+  it("owes no row to the arm of a case a sum's invariant refuses", async () => {
+    const 支払 = variants("種類", {
+      カード: object({ 番号: string() }),
+      小切手: object({ 番号: string() }),
+    }).refine(v => v.種類.$ne("小切手"));
+    const 払う = behavior("払う", {
+      input: variants("状態", { 申請: object({ 支払 }) }),
+      result: 答え,
+      effects: variants("種類", {}),
+    });
+    const report = await check(
+      spec("払う", {
+        examples: examples(払う, { カード: { given: { 状態: "申請", 支払: { 種類: "カード", 番号: "1" } }, expect: ok() } }),
+        implementation: implement(払う, { cases: { 申請: action("支払で分ける", { run: match(r => r.支払.種類, { カード: ok, 小切手: ok }) }) } }),
+      }),
+    );
+
+    const arms = report.measures.arms.status === "complete" ? report.measures.arms.arms : [];
+    expect(arms.find(arm => arm.arm === "小切手")?.status).toBe("no row owed");
+    expect(report.verdict).toBe("satisfied");
   });
 });

@@ -1,5 +1,5 @@
 import type { Temporal as TemporalTypes } from "temporal-spec";
-import type { InvariantRule, Rule, Step, TermOf } from "./rule.js";
+import type { InvariantRule, Rule, TermOf } from "./rule.js";
 import { conjuncts, describeRule, holds, satisfy, selfTerm } from "./rule.js";
 
 export interface ValidationIssue {
@@ -197,15 +197,14 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
     placeholder(name?: string) {
-      // An enum has no value to move to, so it takes the first one its rules keep.
-      if (core.kind === "enum") {
-        const { values } = core as unknown as EnumSchema<string>;
-        return values.find(value => invariants.every(rule => holds(rule, value))) ?? core.placeholder(name);
-      }
-      // A rule an object writes on an enum field moves it to the value named next.
+      // An enum has no value to step to, so a rule on one, its own or one an
+      // enclosing object or sum writes on it, takes the first value that rule keeps
+      // among those the enum's own invariants keep.
       const stepAt = (path: readonly string[]) => {
-        const at = schemaAtPath(schema as unknown as AnySchema, path);
-        return at?.kind === "enum" ? enumStep((at as EnumSchema<string>).values) : undefined;
+        const at = fieldOf(schema as unknown as AnySchema, path);
+        return at?.kind === "enum"
+          ? { among: (at as EnumSchema<string>).values.filter(value => at.invariants.every(rule => holds(rule, value))) }
+          : undefined;
       };
       return invariants
         .flatMap(conjuncts)
@@ -332,11 +331,6 @@ function plain(kind: string, type: PlainType, placeholder: string): AnySchema {
       value instanceof temporalPlain(type) ? valid(value) : invalid(path, `Expected a Temporal.${type}`),
     placeholder: () => temporalPlain(type).from(placeholder),
   });
-}
-
-function enumStep(values: readonly string[]): Step {
-  return (bound, direction) =>
-    values[(values.indexOf(bound as string) + direction + values.length) % values.length];
 }
 
 // Exported as `enum`, a word a function may not be named. Each value is a class
@@ -620,6 +614,21 @@ function temporalPlain(type: PlainType): { from(text: string): unknown; new (...
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
   return constructor;
+}
+
+// The schema a path reads, looked up through the cases of a sum as well, since a
+// rule written on the sum names a field its cases hold.
+function fieldOf(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  if (!isVariantsSchema(schema)) {
+    return schemaAtPath(schema, keys);
+  }
+  for (const each of Object.values(schema.variants) as AnySchema[]) {
+    const found = schemaAtPath(each, keys);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {

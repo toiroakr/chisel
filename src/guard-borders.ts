@@ -614,7 +614,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       const kinds = terms.map(term => {
         const { frame, keys } = locate(term, frames);
-        return termData(term).measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+        const kind = schemaAt(frame.scope, keys)?.kind;
+        // The length of an enum is not read: see carrierOf.
+        return termData(term).measure === "length" ? (kind === "enum" ? "enum length" : "integer") : kind;
       });
       const readable =
         terms.length === 2

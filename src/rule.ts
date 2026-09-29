@@ -338,8 +338,8 @@ function compares(rule: CompareRule, value: unknown, observe?: ComparisonObserve
   }
 }
 
-// `stepAt` names the step of the value a term reads, where it is not the default:
-// the value next to one of an enum's is the one named after it.
+// `stepAt` names the step of the value a term reads, where it is not the default,
+// or the values it may take: an enum's that its own invariants keep.
 export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
   if (holds(rule, value)) {
     return value;
@@ -375,7 +375,14 @@ function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | u
     return value;
   }
   const { path, measure } = termData(term);
-  const move = (measure === "value" ? stepAt?.(path) : undefined) ?? step;
+  const named = measure === "value" ? stepAt?.(path) : undefined;
+  if (named !== undefined && typeof named !== "function") {
+    // A value of a finite domain is chosen, not stepped to: the first one the rule
+    // keeps, whichever way the rule orders them.
+    const chosen = named.among.find(candidate => holds(rule, writeAt(value, path, () => candidate)));
+    return chosen === undefined ? value : writeAt(value, path, () => chosen);
+  }
+  const move = named ?? step;
   const target =
     operator === ">" || operator === "!="
       ? move(bound, 1)
@@ -417,7 +424,9 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
 };
 
 export type Step = (bound: unknown, direction: 1 | -1) => unknown;
-export type StepAt = (path: readonly string[]) => Step | undefined;
+// The step of the value a path reads, or the values it may take, where it is not
+// the default.
+export type StepAt = (path: readonly string[]) => Step | { readonly among: readonly unknown[] } | undefined;
 
 function step(bound: unknown, direction: 1 | -1): unknown {
   if (typeof bound === "number") {
