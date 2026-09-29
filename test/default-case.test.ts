@@ -6,6 +6,7 @@ import {
   examples,
   implement,
   int,
+  match,
   object,
   perform,
   spec,
@@ -116,5 +117,49 @@ describe("cases.$default", () => {
     );
 
     expect(report.input.missing).toStrictEqual(["下書き", "提出済み", "承認済み"]);
+  });
+});
+
+describe("$default and a match over the cases it decides", () => {
+  const 支払う = behavior("支払う", {
+    input: variants("状態", {
+      店頭: object({ 支払: variants("方法", { 現金: object({}), カード: object({}) }) }),
+      通販: object({ 支払: variants("方法", { 現金: object({}), 振込: object({}) }) }),
+    }),
+    result: variants("結果", { 受付: object({ 方法: string() }) }),
+    effects: variants("種類", {}),
+  });
+  const 受付 = (方法: string) => () => ({ result: { 結果: "受付" as const, 方法 }, effects: [] });
+
+  it("takes a match whose arms are every case the sum has in any case $default decides", async () => {
+    const 方法ごとに受け付ける = implement(支払う, {
+      cases: {
+        $default: action("方法ごとに受け付ける", {
+          run: match(r => r.支払.方法, { 現金: 受付("現金"), カード: 受付("カード"), 振込: 受付("振込") }),
+        }),
+      },
+    });
+
+    expect(await perform(方法ごとに受け付ける, { 状態: "通販", 支払: { 方法: "振込" } })).toStrictEqual({
+      result: { 結果: "受付", 方法: "振込" },
+      effects: [],
+    });
+  });
+
+  it("refuses a match arm no case $default decides has", () => {
+    expect(() =>
+      implement(支払う, {
+        cases: {
+          $default: action("方法ごとに受け付ける", {
+            run: match(r => r.支払.方法, {
+              現金: 受付("現金"),
+              カード: 受付("カード"),
+              振込: 受付("振込"),
+              小切手: 受付("小切手"),
+            } as never),
+          }),
+        },
+      }),
+    ).toThrow("match in 方法ごとに受け付ける has a case 小切手 the sum does not");
   });
 });

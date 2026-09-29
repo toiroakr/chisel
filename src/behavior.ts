@@ -359,8 +359,12 @@ export function implement<B extends AnyBehavior>(
   }>,
 ): Implementation<NoInfer<B>> {
   const cases = casesWithoutDefault(definition, options.cases);
+  const tagsOf = new Map<unknown, string[]>();
   for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
-    checkMatch(definition, tag, decision as ImplementationCases<AnyBehavior>[string]);
+    tagsOf.set(decision, [...(tagsOf.get(decision) ?? []), tag]);
+  }
+  for (const [decision, tags] of tagsOf) {
+    checkMatch(definition, tags, decision as ImplementationCases<AnyBehavior>[string]);
   }
   return {
     kind: "implementation",
@@ -428,32 +432,36 @@ export function external<B extends AnyBehavior>(definition: B, reason: string): 
 
 function checkMatch(
   definition: AnyBehavior,
-  tag: string,
+  tags: readonly string[],
   decision: ImplementationCases<AnyBehavior>[string],
 ): void {
   if (decision?.kind !== "rules" || typeof decision.otherwise === "function") {
     return;
   }
   const keys = termData(decision.otherwise.on).path;
-  const selected = schemaAtPath(
-    definition.input.variants[tag] as Schema<unknown>,
-    keys.slice(0, -1),
-  );
-  if (
-    selected === undefined ||
-    !isVariantsSchema(selected) ||
-    selected.discriminant !== keys[keys.length - 1]
-  ) {
-    throw new SpecificationError(
-      `match in ${decision.id} does not select the discriminant of a sum field`,
+  const sumTags = new Set<string>();
+  for (const tag of tags) {
+    const selected = schemaAtPath(
+      definition.input.variants[tag] as Schema<unknown>,
+      keys.slice(0, -1),
     );
+    if (
+      selected === undefined ||
+      !isVariantsSchema(selected) ||
+      selected.discriminant !== keys[keys.length - 1]
+    ) {
+      throw new SpecificationError(
+        `match in ${decision.id} does not select the discriminant of a sum field`,
+      );
+    }
+    selected.variantTags.forEach(caseTag => sumTags.add(caseTag));
   }
   const written = Object.keys(decision.otherwise.cases);
-  const missing = selected.variantTags.find(caseTag => !written.includes(caseTag));
+  const missing = [...sumTags].find(caseTag => !written.includes(caseTag));
   if (missing !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has no case for ${missing}`);
   }
-  const unknown = written.find(caseTag => !selected.variantTags.includes(caseTag));
+  const unknown = written.find(caseTag => !sumTags.has(caseTag));
   if (unknown !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the sum does not`);
   }
