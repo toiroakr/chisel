@@ -2,6 +2,8 @@ import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
   Infer,
+  ObjectSchema,
+  ObjectShape,
   Schema,
   Tags,
   VariantOf,
@@ -323,6 +325,15 @@ function checkMatch(
     return;
   }
   const keys = termData(decision.otherwise.on).path;
+  // A match has a case for every value it selects and none for its absence, so a
+  // value that may be left out would reach no case; its absence is a case of a
+  // sum instead.
+  const leftOut = optionalAlong(definition.input.variants[tag] as Schema<unknown>, keys);
+  if (leftOut !== undefined) {
+    throw new SpecificationError(
+      `match in ${decision.id} selects $.${keys.join(".")}, which may be left out at $.${leftOut.join(".")}`,
+    );
+  }
   const selected = schemaAtPath(
     definition.input.variants[tag] as Schema<unknown>,
     keys.slice(0, -1),
@@ -345,6 +356,20 @@ function checkMatch(
   if (unknown !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the sum does not`);
   }
+}
+
+// The keys down to the first optional along a path, if any.
+function optionalAlong(schema: Schema<unknown>, keys: readonly string[]): readonly string[] | undefined {
+  let current: Schema<unknown> | undefined = schema;
+  for (const [index, key] of keys.entries()) {
+    const field: Schema<unknown> | undefined =
+      current?.kind === "object" ? (current as ObjectSchema<ObjectShape>).shape[key] : undefined;
+    if (field?.kind === "optional") {
+      return keys.slice(0, index + 1);
+    }
+    current = field;
+  }
+  return undefined;
 }
 
 export function isBehavior(value: unknown): value is AnyBehavior {
