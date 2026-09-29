@@ -622,6 +622,7 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
             rule.operator === "!=" ||
             differenceCarrier(kinds[0], kinds[1]) !== undefined
           : kinds[0] === "boolean" ||
+            kinds[0] === "enum" ||
             kinds[0] === "variants" ||
             kinds[0] === "literal" ||
             (kinds[0] !== undefined &&

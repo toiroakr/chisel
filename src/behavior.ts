@@ -1,6 +1,7 @@
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
+  EnumSchema,
   Infer,
   Schema,
   Tags,
@@ -323,27 +324,31 @@ function checkMatch(
     return;
   }
   const keys = termData(decision.otherwise.on).path;
-  const selected = schemaAtPath(
-    definition.input.variants[tag] as Schema<unknown>,
-    keys.slice(0, -1),
-  );
-  if (
-    selected === undefined ||
-    !isVariantsSchema(selected) ||
-    selected.discriminant !== keys[keys.length - 1]
-  ) {
+  const variant = definition.input.variants[tag] as Schema<unknown>;
+  // A match selects an enum field, whose cases are its values, or the
+  // discriminant of a sum field, whose cases are the sum's.
+  const field = schemaAtPath(variant, keys);
+  const selected = schemaAtPath(variant, keys.slice(0, -1));
+  const cases =
+    field?.kind === "enum"
+      ? (field as EnumSchema<string>).values
+      : selected !== undefined && isVariantsSchema(selected) && selected.discriminant === keys[keys.length - 1]
+        ? selected.variantTags
+        : undefined;
+  if (cases === undefined) {
     throw new SpecificationError(
-      `match in ${decision.id} does not select the discriminant of a sum field`,
+      `match in ${decision.id} does not select an enum field or the discriminant of a sum field`,
     );
   }
+  const what = field?.kind === "enum" ? "enum" : "sum";
   const written = Object.keys(decision.otherwise.cases);
-  const missing = selected.variantTags.find(caseTag => !written.includes(caseTag));
+  const missing = cases.find(caseTag => !written.includes(caseTag));
   if (missing !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has no case for ${missing}`);
   }
-  const unknown = written.find(caseTag => !selected.variantTags.includes(caseTag));
+  const unknown = written.find(caseTag => !cases.includes(caseTag));
   if (unknown !== undefined) {
-    throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the sum does not`);
+    throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the ${what} does not`);
   }
 }
 

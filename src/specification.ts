@@ -968,9 +968,11 @@ export function generate(
       }
       const matched = last.distinction;
       const keys = termData(matched.on).path;
-      const position = positionsByPath.get(
-        `@${caseTag}${keys.slice(0, -1).map(key => `.${key}`).join("")}`,
-      );
+      // A match on an enum selects the position itself; one on a sum field's
+      // discriminant selects the field holding it.
+      const at = (path: readonly string[]) =>
+        positionsByPath.get(`@${caseTag}${path.map(key => `.${key}`).join("")}`);
+      const position = at(keys) ?? at(keys.slice(0, -1));
       const origin = origins.find(given =>
         wayOf(given, withFrom(given).with)?.steps.some(step => step.distinction === matched),
       );

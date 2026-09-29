@@ -4,7 +4,7 @@ import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
 import { boundTermPath, conjuncts, describeRule, isTerm, termData, termPaths } from "./rule.js";
-import type { AnySchema, AnyVariantsSchema } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema, EnumSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { Step, Way } from "./ways.js";
 
@@ -212,6 +212,9 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
   }
   if (measure === "value" && schema.kind === "boolean") {
     return finite([true, false], group.constraints);
+  }
+  if (measure === "value" && schema.kind === "enum") {
+    return finite((schema as EnumSchema<string>).values, group.constraints);
   }
   const carrier = carrierOf(schema, measure);
   if (carrier === undefined) {

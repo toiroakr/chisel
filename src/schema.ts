@@ -72,6 +72,11 @@ export interface DateTimeSchema extends Schema<TemporalTypes.PlainDateTime>, Val
   readonly kind: "datetime";
 }
 
+export interface EnumSchema<T extends string> extends Schema<T> {
+  readonly kind: "enum";
+  readonly values: readonly T[];
+}
+
 export interface LiteralSchema<T extends string | number | boolean | null>
   extends Schema<T> {
   readonly kind: "literal";
@@ -190,6 +195,11 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
     placeholder(name?: string) {
+      // An enum has no value to move to, so it takes the first one its rules keep.
+      if (core.kind === "enum") {
+        const { values } = core as unknown as EnumSchema<string>;
+        return values.find(value => invariants.every(rule => holds(rule, value))) ?? core.placeholder(name);
+      }
       return invariants
         .flatMap(conjuncts)
         .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
@@ -315,6 +325,30 @@ function plain(kind: string, type: PlainType, placeholder: string): AnySchema {
       value instanceof temporalPlain(type) ? valid(value) : invalid(path, `Expected a Temporal.${type}`),
     placeholder: () => temporalPlain(type).from(placeholder),
   });
+}
+
+// Exported as `enum`, a word a function may not be named. Each value is a class
+// of the position the enum stands at, the way a boolean is two.
+export function enumOf<const T extends string>(values: readonly [T, ...T[]]): EnumSchema<T> {
+  if (values.length === 0) {
+    throw new Error("enum names no value");
+  }
+  const repeated = values.find((value, index) => values.indexOf(value) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`enum names ${repeated} twice`);
+  }
+  return refinable<EnumSchema<T>>({
+    kind: "enum",
+    values,
+    parse,
+    placeholder: () => values[0],
+  });
+
+  function parse(value: unknown, path = "$"): ValidationResult<T> {
+    return typeof value === "string" && (values as readonly string[]).includes(value)
+      ? valid(value as T)
+      : invalid(path, `Expected one of ${values.map(value => JSON.stringify(value)).join(", ")}`);
+  }
 }
 
 export function literal<const T extends string | number | boolean | null>(

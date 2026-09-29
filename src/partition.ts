@@ -2,6 +2,7 @@ import type {
   AnySchema,
   AnyVariantsSchema,
   ArraySchema,
+  EnumSchema,
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
@@ -189,6 +190,15 @@ function positionAt(
       divided(path, ["true", "false"], focus, String, className => className === "true", {
         rules: rules.filter(rule => boundTermPath(rule)?.length === 0),
         sample: className => className === "true",
+      }),
+    ];
+  }
+  if (schema.kind === "enum") {
+    const { values } = schema as EnumSchema<string>;
+    return [
+      divided(path, values, focus, String, className => className, {
+        rules: rules.filter(rule => boundTermPath(rule)?.length === 0),
+        sample: className => className,
       }),
     ];
   }
