@@ -493,3 +493,19 @@ describe("check holds a disregarded field an invariant bounds", () => {
     ]);
   });
 });
+
+describe("disregards and fields named like Object.prototype members", () => {
+  it("refuses a $default field only a written case declares, even when it is named like an inherited member", () => {
+    expect(() =>
+      behavior("承認する", {
+        input: variants("状態", {
+          下書き: object({ toString: boolean() }),
+          提出済み: object({ 至急: boolean() }),
+        }),
+        result: object({}),
+        effects: variants("種類", {}),
+        disregards: { 下書き: () => [], $default: (r: never) => [(r as { toString: never }).toString] } as never,
+      }),
+    ).toThrow("承認する disregards toString, which no case $default covers declares");
+  });
+});

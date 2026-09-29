@@ -575,6 +575,6 @@ export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySch
   if (unwrapped.kind !== "object") {
     return undefined;
   }
-  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
-  return field === undefined ? undefined : schemaAtPath(field, rest);
+  const { shape } = unwrapped as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) ? schemaAtPath(shape[key]!, rest) : undefined;
 }
