@@ -18,23 +18,35 @@ interface Outcome {
 }
 
 export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): readonly Way[] {
-  const from = (index: number, before: readonly Step[]): readonly Way[] => {
+  return [...eachWayOf(decision)];
+}
+
+// The ways through the guards one at a time, in the order waysOf lists them,
+// so a caller can stop before building them all.
+export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): Generator<Way> {
+  function* from(index: number, before: readonly Step[]): Generator<Way> {
     const candidate = decision.guards[index];
     if (candidate === undefined) {
       const { otherwise } = decision;
-      return typeof otherwise === "function"
-        ? [{ steps: before, exit: "otherwise" }]
-        : Object.keys(otherwise.cases).map(tag => ({
-            steps: [...before, { distinction: otherwise, outcome: tag }],
-            exit: "case" as const,
-          }));
+      if (typeof otherwise === "function") {
+        yield { steps: before, exit: "otherwise" };
+        return;
+      }
+      for (const tag of Object.keys(otherwise.cases)) {
+        yield { steps: [...before, { distinction: otherwise, outcome: tag }], exit: "case" };
+      }
+      return;
     }
-    return outcomesOf(candidate.condition).flatMap(outcome => {
+    for (const outcome of outcomesOf(candidate.condition)) {
       const steps = [...before, ...outcome.steps];
-      return outcome.result ? from(index + 1, steps) : [{ steps, exit: index }];
-    });
-  };
-  return from(0, []);
+      if (outcome.result) {
+        yield* from(index + 1, steps);
+      } else {
+        yield { steps, exit: index };
+      }
+    }
+  }
+  yield* from(0, []);
 }
 
 export function sameSteps(left: readonly Step[], right: readonly Step[]): boolean {
@@ -62,32 +74,39 @@ export function describeWay(way: Way): string {
   return steps === "" ? exit : `${steps} → ${exit}`;
 }
 
-function outcomesOf(rule: Rule): readonly Outcome[] {
+function* outcomesOf(rule: Rule): Generator<Outcome> {
   switch (rule.kind) {
     case "compare":
     case "all":
     case "any":
-      return [
-        { steps: [{ distinction: rule, outcome: true }], result: true },
-        { steps: [{ distinction: rule, outcome: false }], result: false },
-      ];
+      yield { steps: [{ distinction: rule, outcome: true }], result: true };
+      yield { steps: [{ distinction: rule, outcome: false }], result: false };
+      return;
     case "not":
-      return outcomesOf(rule.rule).map(outcome => ({ ...outcome, result: !outcome.result }));
+      for (const outcome of outcomesOf(rule.rule)) {
+        yield { ...outcome, result: !outcome.result };
+      }
+      return;
     case "and":
     case "or": {
       const settles = rule.kind === "or";
-      let partial: readonly Outcome[] = [{ steps: [], result: !settles }];
-      for (const part of rule.rules) {
-        partial = partial.flatMap(outcome =>
-          outcome.result === settles
-            ? [outcome]
-            : outcomesOf(part).map(next => ({
-                steps: [...outcome.steps, ...next.steps],
-                result: next.result,
-              })),
-        );
+      const { rules } = rule;
+      function* from(index: number, before: readonly Step[]): Generator<Outcome> {
+        const part = rules[index];
+        if (part === undefined) {
+          yield { steps: before, result: !settles };
+          return;
+        }
+        for (const next of outcomesOf(part)) {
+          const steps = [...before, ...next.steps];
+          if (next.result === settles) {
+            yield { steps, result: next.result };
+          } else {
+            yield* from(index + 1, steps);
+          }
+        }
       }
-      return partial;
+      yield* from(0, []);
     }
   }
 }
