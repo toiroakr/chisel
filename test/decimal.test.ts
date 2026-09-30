@@ -138,6 +138,44 @@ describe("a guard on a decimal", () => {
   });
 });
 
+describe("a guard comparing a decimal with a value off its grid", () => {
+  const 支払う = behavior("支払う", {
+    input: variants("方法", { カード: object({ 合計: decimal(2) }) }),
+    result: variants("結果", { 請求した: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 請求した = { result: { 結果: "請求した" as const }, effects: [] };
+  const 行 = examples(支払う, {
+    一円: { given: { 方法: "カード", 合計: d("1.00") }, expect: 請求した },
+  });
+  const 実装 = (guard: "$eq" | "$ne") =>
+    implement(支払う, {
+      cases: {
+        カード: action("半端な額", {
+          guards: r => [r.合計[guard](d("0.005")).$else(() => 請求した)],
+          run: () => 請求した,
+        }),
+      },
+    });
+
+  it("owes no row to a value no decimal of its scale can hold", async () => {
+    const report = await check(spec("支払う", { examples: 行, implementation: 実装("$ne") }));
+
+    expect(report.partitions).toStrictEqual([{ path: "@カード.合計", kind: "not-derivable" }]);
+    expect(report.verdict).toBe("satisfied");
+  });
+
+  it("owes no row to an equality with such a value holding", async () => {
+    const report = await check(spec("支払う", { examples: 行, implementation: 実装("$eq") }));
+
+    expect(report.verdict).toBe("satisfied");
+  });
+
+  it("offers no row it cannot compose there", () => {
+    expect(generate(行, 実装("$ne"))).toStrictEqual({ rows: [], notComposed: [] });
+  });
+});
+
 const 承認する = behavior("承認する", {
   input: variants("状態", { 申請中: object({ 金額: decimal(2), 上限: decimal(2) }) }),
   result: variants("結果", { 承認した: object({}), 上限を超える: object({}) }),

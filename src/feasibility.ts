@@ -1,5 +1,5 @@
 import type { Carrier } from "./border.js";
-import { normalize } from "./border.js";
+import { normalize, snapped } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
@@ -279,7 +279,15 @@ function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval
     carrier.ceiling === undefined ? undefined : { value: carrier.ceiling.value, inclusive: true };
   const equal: unknown[] = [];
   const unequal: unknown[] = [];
-  for (const { operator, bound } of constraints) {
+  for (const constraint of constraints) {
+    const onGrid = snapped(carrier, constraint.operator, constraint.bound);
+    if (onGrid === "none") {
+      return false;
+    }
+    if (onGrid === "every") {
+      continue;
+    }
+    const { operator, bound } = onGrid;
     const edge = { value: bound, inclusive: operator === ">=" || operator === "<=" };
     if (operator === ">" || operator === ">=") {
       lower = tighter(lower, edge, 1, carrier);

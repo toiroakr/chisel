@@ -9,6 +9,7 @@ import {
   nanosecondCarrier,
   normalize,
   numberCarrier,
+  snapped,
 } from "./border.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
@@ -284,7 +285,13 @@ function partitionAt(
     return undefined;
   }
   const cuts = rules.flatMap(rule => {
-    const { operator, bound } = normalize(rule)!;
+    const normalized = normalize(rule)!;
+    const onGrid = snapped(carrier, normalized.operator, normalized.bound);
+    // A value off the grid divides none of the values a row can hold.
+    if (typeof onGrid === "string") {
+      return [];
+    }
+    const { operator, bound } = onGrid;
     return operator === "==" || operator === "!="
       ? [
           { value: bound, lowerHoldsIt: false },
@@ -292,6 +299,9 @@ function partitionAt(
         ]
       : [{ value: bound, lowerHoldsIt: operator === "<=" || operator === ">" }];
   });
+  if (cuts.length === 0) {
+    return undefined;
+  }
   const unique = cuts
     .filter(
       (cut, index) =>

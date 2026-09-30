@@ -30,8 +30,15 @@ export interface Carrier {
   readonly floor?: { readonly value: unknown; readonly reason: string };
   readonly ceiling?: { readonly value: unknown; readonly reason: string };
   // Moves a bound off the carrier's grid onto it, keeping what the comparison
-  // admits; undefined when no value of the grid can meet it.
-  readonly snap?: (bound: unknown, operator: Operator) => { readonly operator: Operator; readonly bound: unknown } | undefined;
+  // admits; an equality with a value off the grid is met by no value of it, and
+  // an inequality with one by every value.
+  readonly snap?: (bound: unknown, operator: Operator) => Snapped;
+}
+
+export type Snapped = { readonly operator: Operator; readonly bound: unknown } | "none" | "every";
+
+export function snapped(carrier: Carrier, operator: Operator, bound: unknown): Snapped {
+  return carrier.snap === undefined ? { operator, bound } : carrier.snap(bound, operator);
 }
 
 export const integerCarrier: Carrier = {
@@ -65,9 +72,10 @@ export function decimalCarrier(scale: number): Carrier {
         case "<":
         case "<=":
           return { operator: "<=", bound: step(bound, -1) };
-        default:
-          // No value of the grid equals it, so an equality names none.
-          return undefined;
+        case "==":
+          return "none";
+        case "!=":
+          return "every";
       }
     },
   };
@@ -299,11 +307,11 @@ function borderOf(
   if (carrier === undefined) {
     return undefined;
   }
-  const snapped = carrier.snap === undefined ? normalized : carrier.snap(normalized.bound, normalized.operator);
-  if (snapped === undefined) {
+  const onGrid = snapped(carrier, normalized.operator, normalized.bound);
+  if (typeof onGrid === "string") {
     return undefined;
   }
-  const { operator, bound } = snapped;
+  const { operator, bound } = onGrid;
   if (operator === "==" || operator === "!=") {
     return namedValueBorder(rule, operator, bound, measure, carrier, drawing);
   }
