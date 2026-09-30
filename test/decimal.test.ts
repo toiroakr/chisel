@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   action,
+  array,
   behavior,
   check,
   compose,
@@ -164,6 +165,43 @@ describe("a guard comparing a decimal with a value off its grid", () => {
   it("is refused by implement for an inequality, which every decimal of its scale meets", () => {
     expect(実装("$ne")).toThrow(
       new SpecificationError("guard in 半端な額 compares $.合計 with 0.005, which no decimal(2) holds: $.合計 != 0.005"),
+    );
+  });
+});
+
+describe("a comparison of a decimal with a value off its grid outside the guards", () => {
+  const 半端 = d("0.005");
+
+  it("is refused as an invariant of the decimal itself", () => {
+    expect(() => decimal(2).refine(v => v.$eq(半端))).toThrow(
+      new Error("refine compares $ with 0.005, which no decimal(2) holds: $ == 0.005"),
+    );
+  });
+
+  it("is refused as an invariant an object writes on its field", () => {
+    expect(() => object({ 合計: decimal(2) }).refine(v => v.合計.$ne(半端))).toThrow(
+      new Error("refine compares $.合計 with 0.005, which no decimal(2) holds: $.合計 != 0.005"),
+    );
+  });
+
+  it("is refused on each element of an array", () => {
+    expect(() =>
+      object({ 明細: array(object({ 合計: decimal(2) })) }).refine(v => v.明細.$all(line => line.合計.$eq(半端))),
+    ).toThrow(new Error("refine compares $.明細[].合計 with 0.005, which no decimal(2) holds: $.明細[].合計 == 0.005"));
+  });
+
+  it("is refused in what a behavior ensures", () => {
+    expect(() =>
+      behavior("値引きする", {
+        input: variants("状態", { 申請: object({ 合計: decimal(2) }) }),
+        result: object({ 合計: decimal(2) }),
+        effects: variants("種類", {}),
+        ensures: clause => [
+          clause.always("半端にしない", (input, value) => value.合計.$lte(input.合計).$and(value.合計.$ne(半端))),
+        ],
+      }),
+    ).toThrow(
+      new SpecificationError("Ensures 半端にしない compares value.合計 with 0.005, which no decimal(2) holds: value.合計 != 0.005"),
     );
   });
 });

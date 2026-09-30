@@ -1,7 +1,17 @@
 import { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
-import type { InvariantRule, Rule, TermOf } from "./rule.js";
-import { conjuncts, decimalStep, describeRule, holds, isDecimal, satisfy, selfTerm } from "./rule.js";
+import type { ElementLabels, InvariantRule, Operator, Rule, Term, TermOf } from "./rule.js";
+import {
+  conjuncts,
+  decimalStep,
+  describeRule,
+  holds,
+  isDecimal,
+  isTerm,
+  satisfy,
+  selfTerm,
+  termData,
+} from "./rule.js";
 
 export interface ValidationIssue {
   readonly path: string;
@@ -223,7 +233,12 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
-      return refinable<S>(core, [...invariants, rule(selfTerm())]);
+      const refined = rule(selfTerm());
+      const offGrid = offGridEquality(refined, keys => fieldOf(schema as unknown as AnySchema, keys), "$");
+      if (offGrid !== undefined) {
+        throw new Error(`refine ${offGrid}`);
+      }
+      return refinable<S>(core, [...invariants, refined]);
     },
     describe(text: string) {
       return refinable<S>({ ...core, description: text }, invariants);
@@ -657,6 +672,60 @@ function temporalPlain(type: PlainType): { from(text: string): unknown; new (...
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
   return constructor;
+}
+
+// An equality between a decimal and a value with more digits than it keeps
+// settles without a row, so it is written by mistake.
+export function holdsNoDecimal(schema: AnySchema, operator: Operator, bound: unknown): boolean {
+  return (
+    schema.kind === "decimal" &&
+    (operator === "==" || operator === "!=") &&
+    isDecimal(bound) &&
+    bound.decimalPlaces() > (schema as DecimalSchema).scale
+  );
+}
+
+// Says where a rule compares a decimal with such a value, reading each term's
+// schema through `resolve` and an element of `all`/`any` through its array.
+export function offGridEquality(
+  rule: Rule,
+  resolve: (path: readonly string[]) => AnySchema | undefined,
+  label: string,
+  labels: ElementLabels = {},
+): string | undefined {
+  switch (rule.kind) {
+    case "and":
+    case "or":
+      return rule.rules.map(part => offGridEquality(part, resolve, label, labels)).find(Boolean);
+    case "not":
+      return offGridEquality(rule.rule, resolve, label, labels);
+    case "all":
+    case "any": {
+      const of = termData(rule.of).path;
+      const collection = resolve(of);
+      const element = collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
+      const inner = (path: readonly string[]) =>
+        path[0] === rule.element ? (element === undefined ? undefined : schemaAtPath(element, path.slice(1))) : resolve(path);
+      return offGridEquality(rule.each, inner, label, { ...labels, [rule.element]: `${nameOf(of, label, labels)}[]` });
+    }
+    case "compare": {
+      const [term, bound] = isTerm(rule.left) ? [rule.left, rule.right] : [rule.right, rule.left];
+      if (!isTerm(term) || isTerm(bound) || termData(term).measure !== "value") {
+        return undefined;
+      }
+      const { path } = termData(term as Term<unknown>);
+      const schema = resolve(path);
+      return schema !== undefined && holdsNoDecimal(schema, rule.operator, bound)
+        ? `compares ${nameOf(path, label, labels)} with ${String(bound)}, which no decimal(${(schema as DecimalSchema).scale}) holds: ${describeRule(rule, label, labels)}`
+        : undefined;
+    }
+  }
+}
+
+function nameOf(path: readonly string[], label: string, labels: ElementLabels): string {
+  const [first, ...rest] = path;
+  const [base, keys] = first !== undefined && labels[first] !== undefined ? [labels[first]!, rest] : [label, path];
+  return [base, ...keys].filter(part => part !== "").join(".");
 }
 
 // The schema a path reads, looked up through the cases of a sum as well, since a

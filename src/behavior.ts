@@ -30,7 +30,8 @@ import {
   rootsRead,
 } from "./rule.js";
 import { offGridEqualityIn } from "./guard-borders.js";
-import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
+import { scopesOf } from "./ensures.js";
+import { isVariantsSchema, offGridEquality, schemaAtPath, tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
   readonly result: Result;
@@ -270,6 +271,14 @@ export function behavior<
       throw new SpecificationError(
         `Ensures ${clause.name} must relate the input to the answer`,
       );
+    }
+    const resolve = ([root, ...keys]: readonly string[]) =>
+      scopesOf(root, clause, options)
+        .map(scope => schemaAtPath(scope, keys))
+        .find(schema => schema !== undefined);
+    const offGrid = offGridEquality(clause.rule, resolve, "");
+    if (offGrid !== undefined) {
+      throw new SpecificationError(`Ensures ${clause.name} ${offGrid}`);
     }
   }
   return {

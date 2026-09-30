@@ -32,7 +32,7 @@ import {
   decimalOfUnits,
   decimalUnits,
 } from "./rule.js";
-import { int, object, schemaAtPath } from "./schema.js";
+import { holdsNoDecimal, int, object, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -175,8 +175,8 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
   });
 }
 
-// An equality between a decimal and a value off its grid settles without a row:
-// every value of the grid meets `!=` and none meets `==`.
+// Guards are read here rather than through offGridEquality, since a guard's
+// terms reach the dependencies and are located through the guard's frames.
 export function offGridEqualityIn(
   definition: AnyBehavior,
   tag: string,
@@ -184,11 +184,10 @@ export function offGridEqualityIn(
 ): string | undefined {
   const frames = framesAt(guardScope(definition, tag), `@${tag}`, "$");
   for (const threshold of decision.guards.flatMap(candidate => thresholdsIn(candidate.condition, frames))) {
-    const carrier = carrierOf(threshold.schema, "value");
-    const normalized = normalize(threshold.rule)!;
-    if (threshold.schema.kind === "decimal" && carrier !== undefined && typeof snapped(carrier, normalized.operator, normalized.bound) === "string") {
+    const { operator, bound } = normalize(threshold.rule)!;
+    if (holdsNoDecimal(threshold.schema, operator, bound)) {
       const scale = (threshold.schema as DecimalSchema).scale;
-      return `compares ${threshold.label} with ${carrier.format(normalized.bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
+      return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
     }
   }
   return undefined;

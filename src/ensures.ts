@@ -88,13 +88,7 @@ function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehav
     return "integer";
   }
   const [root, ...keys] = path;
-  const scopes: readonly AnySchema[] =
-    root === "input"
-      ? (Object.values(definition.input.variants) as AnySchema[])
-      : root === "value"
-        ? valueScopes(clause, definition)
-        : [];
-  for (const scope of scopes) {
+  for (const scope of scopesOf(root, clause, definition)) {
     const owner = schemaAtPath(scope, keys.slice(0, -1));
     if (owner !== undefined && isVariantsSchema(owner) && owner.discriminant === keys[keys.length - 1]) {
       return "discriminant";
@@ -107,7 +101,21 @@ function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehav
   return undefined;
 }
 
-function valueScopes(clause: EnsuresClause, definition: AnyBehavior): readonly AnySchema[] {
+// The schemas a clause's root reads: every input case for `input`, and the result
+// cases the clause names for `value`.
+export function scopesOf(
+  root: string | undefined,
+  clause: EnsuresClause,
+  definition: Pick<AnyBehavior, "input" | "result">,
+): readonly AnySchema[] {
+  return root === "input"
+    ? (Object.values(definition.input.variants) as AnySchema[])
+    : root === "value"
+      ? valueScopes(clause, definition)
+      : [];
+}
+
+function valueScopes(clause: EnsuresClause, definition: Pick<AnyBehavior, "result">): readonly AnySchema[] {
   const { result } = definition;
   if (!isVariantsSchema(result)) {
     return [result as AnySchema];
