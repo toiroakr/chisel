@@ -547,14 +547,10 @@ function jointAssignments(
   prefer: (path: readonly string[]) => unknown = () => undefined,
   whole = false,
 ): Iterable<ReadonlyMap<string, unknown>> | "too many" {
-  const joint = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
-    const paths = finitePathsOf(rule, scope, prefix);
-    const distinct = paths === undefined ? [] : [...new Map(paths.map(path => [JSON.stringify(path), path])).values()];
-    return distinct.length < 2 ? [] : [{ prefix, rule, paths: distinct }];
-  });
+  const joint = jointInvariantsOf(scope);
   const constrained = groups.filter(group => group.measure === "value" && finiteDomainAt(scope, group.path) !== undefined);
   const component = new Map(constrained.map(group => [JSON.stringify(group.path), group.path] as const));
-  const involved: (typeof joint)[number][] = [];
+  const involved: JointInvariant[] = [];
   for (let grew = true; grew; ) {
     grew = false;
     for (const invariant of joint) {
@@ -663,13 +659,7 @@ export function keepingInvariants(
   after: unknown,
   combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): unknown {
-  const related = [
-    ...new Map(
-      scopedInvariants(scope, [])
-        .flatMap(({ prefix, rule }) => finitePathsOf(rule, scope, prefix) ?? [])
-        .map(path => [JSON.stringify(path), path] as const),
-    ).values(),
-  ];
+  const related = distinctPaths(jointInvariantsOf(scope).flatMap(invariant => invariant.paths));
   const groups = related.map(
     (path): Group => ({
       path,
@@ -710,4 +700,24 @@ export function refusedJointly(
     jointAssignment([{ path, measure: "value", constraints: [{ operator: "==", bound: value }] }], scope, combinations) ===
       "none"
   );
+}
+
+interface JointInvariant {
+  readonly prefix: readonly string[];
+  readonly rule: Rule;
+  readonly paths: readonly (readonly string[])[];
+}
+
+// The invariants the scope holds that relate two or more finite positions,
+// each with the positions it reads.
+function jointInvariantsOf(scope: AnySchema): readonly JointInvariant[] {
+  return scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
+    const paths = finitePathsOf(rule, scope, prefix);
+    const distinct = paths === undefined ? [] : distinctPaths(paths);
+    return distinct.length < 2 ? [] : [{ prefix, rule, paths: distinct }];
+  });
+}
+
+function distinctPaths(paths: readonly (readonly string[])[]): readonly (readonly string[])[] {
+  return [...new Map(paths.map(path => [JSON.stringify(path), path] as const)).values()];
 }
