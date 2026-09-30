@@ -35,7 +35,7 @@ import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { feasibilityOf } from "./feasibility.js";
+import { feasibilityOf, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility } from "./feasibility.js";
@@ -986,11 +986,12 @@ export function generate(
       if (feasibilityOf(way, scopeOf(implementation!, tag)).kind === "infeasible") {
         continue;
       }
-      const composed = composeForWay(way, tag);
-      if (
-        composed !== undefined &&
-        takes(composed.given, withFrom(composed.origin).with, way)
-      ) {
+      const taken = (candidate: { readonly given: unknown; readonly origin: unknown } | undefined) =>
+        candidate !== undefined && takes(candidate.given, withFrom(candidate.origin).with, way)
+          ? candidate
+          : undefined;
+      const composed = taken(composeForWay(way, tag)) ?? taken(composeFromWitnesses(way, tag));
+      if (composed !== undefined) {
         offer({
           name: `${definition.name}: ${decision.id} ${describeWay(way)}`,
           given: composed.given,
@@ -1000,6 +1001,30 @@ export function generate(
       } else {
         notComposed.push(`${decision.id}: ${describeWay(way)}`);
       }
+    }
+
+    function composeFromWitnesses(
+      way: Way,
+      caseTag: string,
+    ): { readonly given: unknown; readonly origin: unknown } | undefined {
+      const witnesses = witnessesOf(way, scopeOf(implementation!, caseTag));
+      if (witnesses === undefined) {
+        return undefined;
+      }
+      const at = (path: readonly string[]) =>
+        positionsByPath.get(trailKey([`@${caseTag}`, ...path.map(key => `.${key}`)]));
+      const origin =
+        origins.find(given => tagOf(definition.input, given) === caseTag) ??
+        definition.input.placeholderFor(caseTag);
+      let given: unknown = origin;
+      for (const { path, value } of witnesses) {
+        const position = at(path) ?? at(path.slice(0, -1));
+        if (position?.kind !== "divided") {
+          return undefined;
+        }
+        given = position.place(given, String(value));
+      }
+      return { given, origin };
     }
 
     function composeForWay(

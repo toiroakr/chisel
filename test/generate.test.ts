@@ -6,6 +6,7 @@ import {
   array,
   behavior,
   boolean,
+  enum as enumOf,
   example,
   implement,
   examples,
@@ -361,6 +362,104 @@ describe("guard points generate cannot compose", () => {
       "@入力済み.数量 − @入力済み.上限 ON (= 0)",
       "@入力済み.数量 − @入力済み.上限 IN (< 0)",
       "@入力済み.数量 − @入力済み.上限 OUT (> 1)",
+    ]);
+  });
+});
+
+describe("generateExamples for ways through finite values", () => {
+  const 判定する = behavior("判定する", {
+    input: variants("状態", {
+      入力済み: object({ 甲: enumOf(["w", "x"]), 乙: enumOf(["v", "y"]), 丙: boolean() }),
+    }),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
+  const 両方そろえば受け付ける = implement(判定する, {
+    cases: {
+      入力済み: action("両方そろえば受け付ける", {
+        guards: 入力 => [入力.甲.$eq("x").$and(入力.乙.$eq("y")).$else(却下), 入力.丙.$eq(true).$else(却下)],
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
+    },
+  });
+
+  it("writes every finite value a way compares at once, so a way no single move reaches gets a row", () => {
+    const { rows, notComposed } = generate(判定する, 両方そろえば受け付ける);
+
+    expect({
+      rows: rows
+        .filter(row => row.name.endsWith("→ otherwise"))
+        .map(row => ({ name: row.name, given: row.given })),
+      notComposed,
+    }).toStrictEqual({
+      rows: [
+        {
+          name: '判定する: 両方そろえば受け付ける $.甲 == "x" holds, $.乙 == "y" holds, $.丙 == true holds → otherwise',
+          given: { 状態: "入力済み", 甲: "x", 乙: "y", 丙: true },
+        },
+      ],
+      notComposed: [],
+    });
+  });
+
+  it("places a sum field into the case a way compares its discriminant with", () => {
+    const 支払う = behavior("支払う", {
+      input: variants("状態", {
+        入力済み: object({
+          支払: variants("方法", { カード: object({}), 現金: object({ 釣銭: boolean() }) }),
+          丙: boolean(),
+        }),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 現金で確認済みなら受け付ける = implement(支払う, {
+      cases: {
+        入力済み: action("現金で確認済みなら受け付ける", {
+          guards: 入力 => [
+            入力.支払.方法.$eq("現金").$and(入力.丙.$eq(true)).$else(() => ({ result: { 結果: "却下" }, effects: [] })),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+
+    expect(
+      generate(支払う, 現金で確認済みなら受け付ける)
+        .rows.filter(row => row.name.endsWith("→ otherwise"))
+        .map(row => row.given),
+    ).toStrictEqual([{ 状態: "入力済み", 支払: { 方法: "現金", 釣銭: false }, 丙: true }]);
+  });
+
+  it("names a way that compares a field the cases of a sum field share instead of composing it", () => {
+    const 確かめる = behavior("確かめる", {
+      input: variants("状態", {
+        入力済み: object({
+          支払: variants("方法", { カード: object({ 確認: boolean() }), 現金: object({ 確認: boolean() }) }),
+          丙: boolean(),
+        }),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 確認済みの現金なら受け付ける = implement(確かめる, {
+      cases: {
+        入力済み: action("確認済みの現金なら受け付ける", {
+          guards: 入力 => [
+            入力.支払.確認
+              .$eq(true)
+              .$and(入力.支払.方法.$eq("現金"))
+              .$and(入力.丙.$eq(true))
+              .$else(() => ({ result: { 結果: "却下" }, effects: [] })),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+
+    expect(generate(確かめる, 確認済みの現金なら受け付ける).notComposed).toStrictEqual([
+      '確認済みの現金なら受け付ける: $.支払.確認 == true holds, $.支払.方法 == "現金" holds, $.丙 == true holds → otherwise',
     ]);
   });
 });

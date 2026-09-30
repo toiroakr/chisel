@@ -398,3 +398,77 @@ function tighter(
   }
   return current.inclusive ? next : current;
 }
+
+export interface Witness {
+  readonly path: readonly string[];
+  readonly value: unknown;
+}
+
+// One value per finite position a way compares, or undefined when a step reads
+// anything else.
+export function witnessesOf(way: Pick<Way, "steps">, scope: AnySchema): readonly Witness[] | undefined {
+  const groups = new Map<string, { path: readonly string[]; constraints: Constraint[] }>();
+  for (const { distinction, outcome } of way.steps) {
+    let path: readonly string[];
+    let constraint: Constraint;
+    if (distinction.kind === "match") {
+      path = termData(distinction.on).path;
+      constraint = { operator: "==", bound: outcome };
+    } else {
+      if (distinction.kind !== "compare") {
+        return undefined;
+      }
+      const normalized = normalize(distinction);
+      if (normalized === undefined || normalized.measure !== "value") {
+        return undefined;
+      }
+      const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
+      path = termData(term).path;
+      constraint = {
+        operator: outcome === true ? normalized.operator : negated[normalized.operator],
+        bound: normalized.bound,
+      };
+    }
+    const key = JSON.stringify(path);
+    if (!groups.has(key)) {
+      groups.set(key, { path, constraints: [] });
+    }
+    groups.get(key)!.constraints.push(constraint);
+  }
+  const witnesses: Witness[] = [];
+  for (const { path, constraints } of groups.values()) {
+    const domain = finiteDomainAt(scope, path);
+    if (domain === undefined || constraints.some(item => item.operator !== "==" && item.operator !== "!=")) {
+      return undefined;
+    }
+    const value = domain.find(candidate =>
+      constraints.every(item => (candidate === item.bound) === (item.operator === "==")),
+    );
+    if (value === undefined) {
+      return undefined;
+    }
+    witnesses.push({ path, value });
+  }
+  return witnesses;
+}
+
+function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unknown[] | undefined {
+  const discriminated = sumOwning(scope, path);
+  if (discriminated !== undefined) {
+    const discriminant = path[path.length - 1]!;
+    const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
+      .flatMap(conjuncts)
+      .filter(rule => boundTermPath(rule)?.join("\u0000") === discriminant);
+    return discriminated.variantTags.filter(tag =>
+      refusing.every(rule => holds(rule, { [discriminant]: tag })),
+    );
+  }
+  const schema = schemaAtPath(scope, path);
+  if (schema?.kind === "boolean") {
+    return admittedBy([true, false], schema, scope, path);
+  }
+  if (schema?.kind === "enum") {
+    return admittedBy((schema as EnumSchema<string>).values, schema, scope, path);
+  }
+  return undefined;
+}
