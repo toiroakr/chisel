@@ -17,6 +17,10 @@ interface Outcome {
   readonly result: boolean;
 }
 
+// How many ways through a decision's guards are listed before its rules and
+// arms are left unmeasured instead.
+export const WAY_LIMIT = 10_000;
+
 export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): readonly Way[] {
   return [...eachWayOf(decision)];
 }

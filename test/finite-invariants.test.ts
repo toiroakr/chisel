@@ -37,7 +37,7 @@ describe("feasibility reads an invariant relating finite positions", () => {
     effects: variants("種類", {}),
   });
 
-  it("owes no row at a way only values the invariant refuses together can take", async () => {
+  it("lists no way only values the invariant refuses together can take", async () => {
     const 両方そろえば = implement(判定する, {
       cases: {
         入力済み: action("両方そろえば", {
@@ -48,7 +48,6 @@ describe("feasibility reads an invariant relating finite positions", () => {
     });
 
     expect(await rulesOf(判定する, 両方そろえば)).toStrictEqual([
-      '$.甲 == "x" holds, $.乙 == "y" holds → otherwise: no row owed',
       '$.甲 == "x" holds, $.乙 == "y" fails → else of guard 1: gap',
       '$.甲 == "x" fails → else of guard 1: gap',
     ]);
@@ -75,7 +74,6 @@ describe("feasibility reads an invariant relating finite positions", () => {
 
     expect(await rulesOf(伴う, 甲がxなら)).toStrictEqual([
       '$.甲 == "x" holds, $.乙 == "y" holds → otherwise: gap',
-      '$.甲 == "x" holds, $.乙 == "y" fails → else of guard 2: no row owed',
       '$.甲 == "x" fails → else of guard 1: gap',
     ]);
   });
@@ -97,9 +95,10 @@ describe("feasibility reads an invariant relating finite positions", () => {
       },
     });
 
-    expect((await rulesOf(判定する, 両方そろえば))[0]).toStrictEqual(
-      '$.甲 == "x" holds, $.乙 == "y" holds → otherwise: no row owed',
-    );
+    expect(await rulesOf(判定する, 両方そろえば)).toStrictEqual([
+      '$.甲 == "x" holds, $.乙 == "y" fails → else of guard 1: gap',
+      '$.甲 == "x" fails → else of guard 1: gap',
+    ]);
   });
 
   it("reads the input sum's discriminant in its invariant as the case the way is under", async () => {
@@ -119,7 +118,6 @@ describe("feasibility reads an invariant relating finite positions", () => {
     });
 
     expect(await rulesOf(振り分ける, 乙がvなら)).toStrictEqual([
-      '$.乙 == "v" holds → otherwise: no row owed',
       '$.乙 == "v" fails → else of guard 1: gap',
       '$.乙 == "v" holds → otherwise: gap',
       '$.乙 == "v" fails → else of guard 1: gap',
@@ -147,8 +145,35 @@ describe("feasibility reads an invariant relating finite positions", () => {
       },
     });
 
-    expect((await rulesOf(詳しく判定する, 両方そろえば))[0]).toStrictEqual(
-      '$.詳細.甲 == "x" holds, $.詳細.乙 == "y" holds → otherwise: no row owed',
+    expect(await rulesOf(詳しく判定する, 両方そろえば)).toStrictEqual([
+      '$.詳細.甲 == "x" holds, $.詳細.乙 == "y" fails → else of guard 1: gap',
+      '$.詳細.甲 == "x" fails → else of guard 1: gap',
+    ]);
+  });
+});
+
+describe("feasibility reads such an invariant with a way where the decision reads other values too", () => {
+  it("owes no row at a way only values the invariant refuses together can take, beside an integer", async () => {
+    const 判定する = behavior("判定する", {
+      input: variants("状態", {
+        入力済み: object({ 甲: enumOf(["w", "x"]), 乙: enumOf(["v", "y"]), 数: int() }).refine(v =>
+          v.甲.$eq("x").$and(v.乙.$eq("y")).$not(),
+        ),
+      }),
+      result: 結果,
+      effects: variants("種類", {}),
+    });
+    const 両方そろえば = implement(判定する, {
+      cases: {
+        入力済み: action("両方そろえば", {
+          guards: 入力 => [入力.甲.$eq("x").$and(入力.乙.$eq("y")).$and(入力.数.$gte(0)).$else(却下)],
+          run: 受付,
+        }),
+      },
+    });
+
+    expect((await rulesOf(判定する, 両方そろえば))[0]).toStrictEqual(
+      '$.甲 == "x" holds, $.乙 == "y" holds, $.数 >= 0 holds → otherwise: no row owed',
     );
   });
 });

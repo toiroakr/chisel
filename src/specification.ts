@@ -11,7 +11,7 @@ import type {
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
 import type { Way } from "./ways.js";
-import { describeWay, sameSteps, waysOf } from "./ways.js";
+import { WAY_LIMIT, describeWay, eachWayOf, sameSteps, waysOf } from "./ways.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import {
@@ -35,10 +35,10 @@ import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, keepingInvariants, refusedJointly, witnessesOf } from "./feasibility.js";
+import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, finiteReach, keepingInvariants, refusedJointly, unreached, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
-import type { Feasibility, Witness } from "./feasibility.js";
+import type { Feasibility, Reached, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
@@ -332,6 +332,7 @@ export interface CheckOptions {
   // invariants relating them; past it a way or a point is left undecided.
   readonly feasibility?: {
     readonly combinations?: number;
+    readonly ways?: number;
   };
 }
 
@@ -349,6 +350,7 @@ export async function check(
     FEASIBILITY_COMBINATION_LIMIT,
   );
   const definition = specification.examples.behavior;
+  const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
   const coveredEffects = new Set<string>();
@@ -746,8 +748,9 @@ export async function check(
     ) &&
     borders.every(border => border.points.every(point => point.status !== "gap"));
 
-  const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations);
-  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations);
+  const plans = plansOf(specification.implementation, combinations, wayLimit);
+  const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans);
+  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans);
   const lines = [
     ...(arms.status === "unavailable" ? [] : arms.arms),
     ...(rulesMeasure.status === "unavailable" ? [] : rulesMeasure.rules),
@@ -1245,6 +1248,7 @@ function measureRules(
   met: readonly WayTaken[],
   owed: readonly WayTaken[],
   combinations: number,
+  plans: ReadonlyMap<unknown, WayPlan>,
 ): RulesMeasure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
@@ -1254,27 +1258,34 @@ function measureRules(
   }
   const decided = decisionsWithCases(implementation);
   const notRead = decided.flatMap(([decision]) =>
-    decision.kind === "decision" ? [decision.id] : [],
+    decision.kind === "decision" || (decision.kind === "rules" && plans.get(decision)?.kind === "too many")
+      ? [decision.id]
+      : [],
   );
   const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
     taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
-  const rules = decided.flatMap(([decision, tags]) =>
-    decision.kind !== "rules"
-      ? []
-      : waysOf(decision).map((way): RuleCoverage => {
-          const base = { decision: decision.id, way: describeWay(way) };
-          if (took(met, decision.id, way.steps)) {
-            return { ...base, status: "met" };
-          }
-          if (took(owed, decision.id, way.steps)) {
-            return { ...base, status: "answer owed" };
-          }
-          return {
+  const rules = decided.flatMap(([decision, tags]) => {
+    const plan = plans.get(decision);
+    if (decision.kind !== "rules" || plan === undefined || plan.kind === "too many") {
+      return [];
+    }
+    const ways = plan.kind === "finite" ? plan.reached.map(item => item.way) : plan.ways;
+    return ways.map((way): RuleCoverage => {
+      const base = { decision: decision.id, way: describeWay(way) };
+      if (took(met, decision.id, way.steps)) {
+        return { ...base, status: "met" };
+      }
+      if (took(owed, decision.id, way.steps)) {
+        return { ...base, status: "answer owed" };
+      }
+      return plan.kind === "finite"
+        ? { ...base, status: "gap" }
+        : {
             ...base,
             ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations))),
           };
-        }),
-  );
+    });
+  });
   if (notRead.length === 0) {
     return { status: "complete", rules };
   }
@@ -1288,6 +1299,7 @@ function measureArms(
   met: readonly ArmTaken[],
   owed: readonly ArmTaken[],
   combinations: number,
+  plans: ReadonlyMap<unknown, WayPlan>,
 ): Measure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
@@ -1297,20 +1309,26 @@ function measureArms(
   }
   const decided = decisionsWithCases(implementation);
   const notRead = decided.flatMap(([decision]) =>
-    decision.kind === "decision" ? [decision.id] : [],
+    decision.kind === "decision" || (decision.kind === "rules" && plans.get(decision)?.kind === "too many")
+      ? [decision.id]
+      : [],
   );
   const took = (taken: readonly ArmTaken[], decision: string, guard: number, arm: string) =>
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
   const arms = decided.flatMap(([decision, tags]) => {
-    if (decision.kind !== "rules") {
+    const plan = plans.get(decision);
+    if (decision.kind !== "rules" || plan === undefined || plan.kind === "too many") {
       return [];
     }
-    const ways = tags.flatMap(tag =>
-      waysOf(decision).map(way => ({
-        way,
-        feasibility: feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations),
-      })),
-    );
+    const ways =
+      plan.kind === "finite"
+        ? plan.reached.map(({ way }) => ({ way, feasibility: { kind: "feasible" } as Feasibility }))
+        : tags.flatMap(tag =>
+            plan.ways.map(way => ({
+              way,
+              feasibility: feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations),
+            })),
+          );
     const through = (index: number, arm: string) =>
       ways.filter(({ way }) =>
         index === decision.guards.length
@@ -1324,7 +1342,9 @@ function measureArms(
         ? { status: "met" }
         : took(owed, decision.id, index, arm)
           ? { status: "answer owed" }
-          : unmetStatus(through(index, arm).map(item => item.feasibility));
+          : plan.kind === "finite" && through(index, arm).length === 0
+            ? { status: "no row owed", reason: unreached }
+            : unmetStatus(through(index, arm).map(item => item.feasibility));
     const guarded = decision.guards.flatMap((candidate, index) =>
       (["holds", "else"] as const).map(
         (arm): ArmCoverage => ({
@@ -1780,4 +1800,52 @@ function withJointExclusions(definition: AnyBehavior, position: Position, combin
     return at !== undefined && refusedJointly(scope, at.path, at.value, combinations);
   });
   return refused.length === position.excluded.length ? position : { ...position, excluded: refused };
+}
+
+// How a decision's ways are measured: by the combinations of the finite values
+// it reads where every value it reads is finite and they are few enough, by
+// its ways where there are no more of them than the limit, and not at all
+// otherwise.
+type WayPlan =
+  | { readonly kind: "finite"; readonly reached: readonly (Reached & { readonly tag: string })[] }
+  | { readonly kind: "ways"; readonly ways: readonly Way[] }
+  | { readonly kind: "too many" };
+
+function plansOf(
+  implementation: Implementation<AnyBehavior> | undefined,
+  combinations: number,
+  wayLimit: number,
+): ReadonlyMap<unknown, WayPlan> {
+  const plans = new Map<unknown, WayPlan>();
+  for (const [decision, tags] of implementation === undefined ? [] : decisionsWithCases(implementation)) {
+    if (decision.kind !== "rules") {
+      continue;
+    }
+    const reaches = tags.map(tag => ({
+      tag,
+      reached: finiteReach(decision, scopeOf(implementation!, tag), combinations, [[implementation!.behavior.input.discriminant]]),
+    }));
+    if (reaches.every(item => item.reached !== undefined)) {
+      const reached = new Map<string, Reached & { readonly tag: string }>();
+      for (const { tag, reached: each } of reaches) {
+        for (const item of each!) {
+          const key = describeWay(item.way);
+          if (!reached.has(key)) {
+            reached.set(key, { ...item, tag });
+          }
+        }
+      }
+      plans.set(decision, { kind: "finite", reached: [...reached.values()] });
+      continue;
+    }
+    const ways: Way[] = [];
+    for (const way of eachWayOf(decision)) {
+      ways.push(way);
+      if (ways.length > wayLimit) {
+        break;
+      }
+    }
+    plans.set(decision, ways.length > wayLimit ? { kind: "too many" } : { kind: "ways", ways });
+  }
+  return plans;
 }

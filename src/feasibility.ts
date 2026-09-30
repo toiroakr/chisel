@@ -4,9 +4,10 @@ import { normalize } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
-import { boundTermPath, conjuncts, describeRule, holds, isTerm, termData, termPaths } from "./rule.js";
-import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape } from "./schema.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, holds, isTerm, readOperand, termData, termPaths } from "./rule.js";
+import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
+import type { RulesDecision } from "./behavior.js";
 import type { Step, Way } from "./ways.js";
 
 export type Feasibility =
@@ -64,6 +65,7 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
 
 export const contradicts = "ガードの条件がこの値について両立しない";
 export const unreadable = "読めない条件が同じ値を読む別の条件と重なる";
+export const unreached = "どの値の組もこの分岐を通らない";
 
 // How many combinations of finite values feasibility tries against the
 // invariants relating them, before leaving a way or a point undecided.
@@ -720,4 +722,199 @@ function jointInvariantsOf(scope: AnySchema): readonly JointInvariant[] {
 
 function distinctPaths(paths: readonly (readonly string[])[]): readonly (readonly string[])[] {
   return [...new Map(paths.map(path => [JSON.stringify(path), path] as const)).values()];
+}
+
+export interface Reached {
+  readonly way: Way;
+  // The value each position the decision reads holds in one combination that
+  // takes the way, keyed by its path as JSON; undefined is a field left out.
+  readonly witness: ReadonlyMap<string, unknown>;
+}
+
+// When every position a decision's guards and match read is finite (a
+// boolean, an enum or a sum's discriminant, an optional one only where the
+// field itself may be left out) and their combinations, together with the
+// finite positions an invariant on only finite positions connects to them,
+// are within the limit: the ways those combinations take, each with one
+// combination taking it, of the combinations that keep every such invariant.
+// Undefined otherwise.
+export function finiteReach(
+  decision: RulesDecision<unknown, unknown, unknown>,
+  scope: AnySchema,
+  combinations: number,
+  fixed: readonly (readonly string[])[] = [],
+): readonly Reached[] | undefined {
+  const read = decisionPaths(decision);
+  if (read === undefined) {
+    return undefined;
+  }
+  const positions = [...distinctPaths([...read, ...fixed])];
+  const invariants = fieldInvariants(scope, []);
+  const has = (path: readonly string[]) => positions.some(other => isDeepStrictEqual(other, path));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const { prefix, rule } of invariants) {
+      const paths = termPaths(rule).map(path => [...prefix, ...path]);
+      if (!paths.some(has) || !paths.every(path => domainWithAbsence(scope, path) !== undefined)) {
+        continue;
+      }
+      for (const path of paths.filter(path => !has(path))) {
+        positions.push(path);
+        grew = true;
+      }
+    }
+  }
+  const domains = positions.map(path => domainWithAbsence(scope, path));
+  if (domains.some(domain => domain === undefined)) {
+    return undefined;
+  }
+  if (domains.reduce((product, domain) => product * domain!.length, 1) > combinations) {
+    return undefined;
+  }
+  const keys = new Set(positions.map(path => JSON.stringify(path)));
+  const kept = invariants.filter(({ prefix, rule }) =>
+    termPaths(rule).every(path => keys.has(JSON.stringify([...prefix, ...path]))),
+  );
+  const reached = new Map<string, Reached>();
+  const chosen: unknown[] = [];
+  const visit = (index: number): void => {
+    if (index === positions.length) {
+      const value = positions.reduce<unknown>(
+        (built, path, at) => (chosen[at] === undefined ? built : writeAt(built, path, chosen[at])),
+        {},
+      );
+      if (!kept.every(({ prefix, rule }) => holds(rule, readAt(value, prefix)))) {
+        return;
+      }
+      const way = traceFinite(decision, value);
+      const key = JSON.stringify(way.steps.map(step => [describeStep(step), step.outcome]).concat([[String(way.exit)]]));
+      if (!reached.has(key)) {
+        reached.set(key, { way, witness: new Map(positions.map((path, at) => [JSON.stringify(path), chosen[at]])) });
+      }
+      return;
+    }
+    for (const candidate of domains[index]!) {
+      chosen[index] = candidate;
+      visit(index + 1);
+    }
+  };
+  visit(0);
+  return [...reached.values()].sort((left, right) => inWayOrder(left.way, right.way));
+}
+
+// The order waysOf lists ways in: depth first, a condition holding before it
+// fails, a match's cases as written.
+function inWayOrder(left: Way, right: Way): number {
+  const rank = (step: Step): number => {
+    if (step.distinction.kind === "match") {
+      return Object.keys(step.distinction.cases).indexOf(String(step.outcome));
+    }
+    return step.outcome === true ? 0 : 1;
+  };
+  for (let index = 0; index < Math.min(left.steps.length, right.steps.length); index++) {
+    const difference = rank(left.steps[index]!) - rank(right.steps[index]!);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return left.steps.length - right.steps.length;
+}
+
+function describeStep(step: Step): string {
+  return step.distinction.kind === "match" ? `match ${termData(step.distinction.on).path.join(".")}` : describeRule(step.distinction);
+}
+
+function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): readonly (readonly string[])[] | undefined {
+  const paths: (readonly string[])[] = [];
+  const collect = (rule: Rule): boolean => {
+    switch (rule.kind) {
+      case "compare":
+        return [rule.left, rule.right].filter(isTerm).every(side => {
+          const data = termData(side as Term<unknown>);
+          paths.push(data.path);
+          return data.measure === "value";
+        });
+      case "not":
+        return collect(rule.rule);
+      case "and":
+      case "or":
+        return rule.rules.every(collect);
+      default:
+        return false;
+    }
+  };
+  if (!decision.guards.every(candidate => collect(candidate.condition))) {
+    return undefined;
+  }
+  const { otherwise } = decision;
+  if (typeof otherwise !== "function") {
+    paths.push(termData(otherwise.on).path);
+  }
+  return paths.some(path => path[0] === DEPS) ? undefined : paths;
+}
+
+function domainWithAbsence(scope: AnySchema, path: readonly string[]): readonly unknown[] | undefined {
+  const parent = rawAt(scope, path.slice(0, -1));
+  const last = path[path.length - 1];
+  const domain = finiteDomainAt(scope, path);
+  if (parent === undefined || last === undefined || domain === undefined) {
+    return undefined;
+  }
+  if (isVariantsSchema(parent)) {
+    return parent.discriminant === last ? domain : undefined;
+  }
+  if (parent.kind !== "object") {
+    return undefined;
+  }
+  const field = (parent as ObjectSchema<ObjectShape>).shape[last];
+  return field?.kind === "optional" ? [...domain, undefined] : domain;
+}
+
+// The schema at a path without stepping through an optional, which a
+// combination could not write a field under.
+function rawAt(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  const [key, ...rest] = keys;
+  if (key === undefined) {
+    return schema;
+  }
+  if (schema.kind !== "object") {
+    return undefined;
+  }
+  const field = (schema as ObjectSchema<ObjectShape>).shape[key];
+  return field === undefined ? undefined : rawAt(field, rest);
+}
+
+// Every invariant written on the scope, an object or a field it holds, or
+// what an optional field holds, with the path of what it is written on.
+function fieldInvariants(
+  schema: AnySchema,
+  prefix: readonly string[],
+): readonly { readonly prefix: readonly string[]; readonly rule: Rule }[] {
+  const own = schema.invariants.map(rule => ({ prefix, rule }));
+  if (schema.kind === "optional") {
+    return [...own, ...fieldInvariants((schema as OptionalSchema<unknown>).schema, prefix)];
+  }
+  if (schema.kind !== "object") {
+    return own;
+  }
+  const { shape } = schema as ObjectSchema<ObjectShape>;
+  return [...own, ...Object.entries(shape).flatMap(([key, field]) => fieldInvariants(field, [...prefix, key]))];
+}
+
+function traceFinite(decision: RulesDecision<unknown, unknown, unknown>, value: unknown): Way {
+  const steps: Step[] = [];
+  const distinguish = (distinction: Step["distinction"], outcome: boolean | string) => {
+    steps.push({ distinction, outcome });
+  };
+  for (const [index, candidate] of decision.guards.entries()) {
+    if (!holds(candidate.condition, value, undefined, distinguish)) {
+      return { steps, exit: index };
+    }
+  }
+  const { otherwise } = decision;
+  if (typeof otherwise === "function") {
+    return { steps, exit: "otherwise" };
+  }
+  steps.push({ distinction: otherwise, outcome: String(readOperand(otherwise.on, value)) });
+  return { steps, exit: "case" };
 }
