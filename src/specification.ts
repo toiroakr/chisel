@@ -1018,8 +1018,14 @@ export function generate(
       if (witnesses === undefined) {
         return undefined;
       }
-      const at = (path: readonly string[]) =>
-        positionsByPath.get(trailKey([`@${caseTag}`, ...path.map(key => `.${key}`)]));
+      // Not a lookup by the term's own trail: a term steps through an optional
+      // without naming it, so that trail finds whether the field is left out.
+      const at = (path: readonly string[]) => {
+        const wanted = trailKey([`@${caseTag}`, ...path.map(key => `.${key}`)]);
+        return [...positionsByPath.values()]
+          .filter(position => trailKey(position.segments.filter(step => step !== "?")) === wanted)
+          .sort((left, right) => right.segments.length - left.segments.length)[0];
+      };
       const origin =
         origins.find(given => tagOf(definition.input, given) === caseTag) ??
         definition.input.placeholderFor(caseTag);

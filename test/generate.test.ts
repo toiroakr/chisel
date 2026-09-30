@@ -477,4 +477,64 @@ describe("generateExamples for ways through finite values", () => {
       '確認済みの現金なら受け付ける: $.支払.確認 == true holds, $.支払.方法 == "現金" holds, $.丙 == true holds → otherwise',
     ]);
   });
+
+  it("writes a value a way compares into a field that may be left out, not into whether it is left out", () => {
+    const 選ぶ = behavior("選ぶ", {
+      input: variants("状態", {
+        入力済み: object({ 甲: enumOf(["w", "x"]).optional(), 乙: boolean(), 丙: boolean() }),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 三つそろえば受け付ける = implement(選ぶ, {
+      cases: {
+        入力済み: action("三つそろえば受け付ける", {
+          guards: 入力 => [
+            入力.甲
+              .$eq("x")
+              .$and(入力.乙.$eq(true))
+              .$and(入力.丙.$eq(true))
+              .$else(() => ({ result: { 結果: "却下" }, effects: [] })),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+
+    expect(
+      generate(選ぶ, 三つそろえば受け付ける, { ways: true })
+        .rows.filter(row => row.name.endsWith("→ otherwise"))
+        .map(row => row.given),
+    ).toStrictEqual([{ 状態: "入力済み", 甲: "x", 乙: true, 丙: true }]);
+  });
+
+  it("writes a value a way compares into a field held by an object that may be left out", () => {
+    const 選ぶ = behavior("選ぶ", {
+      input: variants("状態", {
+        入力済み: object({ 丁: object({ 甲: enumOf(["w", "x"]) }).optional(), 乙: boolean(), 丙: boolean() }),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 三つそろえば受け付ける = implement(選ぶ, {
+      cases: {
+        入力済み: action("三つそろえば受け付ける", {
+          guards: 入力 => [
+            入力.丁.甲
+              .$eq("x")
+              .$and(入力.乙.$eq(true))
+              .$and(入力.丙.$eq(true))
+              .$else(() => ({ result: { 結果: "却下" }, effects: [] })),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+
+    expect(
+      generate(選ぶ, 三つそろえば受け付ける, { ways: true })
+        .rows.filter(row => row.name.endsWith("→ otherwise"))
+        .map(row => row.given),
+    ).toStrictEqual([{ 状態: "入力済み", 丁: { 甲: "x" }, 乙: true, 丙: true }]);
+  });
 });
