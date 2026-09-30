@@ -8,6 +8,7 @@ import {
   examples,
   generate,
   implement,
+  int,
   object,
   spec,
   variants,
@@ -211,6 +212,58 @@ describe("generate keeps the invariants relating finite positions", () => {
       row: { 状態: "入力済み", 甲: "x", 乙: "y", 丙: false },
       notComposed: [],
     });
+  });
+
+  it("chooses the values of a way together so they keep an invariant relating them", () => {
+    const そろえる = behavior("そろえる", {
+      input: variants("状態", {
+        入力済み: object({ 甲: enumOf(["p", "q", "r"]), 乙: enumOf(["p", "q", "r"]), 丙: boolean() }).refine(v =>
+          v.甲.$eq(v.乙),
+        ),
+      }),
+      result: 結果,
+      effects: variants("種類", {}),
+    });
+    const 端を避ける = implement(そろえる, {
+      cases: {
+        入力済み: action("端を避ける", {
+          guards: 入力 => [入力.甲.$ne("r").$and(入力.乙.$ne("p")).$and(入力.丙.$eq(true)).$else(却下)],
+          run: 受付,
+        }),
+      },
+    });
+    const { rows, notComposed } = generate(そろえる, 端を避ける, { ways: true });
+
+    expect({
+      row: rows.find(row => row.name.endsWith("→ otherwise"))?.given,
+      notComposed,
+    }).toStrictEqual({ row: { 状態: "入力済み", 甲: "q", 乙: "q", 丙: true }, notComposed: [] });
+  });
+
+  it("tries every answered row of the case as the origin of a way row before its placeholder", () => {
+    const 数える = behavior("数える", {
+      input: variants("状態", {
+        入力済み: object({ 甲: boolean(), 丙: boolean(), 数: int() }).refine(v => v.甲.$ne(true).$or(v.数.$gte(1))),
+      }),
+      result: 結果,
+      effects: variants("種類", {}),
+    });
+    const 両方なら = implement(数える, {
+      cases: {
+        入力済み: action("両方なら", {
+          guards: 入力 => [入力.甲.$eq(true).$and(入力.丙.$eq(true)).$else(却下)],
+          run: 受付,
+        }),
+      },
+    });
+    const 記録 = examples(数える, {
+      ない: { given: { 状態: "入力済み", 甲: false, 丙: false, 数: 0 }, expect: 却下() },
+      ある: { given: { 状態: "入力済み", 甲: true, 丙: false, 数: 5 }, expect: 却下() },
+    });
+
+    expect(
+      generate(記録, 両方なら, { ways: true }).rows.find(row => row.name.endsWith("→ otherwise"))?.given,
+    ).toStrictEqual({ 状態: "入力済み", 甲: true, 丙: true, 数: 5 });
   });
 });
 

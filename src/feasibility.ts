@@ -426,43 +426,48 @@ export interface Witness {
   readonly value: unknown;
 }
 
-// One value per finite position a way compares, or undefined when a step reads
-// anything else.
+// The combinations of values a way's finite positions can take together with
+// the finite positions an invariant relates them to, keeping those
+// invariants; undefined when a step reads anything else or there are more
+// combinations to try than the limit.
 export function witnessesOf(
   way: Pick<Way, "steps">,
   scope: AnySchema,
   inputCase?: { readonly discriminant: string; readonly tag: string },
-): readonly Witness[] | undefined {
-  const groups = new Map<string, { path: readonly string[]; constraints: Constraint[] }>();
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
+): Iterable<readonly Witness[]> | undefined {
+  const groups = new Map<string, Group>();
+  const constrain = (path: readonly string[], constraint: Constraint) => {
+    const key = JSON.stringify(path);
+    if (!groups.has(key)) {
+      groups.set(key, { path, measure: "value", constraints: [] });
+    }
+    groups.get(key)!.constraints.push(constraint);
+  };
   for (const step of way.steps) {
     const placed = placedConstraintOf(step);
-    if (placed === undefined || placed.measure !== "value") {
+    if (
+      placed === undefined ||
+      placed.measure !== "value" ||
+      (placed.constraint.operator !== "==" && placed.constraint.operator !== "!=") ||
+      finiteDomainAt(scope, placed.path) === undefined
+    ) {
       return undefined;
     }
-    const key = JSON.stringify(placed.path);
-    if (!groups.has(key)) {
-      groups.set(key, { path: placed.path, constraints: [] });
-    }
-    groups.get(key)!.constraints.push(placed.constraint);
+    constrain(placed.path, placed.constraint);
   }
-  const witnesses: Witness[] = [];
-  for (const { path, constraints } of groups.values()) {
-    const domain =
-      inputCase !== undefined && path.length === 1 && path[0] === inputCase.discriminant
-        ? [inputCase.tag]
-        : finiteDomainAt(scope, path);
-    if (domain === undefined || constraints.some(item => item.operator !== "==" && item.operator !== "!=")) {
-      return undefined;
-    }
-    const value = domain.find(candidate =>
-      constraints.every(item => (candidate === item.bound) === (item.operator === "==")),
-    );
-    if (value === undefined) {
-      return undefined;
-    }
-    witnesses.push({ path, value });
+  if (inputCase !== undefined && groups.has(JSON.stringify([inputCase.discriminant]))) {
+    constrain([inputCase.discriminant], { operator: "==", bound: inputCase.tag });
   }
-  return witnesses;
+  const tried = jointAssignments([...groups.values()], scope, combinations, undefined, true);
+  if (tried === "too many") {
+    return undefined;
+  }
+  return (function* () {
+    for (const assignment of tried) {
+      yield [...assignment].map(([key, value]) => ({ path: JSON.parse(key) as string[], value }));
+    }
+  })();
 }
 
 function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unknown[] | undefined {
@@ -497,6 +502,15 @@ function finitePathsOf(
 ): readonly (readonly string[])[] | undefined {
   switch (rule.kind) {
     case "compare": {
+      if (isTerm(rule.left) && isTerm(rule.right)) {
+        const sides = [rule.left, rule.right].map(side => termData(side as Term<unknown>));
+        const paths = sides.map(side => [...prefix, ...side.path]);
+        return (rule.operator === "==" || rule.operator === "!=") &&
+          sides.every(side => side.measure === "value") &&
+          paths.every(path => finiteDomainAt(scope, path) !== undefined)
+          ? paths
+          : undefined;
+      }
       const normalized = normalize(rule);
       if (normalized === undefined || normalized.measure !== "value") {
         return undefined;
@@ -520,16 +534,19 @@ function finitePathsOf(
   }
 }
 
-// Values for the finite positions the groups constrain, together with every
-// finite position an invariant relating two or more of them reaches, that
-// keep those invariants: "none" when no such values exist, "too many" when
-// there are more combinations to try than the limit.
-function jointAssignment(
+// The combinations of values for the finite positions the groups constrain,
+// together with every finite position an invariant relating two or more of
+// them reaches, that keep those invariants, in the order of `prefer`; "too
+// many" when there are more combinations to try than the limit. Unless
+// `whole`, positions no such invariant reaches are left out, and nothing is
+// tried when there are none.
+function jointAssignments(
   groups: readonly Group[],
   scope: AnySchema,
   combinations: number,
   prefer: (path: readonly string[]) => unknown = () => undefined,
-): ReadonlyMap<string, unknown> | "none" | "too many" {
+  whole = false,
+): Iterable<ReadonlyMap<string, unknown>> | "too many" {
   const joint = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
     const paths = finitePathsOf(rule, scope, prefix);
     const distinct = paths === undefined ? [] : [...new Map(paths.map(path => [JSON.stringify(path), path])).values()];
@@ -552,8 +569,8 @@ function jointAssignment(
     }
   }
   const positions = [...component.values()];
-  if (involved.length === 0) {
-    return new Map();
+  if (involved.length === 0 && !whole) {
+    return [new Map()];
   }
   const domains = positions.map(path => {
     const keeps = constrained.filter(group => JSON.stringify(group.path) === JSON.stringify(path));
@@ -568,20 +585,36 @@ function jointAssignment(
   if (domains.reduce((product, domain) => product * domain.length, 1) > combinations) {
     return "too many";
   }
-  const chosen: unknown[] = [];
-  const search = (index: number): boolean => {
+  function* from(index: number, chosen: readonly unknown[]): Generator<ReadonlyMap<string, unknown>> {
     if (index === positions.length) {
       const value = positions.reduce<unknown>((built, path, at) => writeAt(built, path, chosen[at]), {});
-      return involved.every(({ prefix, rule }) => holds(rule, readAt(value, prefix)));
+      if (involved.every(({ prefix, rule }) => holds(rule, readAt(value, prefix)))) {
+        yield new Map(positions.map((path, at) => [JSON.stringify(path), chosen[at]]));
+      }
+      return;
     }
-    return domains[index]!.some(candidate => {
-      chosen[index] = candidate;
-      return search(index + 1);
-    });
-  };
-  return search(0)
-    ? new Map(positions.map((path, index) => [JSON.stringify(path), chosen[index]]))
-    : "none";
+    for (const candidate of domains[index]!) {
+      yield* from(index + 1, [...chosen, candidate]);
+    }
+  }
+  return from(0, []);
+}
+
+// The first of the combinations jointAssignments tries, or "none".
+function jointAssignment(
+  groups: readonly Group[],
+  scope: AnySchema,
+  combinations: number,
+  prefer?: (path: readonly string[]) => unknown,
+): ReadonlyMap<string, unknown> | "none" | "too many" {
+  const tried = jointAssignments(groups, scope, combinations, prefer);
+  if (tried === "too many") {
+    return "too many";
+  }
+  for (const first of tried) {
+    return first;
+  }
+  return "none";
 }
 
 function writeAt(value: unknown, path: readonly string[], leaf: unknown): unknown {

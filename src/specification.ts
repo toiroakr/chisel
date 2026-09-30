@@ -38,7 +38,7 @@ import { emptiedBy, normalize } from "./border.js";
 import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, keepingInvariants, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
-import type { Feasibility } from "./feasibility.js";
+import type { Feasibility, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
@@ -1036,10 +1036,6 @@ export function generate(
       caseTag: string,
     ): { readonly given: unknown; readonly origin: unknown } | undefined {
       const { discriminant } = definition.input;
-      const witnesses = witnessesOf(way, scopeOf(implementation!, caseTag), { discriminant, tag: caseTag });
-      if (witnesses === undefined) {
-        return undefined;
-      }
       // Not a lookup by the term's own trail: a term steps through an optional
       // without naming it, so that trail finds whether the field is left out.
       const at = (path: readonly string[]) => {
@@ -1048,21 +1044,37 @@ export function generate(
           .filter(position => trailKey(position.segments.filter(step => step !== "?")) === wanted)
           .sort((left, right) => right.segments.length - left.segments.length)[0];
       };
-      const origin =
-        origins.find(given => tagOf(definition.input, given) === caseTag) ??
-        definition.input.placeholderFor(caseTag);
-      let given: unknown = origin;
-      for (const { path, value } of witnesses) {
-        if (path.length === 1 && path[0] === discriminant) {
-          continue;
+      const placed = (origin: unknown, witnessed: readonly Witness[]): unknown => {
+        let given: unknown = origin;
+        for (const { path, value } of witnessed) {
+          if (path.length === 1 && path[0] === discriminant) {
+            continue;
+          }
+          const position = at(path) ?? at(path.slice(0, -1));
+          if (position?.kind !== "divided") {
+            return undefined;
+          }
+          given = position.place(given, String(value));
         }
-        const position = at(path) ?? at(path.slice(0, -1));
-        if (position?.kind !== "divided") {
+        return given;
+      };
+      const candidates = [
+        ...origins.filter(given => tagOf(definition.input, given) === caseTag),
+        definition.input.placeholderFor(caseTag),
+      ];
+      for (const origin of candidates) {
+        const witnesses = witnessesOf(way, scopeOf(implementation!, caseTag), { discriminant, tag: caseTag });
+        if (witnesses === undefined) {
           return undefined;
         }
-        given = position.place(given, String(value));
+        for (const witnessed of witnesses) {
+          const given = placed(origin, witnessed);
+          if (given !== undefined && definition.input.parse(given).success && takes(given, withFrom(origin).with, way)) {
+            return { given, origin };
+          }
+        }
       }
-      return { given, origin };
+      return undefined;
     }
 
     function composeForWay(
