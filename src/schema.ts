@@ -315,7 +315,7 @@ export function decimal(scale: number): DecimalSchema {
       return invalid(path, `Expected a Decimal with at most ${scale} decimal places`);
     }
     // -0 is 0: a Decimal keeps the sign of a zero, and a row writing 0 must match.
-    return valid(value.isZero() && value.isNegative() ? new Decimal(0) : value);
+    return valid(value.isZero() && value.isNegative() ? value.abs() : value);
   }
 }
 

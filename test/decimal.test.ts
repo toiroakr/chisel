@@ -47,6 +47,11 @@ describe("decimal", () => {
     expect(decimal(2).parse(d("-0"))).toStrictEqual({ success: true, value: d("0") });
   });
 
+  it("reads -0 as a 0 of the copy of decimal.js the value was built with", () => {
+    const Other = Decimal.clone();
+    expect(decimal(2).parse(new Other("-0"))).toStrictEqual({ success: true, value: new Other("0") });
+  });
+
   it("refuses a scale that is not a whole number of digits", () => {
     expect(() => decimal(-1)).toThrow(new Error("decimal takes a whole number of digits, not -1"));
     expect(() => decimal(1.5)).toThrow(new Error("decimal takes a whole number of digits, not 1.5"));
