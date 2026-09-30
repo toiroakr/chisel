@@ -819,9 +819,14 @@ export interface GenerationReport {
   readonly notComposed: readonly string[];
 }
 
+export interface GenerationOptions {
+  readonly ways?: boolean;
+}
+
 export function generate(
   target: AnyBehavior | ExampleSet<AnyBehavior>,
   implementation?: AnyImplementation,
+  options: GenerationOptions = {},
 ): GenerationReport {
   const definition = target.kind === "behavior" ? target : target.behavior;
   const rows =
@@ -990,7 +995,9 @@ export function generate(
         candidate !== undefined && takes(candidate.given, withFrom(candidate.origin).with, way)
           ? candidate
           : undefined;
-      const composed = taken(composeForWay(way, tag)) ?? taken(composeFromWitnesses(way, tag));
+      const composed =
+        taken(composeForWay(way, tag)) ??
+        (options.ways === true ? taken(composeFromWitnesses(way, tag)) : undefined);
       if (composed !== undefined) {
         offer({
           name: `${definition.name}: ${decision.id} ${describeWay(way)}`,

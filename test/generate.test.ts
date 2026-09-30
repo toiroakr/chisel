@@ -384,8 +384,23 @@ describe("generateExamples for ways through finite values", () => {
     },
   });
 
-  it("writes every finite value a way compares at once, so a way no single move reaches gets a row", () => {
+  it("names a way no single move reaches instead of composing it unless ways are asked for", () => {
     const { rows, notComposed } = generate(判定する, 両方そろえば受け付ける);
+
+    expect({
+      rows: rows.filter(row => row.name.endsWith("→ otherwise")).map(row => row.name),
+      notComposed,
+    }).toStrictEqual({
+      rows: [],
+      notComposed: [
+        '両方そろえば受け付ける: $.甲 == "x" holds, $.乙 == "y" holds, $.丙 == true holds → otherwise',
+        '両方そろえば受け付ける: $.甲 == "x" holds, $.乙 == "y" holds, $.丙 == true fails → else of guard 2',
+      ],
+    });
+  });
+
+  it("writes every finite value a way compares at once, so a way no single move reaches gets a row", () => {
+    const { rows, notComposed } = generate(判定する, 両方そろえば受け付ける, { ways: true });
 
     expect({
       rows: rows
@@ -426,7 +441,7 @@ describe("generateExamples for ways through finite values", () => {
     });
 
     expect(
-      generate(支払う, 現金で確認済みなら受け付ける)
+      generate(支払う, 現金で確認済みなら受け付ける, { ways: true })
         .rows.filter(row => row.name.endsWith("→ otherwise"))
         .map(row => row.given),
     ).toStrictEqual([{ 状態: "入力済み", 支払: { 方法: "現金", 釣銭: false }, 丙: true }]);
@@ -458,7 +473,7 @@ describe("generateExamples for ways through finite values", () => {
       },
     });
 
-    expect(generate(確かめる, 確認済みの現金なら受け付ける).notComposed).toStrictEqual([
+    expect(generate(確かめる, 確認済みの現金なら受け付ける, { ways: true }).notComposed).toStrictEqual([
       '確認済みの現金なら受け付ける: $.支払.確認 == true holds, $.支払.方法 == "現金" holds, $.丙 == true holds → otherwise',
     ]);
   });
