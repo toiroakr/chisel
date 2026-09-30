@@ -211,10 +211,13 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       if (!result.success) {
         return result;
       }
-      const broken = invariants.find(rule => !holds(rule, result.value));
-      return broken === undefined
+      const broken = invariants.filter(rule => !holds(rule, result.value));
+      return broken.length === 0
         ? result
-        : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
+        : {
+            success: false as const,
+            issues: broken.map(rule => ({ path, message: `Invariant violated: ${describeRule(rule, path)}` })),
+          };
     },
     placeholder(name?: string) {
       // An enum has no value to step to, so a rule on one, its own or one an
