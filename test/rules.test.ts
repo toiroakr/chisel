@@ -410,6 +410,38 @@ describe("what match can branch on", () => {
     );
   });
 
+  it("refuses a match on a sum that may be left out, or one held by what may be", () => {
+    const 配送 = variants("方法", { 宅配: object({}), 店頭受取: object({}) });
+    const 送り先 = behavior("送り先", {
+      input: variants("状態", {
+        確定済み: object({ 配送: 配送.optional(), 届け先: object({ 配送 }).optional() }),
+      }),
+      result: object({}),
+      effects: variants("種類", {}),
+    });
+
+    expect(() =>
+      implement(送り先, {
+        cases: {
+          確定済み: action("配送で分ける", {
+            run: match(注文 => 注文.配送.方法, { 宅配: 何もしない, 店頭受取: 何もしない }),
+          }),
+        },
+      }),
+    ).toThrow(new SpecificationError("match in 配送で分ける selects $.配送.方法, which may be left out at $.配送"));
+    expect(() =>
+      implement(送り先, {
+        cases: {
+          確定済み: action("届け先の配送で分ける", {
+            run: match(注文 => 注文.届け先.配送.方法, { 宅配: 何もしない, 店頭受取: 何もしない }),
+          }),
+        },
+      }),
+    ).toThrow(
+      new SpecificationError("match in 届け先の配送で分ける selects $.届け先.配送.方法, which may be left out at $.届け先"),
+    );
+  });
+
   it("refuses a match that leaves out a case of the sum", () => {
     expect(() =>
       implement(送る, {
