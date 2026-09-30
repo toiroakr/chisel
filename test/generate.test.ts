@@ -537,4 +537,36 @@ describe("generateExamples for ways through finite values", () => {
         .map(row => row.given),
     ).toStrictEqual([{ 状態: "入力済み", 丁: { 甲: "x" }, 乙: true, 丙: true }]);
   });
+
+  it("reads the input's own case from the case a way is composed under", () => {
+    const 仕分ける = behavior("仕分ける", {
+      input: variants("状態", {
+        甲: object({ 乙: boolean(), 丙: boolean() }),
+        丁: object({ 乙: boolean(), 丙: boolean() }),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 甲でそろえば受け付ける = implement(仕分ける, {
+      cases: {
+        $default: action("甲でそろえば受け付ける", {
+          guards: 入力 => [
+            入力.状態
+              .$eq("甲")
+              .$and(入力.乙.$eq(true))
+              .$and(入力.丙.$eq(true))
+              .$else(() => ({ result: { 結果: "却下" }, effects: [] })),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+
+    const { rows, notComposed } = generate(仕分ける, 甲でそろえば受け付ける, { ways: true });
+
+    expect({
+      rows: rows.filter(row => row.name.endsWith("→ otherwise")).map(row => row.given),
+      notComposed,
+    }).toStrictEqual({ rows: [{ 状態: "甲", 乙: true, 丙: true }], notComposed: [] });
+  });
 });

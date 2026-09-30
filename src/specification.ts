@@ -1014,7 +1014,8 @@ export function generate(
       way: Way,
       caseTag: string,
     ): { readonly given: unknown; readonly origin: unknown } | undefined {
-      const witnesses = witnessesOf(way, scopeOf(implementation!, caseTag));
+      const { discriminant } = definition.input;
+      const witnesses = witnessesOf(way, scopeOf(implementation!, caseTag), { discriminant, tag: caseTag });
       if (witnesses === undefined) {
         return undefined;
       }
@@ -1031,6 +1032,9 @@ export function generate(
         definition.input.placeholderFor(caseTag);
       let given: unknown = origin;
       for (const { path, value } of witnesses) {
+        if (path.length === 1 && path[0] === discriminant) {
+          continue;
+        }
         const position = at(path) ?? at(path.slice(0, -1));
         if (position?.kind !== "divided") {
           return undefined;

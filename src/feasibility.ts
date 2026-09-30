@@ -411,7 +411,11 @@ export interface Witness {
 
 // One value per finite position a way compares, or undefined when a step reads
 // anything else.
-export function witnessesOf(way: Pick<Way, "steps">, scope: AnySchema): readonly Witness[] | undefined {
+export function witnessesOf(
+  way: Pick<Way, "steps">,
+  scope: AnySchema,
+  inputCase?: { readonly discriminant: string; readonly tag: string },
+): readonly Witness[] | undefined {
   const groups = new Map<string, { path: readonly string[]; constraints: Constraint[] }>();
   for (const step of way.steps) {
     const placed = placedConstraintOf(step);
@@ -426,7 +430,10 @@ export function witnessesOf(way: Pick<Way, "steps">, scope: AnySchema): readonly
   }
   const witnesses: Witness[] = [];
   for (const { path, constraints } of groups.values()) {
-    const domain = finiteDomainAt(scope, path);
+    const domain =
+      inputCase !== undefined && path.length === 1 && path[0] === inputCase.discriminant
+        ? [inputCase.tag]
+        : finiteDomainAt(scope, path);
     if (domain === undefined || constraints.some(item => item.operator !== "==" && item.operator !== "!=")) {
       return undefined;
     }
