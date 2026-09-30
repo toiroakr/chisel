@@ -5,6 +5,7 @@ import type {
   AnySchema,
   AnyVariantsSchema,
   ArraySchema,
+  EnumSchema,
   LiteralSchema,
   ObjectSchema,
   ObjectShape,
@@ -198,10 +199,18 @@ function takes(answered: AnySchema, taken: AnySchema): boolean {
   if (answered.kind === "literal") {
     return taken.parse((answered as LiteralSchema<string | number | boolean | null>).value).success;
   }
+  // Every value an enum may answer has to be one the next stage takes, so an
+  // enum goes into a string or a wider enum and not into a narrower one.
+  if (answered.kind === "enum") {
+    return (answered as EnumSchema<string>).values.every(value => taken.parse(value).success);
+  }
   return answered.kind === taken.kind || (answered.kind === "integer" && taken.kind === "number");
 }
 
 function kindOf(schema: AnySchema): string {
+  if (schema.kind === "enum") {
+    return `enum ${(schema as EnumSchema<string>).values.map(value => JSON.stringify(value)).join(" | ")}`;
+  }
   if (schema.kind !== "literal") {
     return schema.kind;
   }
@@ -275,6 +284,14 @@ function mismatchOf(
     const named = Object.hasOwn(answeredShape, taken.discriminant) ? answeredShape[taken.discriminant] : undefined;
     if (named === undefined || named.kind === "optional") {
       return missing(`${path}.${taken.discriminant}`);
+    }
+    // An enum names one case per value, so each value is taken as that case.
+    if (named.kind === "enum") {
+      return firstFound((named as EnumSchema<string>).values, value =>
+        taken.variantTags.includes(value)
+          ? mismatchOf(answered, taken.variants[value], path, { discriminant: taken.discriminant, tag: value })
+          : undeclared(`${path}@${value}`),
+      );
     }
     const tag = named.kind === "literal" ? (named as LiteralSchema<string | number | boolean | null>).value : undefined;
     if (typeof tag !== "string") {

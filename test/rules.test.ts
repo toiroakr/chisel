@@ -406,7 +406,7 @@ describe("what match can branch on", () => {
         },
       }),
     ).toThrow(
-      new SpecificationError("match in メモで分ける does not select the discriminant of a sum field"),
+      new SpecificationError("match in メモで分ける does not select an enum field or the discriminant of a sum field"),
     );
   });
 

@@ -1,6 +1,7 @@
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
+  EnumSchema,
   Infer,
   ObjectSchema,
   ObjectShape,
@@ -443,40 +444,47 @@ function checkMatch(
     return;
   }
   const keys = termData(decision.otherwise.on).path;
-  const sumTags = new Set<string>();
+  const caseTags = new Set<string>();
+  let what = "sum";
   for (const tag of tags) {
+    const variant = definition.input.variants[tag] as Schema<unknown>;
     // A match has a case for every value it selects and none for its absence, so a
     // value that may be left out would reach no case; its absence is a case of a
     // sum instead.
-    const leftOut = optionalAlong(definition.input.variants[tag] as Schema<unknown>, keys);
+    const leftOut = optionalAlong(variant, keys);
     if (leftOut !== undefined) {
       throw new SpecificationError(
         `match in ${decision.id} selects $.${keys.join(".")}, which may be left out at $.${leftOut.join(".")}`,
       );
     }
-    const selected = schemaAtPath(
-      definition.input.variants[tag] as Schema<unknown>,
-      keys.slice(0, -1),
-    );
-    if (
-      selected === undefined ||
-      !isVariantsSchema(selected) ||
-      selected.discriminant !== keys[keys.length - 1]
-    ) {
+    // A match selects an enum field, whose cases are its values, or the
+    // discriminant of a sum field, whose cases are the sum's.
+    const field = schemaAtPath(variant, keys);
+    const selected = schemaAtPath(variant, keys.slice(0, -1));
+    const cases =
+      field?.kind === "enum"
+        ? (field as EnumSchema<string>).values
+        : selected !== undefined && isVariantsSchema(selected) && selected.discriminant === keys[keys.length - 1]
+          ? selected.variantTags
+          : undefined;
+    if (cases === undefined) {
       throw new SpecificationError(
-        `match in ${decision.id} does not select the discriminant of a sum field`,
+        `match in ${decision.id} does not select an enum field or the discriminant of a sum field`,
       );
     }
-    selected.variantTags.forEach(caseTag => sumTags.add(caseTag));
+    if (field?.kind === "enum") {
+      what = "enum";
+    }
+    cases.forEach(caseTag => caseTags.add(caseTag));
   }
   const written = Object.keys(decision.otherwise.cases);
-  const missing = [...sumTags].find(caseTag => !written.includes(caseTag));
+  const missing = [...caseTags].find(caseTag => !written.includes(caseTag));
   if (missing !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has no case for ${missing}`);
   }
-  const unknown = written.find(caseTag => !sumTags.has(caseTag));
+  const unknown = written.find(caseTag => !caseTags.has(caseTag));
   if (unknown !== undefined) {
-    throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the sum does not`);
+    throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the ${what} does not`);
   }
 }
 

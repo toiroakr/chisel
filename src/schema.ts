@@ -75,6 +75,13 @@ export interface DateTimeSchema extends Schema<TemporalTypes.PlainDateTime>, Val
   readonly kind: "datetime";
 }
 
+export interface EnumSchema<T extends string> extends Schema<T> {
+  readonly kind: "enum";
+  readonly values: readonly T[];
+  // What each value means, where the specification says so.
+  readonly labels?: { readonly [Value in T]?: string };
+}
+
 export interface LiteralSchema<T extends string | number | boolean | null>
   extends Schema<T> {
   readonly kind: "literal";
@@ -193,9 +200,18 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
     },
     placeholder(name?: string) {
+      // An enum has no value to step to, so a rule on one, its own or one an
+      // enclosing object or sum writes on it, takes the first value that rule keeps
+      // among those the enum's own invariants keep.
+      const stepAt = (path: readonly string[]) => {
+        const at = fieldOf(schema as unknown as AnySchema, path);
+        return at?.kind === "enum"
+          ? { among: (at as EnumSchema<string>).values.filter(value => at.invariants.every(rule => holds(rule, value))) }
+          : undefined;
+      };
       return invariants
         .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value), core.placeholder(name));
+        .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
     },
     refine(rule: (self: TermOf<unknown>) => Rule) {
       return refinable<S>(core, [...invariants, rule(selfTerm())]);
@@ -321,6 +337,41 @@ function plain(kind: string, type: PlainType, placeholder: string): AnySchema {
       value instanceof temporalPlain(type) ? valid(value) : invalid(path, `Expected a Temporal.${type}`),
     placeholder: () => temporalPlain(type).from(placeholder),
   });
+}
+
+// Exported as `enum`, a word a function may not be named. Each value is a class
+// of the position the enum stands at, the way a boolean is two.
+// What each value means is its second argument, as zod takes its options there:
+// enum(["DRAFT", "SUBMITTED"], { labels: { DRAFT: "下書き", SUBMITTED: "申請中" } }).
+export function enumOf<const T extends string>(
+  values: readonly [T, ...T[]],
+  options: { readonly labels?: { readonly [Value in T]?: string } } = {},
+): EnumSchema<T> {
+  if (values.length === 0) {
+    throw new Error("enum names no value");
+  }
+  const repeated = values.find((value, index) => values.indexOf(value) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`enum names ${repeated} twice`);
+  }
+  const { labels } = options;
+  const unknown = Object.keys(labels ?? {}).find(key => !(values as readonly string[]).includes(key));
+  if (unknown !== undefined) {
+    throw new Error(`enum labels ${unknown}, which it does not name`);
+  }
+  return refinable<EnumSchema<T>>({
+    kind: "enum",
+    values,
+    ...(labels === undefined ? {} : { labels }),
+    parse,
+    placeholder: () => values[0],
+  });
+
+  function parse(value: unknown, path = "$"): ValidationResult<T> {
+    return typeof value === "string" && (values as readonly string[]).includes(value)
+      ? valid(value as T)
+      : invalid(path, `Expected one of ${values.map(value => JSON.stringify(value)).join(", ")}`);
+  }
 }
 
 export function literal<const T extends string | number | boolean | null>(
@@ -571,6 +622,21 @@ function temporalPlain(type: PlainType): { from(text: string): unknown; new (...
     throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
   }
   return constructor;
+}
+
+// The schema a path reads, looked up through the cases of a sum as well, since a
+// rule written on the sum names a field its cases hold.
+function fieldOf(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  if (!isVariantsSchema(schema)) {
+    return schemaAtPath(schema, keys);
+  }
+  for (const each of Object.values(schema.variants) as AnySchema[]) {
+    const found = schemaAtPath(each, keys);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 export function schemaAtPath(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {

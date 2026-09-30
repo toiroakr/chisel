@@ -2,6 +2,7 @@ import type {
   AnySchema,
   AnyVariantsSchema,
   ArraySchema,
+  EnumSchema,
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
@@ -253,6 +254,15 @@ function positionAt(
       }),
     ];
   }
+  if (schema.kind === "enum") {
+    const { values } = schema as EnumSchema<string>;
+    return [
+      divided(path, values, focus, String, className => className, {
+        rules: rules.filter(rule => boundTermPath(rule)?.length === 0),
+        sample: className => className,
+      }),
+    ];
+  }
   if (schema.kind === "array") {
     const element = (schema as ArraySchema<unknown>).element;
     const first: Step = {
@@ -395,8 +405,10 @@ function writer(focus: Focus, empty?: () => unknown): Position["write"] {
 }
 
 export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
+  // An enum's lengths are those of its few values, not a range a row can step
+  // through, so a rule on one draws no border.
   if (measure === "length") {
-    return lengthCarrier;
+    return schema.kind === "enum" ? undefined : lengthCarrier;
   }
   switch (schema.kind) {
     case "integer":

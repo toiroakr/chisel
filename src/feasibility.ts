@@ -3,8 +3,8 @@ import { normalize } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
-import { boundTermPath, conjuncts, describeRule, isTerm, termData, termPaths } from "./rule.js";
-import type { AnySchema, AnyVariantsSchema } from "./schema.js";
+import { boundTermPath, conjuncts, describeRule, holds, isTerm, termData, termPaths } from "./rule.js";
+import type { AnySchema, AnyVariantsSchema, EnumSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { Step, Way } from "./ways.js";
 
@@ -204,14 +204,25 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
   const { path, measure } = group;
   const discriminated = measure === "value" ? sumOwning(scope, path) : undefined;
   if (discriminated !== undefined) {
-    return finite(discriminated.variantTags, group.constraints);
+    // A case the sum's invariants refuse is no value the discriminant can take.
+    const discriminant = path[path.length - 1]!;
+    const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
+      .flatMap(conjuncts)
+      .filter(rule => boundTermPath(rule)?.join("\u0000") === discriminant);
+    const admitted = discriminated.variantTags.filter(tag =>
+      refusing.every(rule => holds(rule, { [discriminant]: tag })),
+    );
+    return finite(admitted, group.constraints);
   }
   const schema = schemaAtPath(scope, path);
   if (schema === undefined) {
     return undefined;
   }
   if (measure === "value" && schema.kind === "boolean") {
-    return finite([true, false], group.constraints);
+    return finite(admittedBy([true, false], schema, scope, path), group.constraints);
+  }
+  if (measure === "value" && schema.kind === "enum") {
+    return finite(admittedBy((schema as EnumSchema<string>).values, schema, scope, path), group.constraints);
   }
   const carrier = carrierOf(schema, measure);
   if (carrier === undefined) {
@@ -229,6 +240,20 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
         : [{ operator: normalized.operator, bound: normalized.bound }];
     });
   return ordered([...group.constraints, ...invariants], carrier);
+}
+
+// The values of a finite domain the position's own invariants keep, the way its
+// classes leave out the ones an invariant refuses.
+function admittedBy(
+  domain: readonly unknown[],
+  schema: AnySchema,
+  scope: AnySchema,
+  path: readonly string[],
+): readonly unknown[] {
+  const own = [...schema.invariants, ...inheritedAt(scope, path)]
+    .flatMap(conjuncts)
+    .filter(rule => boundTermPath(rule)?.length === 0);
+  return domain.filter(value => own.every(rule => holds(rule, value)));
 }
 
 function sumOwning(scope: AnySchema, path: readonly string[]): AnyVariantsSchema | undefined {

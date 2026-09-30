@@ -44,7 +44,7 @@ export function readEnsures(definition: AnyBehavior): EnsuresReport {
 }
 
 const numeric = new Set(["integer", "number", "instant", "date", "time", "datetime"]);
-const named = new Set(["string", "boolean", "literal"]);
+const named = new Set(["string", "boolean", "literal", "enum"]);
 
 function classify(
   rule: Rule,

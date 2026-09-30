@@ -634,7 +634,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       const kinds = terms.map(term => {
         const { frame, keys } = locate(term, frames);
-        return termData(term).measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+        const kind = schemaAt(frame.scope, keys)?.kind;
+        // The length of an enum is not read: see carrierOf.
+        return termData(term).measure === "length" ? (kind === "enum" ? "enum length" : "integer") : kind;
       });
       const readable =
         terms.length === 2
@@ -642,6 +644,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
             rule.operator === "!=" ||
             differenceCarrier(kinds[0], kinds[1]) !== undefined
           : kinds[0] === "boolean" ||
+            // An enum's values are ordered by their text, not as they were named,
+            // so only an equality with one of them is read.
+            (kinds[0] === "enum" && (rule.operator === "==" || rule.operator === "!=")) ||
             kinds[0] === "variants" ||
             kinds[0] === "literal" ||
             (kinds[0] !== undefined &&

@@ -338,16 +338,18 @@ function compares(rule: CompareRule, value: unknown, observe?: ComparisonObserve
   }
 }
 
-export function satisfy(rule: Rule, value: unknown): unknown {
+// `stepAt` names the step of the value a term reads, where it is not the default,
+// or the values it may take: an enum's that its own invariants keep.
+export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
   if (holds(rule, value)) {
     return value;
   }
   switch (rule.kind) {
     case "and":
-      return rule.rules.reduce<unknown>((current, part) => satisfy(part, current), value);
+      return rule.rules.reduce<unknown>((current, part) => satisfy(part, current, stepAt), value);
     case "or": {
       for (const part of rule.rules) {
-        const moved = satisfy(part, value);
+        const moved = satisfy(part, value, stepAt);
         if (holds(rule, moved)) {
           return moved;
         }
@@ -355,13 +357,13 @@ export function satisfy(rule: Rule, value: unknown): unknown {
       return value;
     }
     case "compare":
-      return satisfyComparison(rule, value);
+      return satisfyComparison(rule, value, stepAt);
     default:
       return value;
   }
 }
 
-function satisfyComparison(rule: CompareRule, value: unknown): unknown {
+function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | undefined): unknown {
   const [term, other, operator] = isTerm(rule.left)
     ? [rule.left, rule.right, rule.operator]
     : [rule.right, rule.left, mirrored[rule.operator]];
@@ -372,13 +374,21 @@ function satisfyComparison(rule: CompareRule, value: unknown): unknown {
   if (bound === undefined) {
     return value;
   }
+  const { path, measure } = termData(term);
+  const named = measure === "value" ? stepAt?.(path) : undefined;
+  if (named !== undefined && typeof named !== "function") {
+    // A value of a finite domain is chosen, not stepped to: the first one the rule
+    // keeps, whichever way the rule orders them.
+    const chosen = named.among.find(candidate => holds(rule, writeAt(value, path, () => candidate)));
+    return chosen === undefined ? value : writeAt(value, path, () => chosen);
+  }
+  const move = named ?? step;
   const target =
     operator === ">" || operator === "!="
-      ? step(bound, 1)
+      ? move(bound, 1)
       : operator === "<"
-        ? step(bound, -1)
+        ? move(bound, -1)
         : bound;
-  const { path, measure } = termData(term);
   return writeAt(value, path, current =>
     measure === "length" ? resize(current, target as number) : target,
   );
@@ -412,6 +422,11 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
   "==": "==",
   "!=": "!=",
 };
+
+export type Step = (bound: unknown, direction: 1 | -1) => unknown;
+// The step of the value a path reads, or the values it may take, where it is not
+// the default.
+export type StepAt = (path: readonly string[]) => Step | { readonly among: readonly unknown[] } | undefined;
 
 function step(bound: unknown, direction: 1 | -1): unknown {
   if (typeof bound === "number") {
