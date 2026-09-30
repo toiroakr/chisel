@@ -11,15 +11,6 @@
   "internalChecksFilter": "strict",
   "prConcurrentLimit": 5,
   "rangeStrategy": "bump",
-  "customManagers": [
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
-      "matchStrings": ["npx pkg-pr-new@(?<currentValue>\\S+)"],
-      "datasourceTemplate": "npm",
-      "depNameTemplate": "pkg-pr-new"
-    }
-  ],
   "packageRules": [
     {
       "matchDepTypes": ["devDependencies"],

@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read # checkout the repository
-      pull-requests: write # pkg-pr-new comments the preview install command on the PR
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,4 +24,4 @@ jobs:
           node-version: "26.8.2"
       - run: npm ci
       - run: npm run build
-      - run: npx pkg-pr-new@0.0.88 publish --previewVersion --commentWithSha
+      - run: npm exec pkg-pr-new -- publish --previewVersion --commentWithSha

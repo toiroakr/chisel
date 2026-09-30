@@ -28,7 +28,7 @@ npm run build        # tsc -p tsconfig.build.json -> dist/
 npm run demo         # runs examples/progressive-demo/run.ts end-to-end
 ```
 
-CI (`.github/workflows/check.yml`) runs `npm ci && npm run check` on push to `main` and on every pull request. `.github/workflows/preview.yml` builds every pull request and publishes it with [pkg.pr.new](https://pkg.pr.new) (versioned `0.0.0-preview-<sha>`), which comments the install command on the pull request; it needs the pkg.pr.new GitHub App installed on the repository.
+CI (`.github/workflows/check.yml`) runs `npm ci && npm run check` on push to `main` and on every pull request. `.github/workflows/preview.yml` builds every pull request and publishes it with [pkg.pr.new](https://pkg.pr.new) (versioned `0.0.0-preview-<sha>`), running `pkg-pr-new` from the lockfile (a devDependency) as its README asks of CI; the pkg.pr.new GitHub App, not the workflow's token, comments the install command on the pull request.
 
 Run a single test file directly with vitest, e.g. `npx vitest run test/chisel.test.ts`. Tests use Vitest (`describe`/`it`/`expect` imported explicitly from `"vitest"`, no globals). `expect(...).toStrictEqual(...)` (not `toEqual`) is the standard equality assertion here — it distinguishes `{ note: undefined }` from `{}` the same way `node:assert.deepStrictEqual` did, which matters for the `optional()` invariant below.
 
