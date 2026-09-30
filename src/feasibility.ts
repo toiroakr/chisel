@@ -663,11 +663,21 @@ export function keepingInvariants(
   after: unknown,
   combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): unknown {
-  const moved = scopedInvariants(scope, [])
-    .flatMap(({ prefix, rule }) => finitePathsOf(rule, scope, prefix) ?? [])
-    .filter(path => !isDeepStrictEqual(readAt(before, path), readAt(after, path)));
-  const groups = moved.map(
-    (path): Group => ({ path, measure: "value", constraints: [{ operator: "==", bound: readAt(after, path) }] }),
+  const related = [
+    ...new Map(
+      scopedInvariants(scope, [])
+        .flatMap(({ prefix, rule }) => finitePathsOf(rule, scope, prefix) ?? [])
+        .map(path => [JSON.stringify(path), path] as const),
+    ).values(),
+  ];
+  const groups = related.map(
+    (path): Group => ({
+      path,
+      measure: "value",
+      constraints: isDeepStrictEqual(readAt(before, path), readAt(after, path))
+        ? []
+        : [{ operator: "==", bound: readAt(after, path) }],
+    }),
   );
   const assignment = jointAssignment(groups, scope, combinations, path => readAt(after, path));
   if (typeof assignment === "string") {
@@ -685,4 +695,19 @@ export function keepingInvariants(
     kept = writeAt(kept, path, value);
   }
   return kept;
+}
+
+// Whether no combination the invariants relating finite positions keep gives
+// the position at `path` this value.
+export function refusedJointly(
+  scope: AnySchema,
+  path: readonly string[],
+  value: unknown,
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
+): boolean {
+  return (
+    finiteDomainAt(scope, path) !== undefined &&
+    jointAssignment([{ path, measure: "value", constraints: [{ operator: "==", bound: value }] }], scope, combinations) ===
+      "none"
+  );
 }

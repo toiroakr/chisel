@@ -100,6 +100,9 @@ const generateCommand = defineCommand({
     ways: arg(z.boolean().default(false), {
       description: "1か所を動かすだけでは通れない道筋も、有限の値をまとめて書き込んで行を出力する",
     }),
+    feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
+      description: "不変条件とあわせて行を組み立てるときに試す値の組の上限（既定は4096）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
@@ -107,7 +110,12 @@ const generateCommand = defineCommand({
       const { rows: generated, notComposed } = generate(
         target.specification.examples,
         target.specification.implementation,
-        { ways: args.ways },
+        {
+          ways: args.ways,
+          ...(args.feasibilityCombinations === undefined
+            ? {}
+            : { feasibility: { combinations: args.feasibilityCombinations } }),
+        },
       );
       return [
         formatGeneratedExamples(target, generated),

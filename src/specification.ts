@@ -35,15 +35,15 @@ import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, keepingInvariants, witnessesOf } from "./feasibility.js";
+import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, keepingInvariants, refusedJointly, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
-import { isVariantsSchema, tagOf } from "./schema.js";
-import type { AnySchema } from "./schema.js";
+import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema } from "./schema.js";
 
 interface RunOutcome {
   readonly actual: unknown;
@@ -368,6 +368,7 @@ export async function check(
     definition,
     new Set(guardPartitions.map(partition => trailKey(partition.segments))),
     guardReadSegmentsOf(specification.implementation),
+    combinations,
   );
   const coveredClasses = positions.map(() => new Set<string>());
   const answeredGivens: unknown[] = [];
@@ -831,6 +832,11 @@ export interface GenerationReport {
 
 export interface GenerationOptions {
   readonly ways?: boolean;
+  // How many combinations of finite values are tried against the invariants
+  // relating them, as in CheckOptions.
+  readonly feasibility?: {
+    readonly combinations?: number;
+  };
 }
 
 export function generate(
@@ -838,6 +844,11 @@ export function generate(
   implementation?: AnyImplementation,
   options: GenerationOptions = {},
 ): GenerationReport {
+  const combinations = positiveLimit(
+    "feasibility.combinations",
+    options.feasibility?.combinations,
+    FEASIBILITY_COMBINATION_LIMIT,
+  );
   const definition = target.kind === "behavior" ? target : target.behavior;
   const rows =
     target.kind === "behavior" ? [] : target.rows.filter(row => definition.input.parse(row.given).success);
@@ -871,7 +882,7 @@ export function generate(
     const kept =
       from === undefined || tag === undefined
         ? undefined
-        : keepingInvariants(feasibilityScope(definition, tag), from, row.given);
+        : keepingInvariants(feasibilityScope(definition, tag), from, row.given, combinations);
     if (kept !== undefined && definition.input.parse(kept).success) {
       generated.push({ ...row, given: kept });
     } else {
@@ -888,14 +899,11 @@ export function generate(
   for (const tag of definition.input.variantTags.filter(
     tag => !existing.has(tag) && !refused.includes(tag),
   )) {
-    offer({
-      name: `${definition.name}: ${tag}`,
-      given: definition.input.placeholderFor(tag),
-      reason: `${tag}の期待結果を人間が決める必要があります`,
-    });
+    const given = definition.input.placeholderFor(tag);
+    offer({ name: `${definition.name}: ${tag}`, given, reason: `${tag}の期待結果を人間が決める必要があります` }, given);
   }
 
-  for (const position of measuredPositionsOf(definition, guardDivided, guardRead)) {
+  for (const position of measuredPositionsOf(definition, guardDivided, guardRead, combinations)) {
     if (position.kind !== "divided") {
       continue;
     }
@@ -918,7 +926,7 @@ export function generate(
     }
   }
 
-  for (const position of measuredPositionsOf(definition, guardDivided, guardRead)) {
+  for (const position of measuredPositionsOf(definition, guardDivided, guardRead, combinations)) {
     for (const border of position.borders) {
       for (const point of border.points) {
         if (point.status !== "owed" || point.witness === undefined) {
@@ -976,7 +984,7 @@ export function generate(
       const standsAt = [...rows, ...generated].some(row =>
         reachedBy(row.given, row.with).some(item => point.contains(drawn.coordinateOf(item))),
       );
-      if (standsAt || unmetStatus(reachOf(drawn, point, FEASIBILITY_COMBINATION_LIMIT)).status === "no row owed") {
+      if (standsAt || unmetStatus(reachOf(drawn, point, combinations)).status === "no row owed") {
         continue;
       }
       const origin =
@@ -1009,7 +1017,7 @@ export function generate(
       if ([...rows, ...generated].some(row => takes(row.given, row.with, way))) {
         continue;
       }
-      if (feasibilityOf(way, scopeOf(implementation!, tag)).kind === "infeasible") {
+      if (feasibilityOf(way, scopeOf(implementation!, tag), undefined, combinations).kind === "infeasible") {
         continue;
       }
       const taken = (candidate: { readonly given: unknown; readonly origin: unknown } | undefined) =>
@@ -1063,7 +1071,12 @@ export function generate(
         definition.input.placeholderFor(caseTag),
       ];
       for (const origin of candidates) {
-        const witnesses = witnessesOf(way, scopeOf(implementation!, caseTag), { discriminant, tag: caseTag });
+        const witnesses = witnessesOf(
+          way,
+          scopeOf(implementation!, caseTag),
+          { discriminant, tag: caseTag },
+          combinations,
+        );
         if (witnesses === undefined) {
           return undefined;
         }
@@ -1546,8 +1559,9 @@ function measuredPositionsOf(
   definition: AnyBehavior,
   guardDivided: ReadonlySet<string> = new Set(),
   guardRead: readonly (readonly string[])[] = [],
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): readonly Position[] {
-  return positionsOf(definition.input).flatMap((position): Position[] => {
+  return positionsOf(definition.input).map(position => withJointExclusions(definition, position, combinations)).flatMap((position): Position[] => {
     if (!isDisregarded(definition, position)) {
       return [position];
     }
@@ -1732,4 +1746,38 @@ async function disregardBroken(
     }
   }
   return { kind: "held" };
+}
+
+// A class of a boolean, an enum or a sum field that no combination of values
+// the invariants relating finite positions keep can take is excluded, like
+// one a rule on the position alone refuses.
+function withJointExclusions(definition: AnyBehavior, position: Position, combinations: number): Position {
+  const [head, ...rest] = position.segments;
+  if (position.kind !== "divided" || head === undefined || rest.length === 0 || !rest.every(step => step.startsWith("."))) {
+    return position;
+  }
+  const tag = head.slice(1);
+  const scope = feasibilityScope(definition, tag);
+  const keys = rest.map(step => step.slice(1));
+  const field = schemaAtPath(scope, keys);
+  const coordinate = (className: string): { path: readonly string[]; value: unknown } | undefined => {
+    switch (field?.kind) {
+      case "boolean":
+        return { path: keys, value: className === "true" };
+      case "enum":
+        return { path: keys, value: className };
+      case "variants":
+        return { path: [...keys, (field as AnyVariantsSchema).discriminant], value: className };
+      default:
+        return undefined;
+    }
+  };
+  const refused = position.classes.filter(className => {
+    if (position.excluded.includes(className)) {
+      return true;
+    }
+    const at = coordinate(className);
+    return at !== undefined && refusedJointly(scope, at.path, at.value, combinations);
+  });
+  return refused.length === position.excluded.length ? position : { ...position, excluded: refused };
 }

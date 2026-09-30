@@ -267,3 +267,47 @@ describe("generate keeps the invariants relating finite positions", () => {
   });
 });
 
+describe("classes the invariants relating finite positions leave no combination for", () => {
+  const 決まる = behavior("決まる", {
+    input: variants("状態", {
+      入力済み: object({ 甲: enumOf(["w", "x"]), 乙: enumOf(["v", "y"]) })
+        .refine(v => v.甲.$eq("x").$or(v.乙.$eq("y")))
+        .refine(v => v.甲.$ne("x").$or(v.乙.$eq("y"))),
+    }),
+    result: 結果,
+    effects: variants("種類", {}),
+  });
+
+  it("counts a class no combination the invariants keep can take as excluded", async () => {
+    const report = await check(spec("決まる", { examples: examples(決まる, {}) }));
+
+    expect(report.partitions).toStrictEqual([
+      { path: "@入力済み.甲", kind: "divided", covered: [], missing: ["w", "x"], excluded: [] },
+      { path: "@入力済み.乙", kind: "divided", covered: [], missing: ["y"], excluded: ["v"] },
+    ]);
+  });
+
+  it("offers no row for such a class", () => {
+    const { rows, notComposed } = generate(決まる);
+
+    expect({ rows: rows.map(row => row.name), notComposed }).toStrictEqual({
+      rows: ["決まる: 入力済み", "決まる: @入力済み.甲 = x"],
+      notComposed: [],
+    });
+  });
+
+  it("takes the limit on the combinations it tries from the options of generate", () => {
+    const { notComposed } = generate(決まる, undefined, { feasibility: { combinations: 1 } });
+
+    expect(notComposed.filter(line => line.startsWith("決まる: @入力済み.乙 = v"))).toStrictEqual([
+      '決まる: @入力済み.乙 = v: Invariant violated: or($.甲 == "x", $.乙 == "y")',
+    ]);
+  });
+
+  it("refuses a limit for generate that is not a positive integer", () => {
+    expect(() => generate(決まる, undefined, { feasibility: { combinations: 1.5 } })).toThrow(
+      "feasibility.combinations must be a positive integer, but was 1.5",
+    );
+  });
+});
+

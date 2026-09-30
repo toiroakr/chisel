@@ -441,6 +441,19 @@ describe("chisel generate --ways", () => {
   });
 });
 
+describe("chisel generate with the limit of the combinations feasibility tries", () => {
+  it("takes the limit from an option, past which a class it cannot rule out is named", async () => {
+    const result = await run([
+      "generate",
+      fixture("test/fixtures/finite-exclusion.ts"),
+      "--feasibility-combinations",
+      "1",
+    ]);
+
+    expect(stdoutOf(result)).toMatch(/^\/\/ 組み立てられなかった道筋: 決まる: @入力済み\.乙 = v: /m);
+  });
+});
+
 describe("chisel check --json", () => {
   it("writes the reports as one JSON document with a schema version", async () => {
     const result = await run(["check", fixture("test/fixtures/rules.ts"), "--json"]);
