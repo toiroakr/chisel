@@ -16,6 +16,12 @@ import {
 export interface ValidationIssue {
   readonly path: string;
   readonly message: string;
+  // The name of the invariant the value breaks, where it was given one.
+  readonly invariant?: string;
+}
+
+export interface InvariantOptions {
+  readonly name?: string;
 }
 
 export type ValidationResult<T> =
@@ -29,7 +35,7 @@ export interface Schema<T> {
   readonly description?: string;
   parse(value: unknown, path?: string): ValidationResult<T>;
   placeholder(name?: string): unknown;
-  refine(rule: InvariantRule<T>): this;
+  refine(rule: InvariantRule<T>, options?: InvariantOptions): this;
   describe(text: string): this;
   // Typed through `this` rather than T: naming T here would make Schema<T>
   // invariant in T, and StringSchema would stop being an AnySchema.
@@ -39,16 +45,16 @@ export interface Schema<T> {
 // Shorthands for the bounds a rule most often states; each one desugars to the
 // same rule refine() would take, so the analysis reads them alike.
 interface ValueBounds<T> {
-  min(bound: T): this;
-  max(bound: T): this;
-  gt(bound: T): this;
-  lt(bound: T): this;
+  min(bound: T, options?: InvariantOptions): this;
+  max(bound: T, options?: InvariantOptions): this;
+  gt(bound: T, options?: InvariantOptions): this;
+  lt(bound: T, options?: InvariantOptions): this;
 }
 
 interface LengthBounds {
-  min(length: number): this;
-  max(length: number): this;
-  length(length: number): this;
+  min(length: number, options?: InvariantOptions): this;
+  max(length: number, options?: InvariantOptions): this;
+  length(length: number, options?: InvariantOptions): this;
 }
 
 export type AnySchema = Schema<unknown>;
@@ -216,7 +222,15 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         ? result
         : {
             success: false as const,
-            issues: broken.map(rule => ({ path, message: `Invariant violated: ${describeRule(rule, path)}` })),
+            issues: broken.map(rule =>
+              rule.name === undefined
+                ? { path, message: `Invariant violated: ${describeRule(rule, path)}` }
+                : {
+                    path,
+                    message: `Invariant ${rule.name} violated: ${describeRule(rule, path)}`,
+                    invariant: rule.name,
+                  },
+            ),
           };
     },
     placeholder(name?: string) {
@@ -235,8 +249,11 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         .flatMap(conjuncts)
         .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
     },
-    refine(rule: (self: TermOf<unknown>) => Rule) {
-      const refined = rule(selfTerm());
+    refine(rule: (self: TermOf<unknown>) => Rule, options: InvariantOptions = {}) {
+      if (options.name !== undefined && invariants.some(invariant => invariant.name === options.name)) {
+        throw new Error(`Invariant ${options.name} is declared more than once`);
+      }
+      const refined: Rule = options.name === undefined ? rule(selfTerm()) : { ...rule(selfTerm()), name: options.name };
       const offGrid = offGridEquality(refined, keys => fieldOf(schema as unknown as AnySchema, keys), "$");
       if (offGrid !== undefined) {
         throw new Error(`refine ${offGrid}`);
@@ -250,20 +267,20 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       return optional(schema as unknown as S);
     },
   };
-  const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
+  const refine = (rule: (self: any) => Rule, options?: InvariantOptions): S => schema.refine(rule, options);
   if (ORDERED_KINDS.has(core.kind)) {
     Object.assign(schema, {
-      min: (bound: unknown) => refine(v => v.$gte(bound)),
-      max: (bound: unknown) => refine(v => v.$lte(bound)),
-      gt: (bound: unknown) => refine(v => v.$gt(bound)),
-      lt: (bound: unknown) => refine(v => v.$lt(bound)),
+      min: (bound: unknown, options?: InvariantOptions) => refine(v => v.$gte(bound), options),
+      max: (bound: unknown, options?: InvariantOptions) => refine(v => v.$lte(bound), options),
+      gt: (bound: unknown, options?: InvariantOptions) => refine(v => v.$gt(bound), options),
+      lt: (bound: unknown, options?: InvariantOptions) => refine(v => v.$lt(bound), options),
     });
   }
   if (core.kind === "string" || core.kind === "array" || core.kind === "record") {
     Object.assign(schema, {
-      min: (length: number) => refine(v => v.$length().$gte(length)),
-      max: (length: number) => refine(v => v.$length().$lte(length)),
-      length: (length: number) => refine(v => v.$length().$eq(length)),
+      min: (length: number, options?: InvariantOptions) => refine(v => v.$length().$gte(length), options),
+      max: (length: number, options?: InvariantOptions) => refine(v => v.$length().$lte(length), options),
+      length: (length: number, options?: InvariantOptions) => refine(v => v.$length().$eq(length), options),
     });
   }
   return schema as unknown as S;

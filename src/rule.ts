@@ -125,12 +125,18 @@ export interface NotRule {
   readonly rule: Rule;
 }
 
-export type Rule = CompareRule | AllRule | AnyRule | AndRule | OrRule | NotRule;
+// An invariant may carry the name refine() was given for it.
+export type Rule = (CompareRule | AllRule | AnyRule | AndRule | OrRule | NotRule) & { readonly name?: string };
 
 export type Distinction = CompareRule | AllRule | AnyRule;
 
+// Each part of a named invariant keeps its name.
 export function conjuncts(rule: Rule): readonly Rule[] {
-  return rule.kind === "and" ? rule.rules.flatMap(conjuncts) : [rule];
+  if (rule.kind !== "and") {
+    return [rule];
+  }
+  const { name } = rule;
+  return rule.rules.flatMap(part => conjuncts(name === undefined || part.name !== undefined ? part : { ...part, name }));
 }
 
 let quantifiedDepth = 0;

@@ -39,6 +39,7 @@ export type {
   VariantsSchema,
   VariantValue,
   Tags,
+  InvariantOptions,
   ValidationIssue,
   ValidationResult,
   VariantOf,
