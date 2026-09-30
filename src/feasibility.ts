@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { Carrier } from "./border.js";
 import { normalize } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
@@ -527,6 +528,7 @@ function jointAssignment(
   groups: readonly Group[],
   scope: AnySchema,
   combinations: number,
+  prefer: (path: readonly string[]) => unknown = () => undefined,
 ): ReadonlyMap<string, unknown> | "none" | "too many" {
   const joint = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
     const paths = finitePathsOf(rule, scope, prefix);
@@ -555,11 +557,13 @@ function jointAssignment(
   }
   const domains = positions.map(path => {
     const keeps = constrained.filter(group => JSON.stringify(group.path) === JSON.stringify(path));
-    return finiteDomainAt(scope, path)!.filter(value =>
+    const kept = finiteDomainAt(scope, path)!.filter(value =>
       keeps.every(group =>
         group.constraints.every(item => (value === item.bound) === (item.operator === "==")),
       ),
     );
+    const preferred = prefer(path);
+    return kept.includes(preferred) ? [preferred, ...kept.filter(value => value !== preferred)] : kept;
   });
   if (domains.reduce((product, domain) => product * domain.length, 1) > combinations) {
     return "too many";
@@ -613,4 +617,39 @@ function readAt(value: unknown, path: readonly string[]): unknown {
         : undefined,
     value,
   );
+}
+
+// The value `after` becomes when the finite positions an invariant relates,
+// other than those `after` moved away from `before`, are chosen again so every
+// such invariant holds, keeping what `after` holds wherever it can; undefined
+// when no choice keeps them, when there are more combinations than the limit,
+// or when it would take another case of a sum field.
+export function keepingInvariants(
+  scope: AnySchema,
+  before: unknown,
+  after: unknown,
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
+): unknown {
+  const moved = scopedInvariants(scope, [])
+    .flatMap(({ prefix, rule }) => finitePathsOf(rule, scope, prefix) ?? [])
+    .filter(path => !isDeepStrictEqual(readAt(before, path), readAt(after, path)));
+  const groups = moved.map(
+    (path): Group => ({ path, measure: "value", constraints: [{ operator: "==", bound: readAt(after, path) }] }),
+  );
+  const assignment = jointAssignment(groups, scope, combinations, path => readAt(after, path));
+  if (typeof assignment === "string") {
+    return undefined;
+  }
+  let kept = after;
+  for (const [key, value] of assignment) {
+    const path = JSON.parse(key) as string[];
+    if (readAt(kept, path) === value) {
+      continue;
+    }
+    if (sumOwning(scope, path) !== undefined) {
+      return undefined;
+    }
+    kept = writeAt(kept, path, value);
+  }
+  return kept;
 }

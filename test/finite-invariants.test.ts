@@ -6,6 +6,7 @@ import {
   check,
   enum as enumOf,
   examples,
+  generate,
   implement,
   object,
   spec,
@@ -188,3 +189,28 @@ describe("the combinations feasibility tries against invariants", () => {
     );
   });
 });
+
+describe("generate keeps the invariants relating finite positions", () => {
+  const 伴う = behavior("伴う", {
+    input: variants("状態", {
+      入力済み: object({ 甲: enumOf(["w", "x"]), 乙: enumOf(["v", "y"]), 丙: boolean() }).refine(v =>
+        v.甲.$ne("x").$or(v.乙.$eq("y")),
+      ),
+    }),
+    result: 結果,
+    effects: variants("種類", {}),
+  });
+
+  it("moves the other finite positions a class row needs so the row keeps the invariant", () => {
+    const { rows, notComposed } = generate(伴う);
+
+    expect({
+      row: rows.find(row => row.name === "伴う: @入力済み.甲 = x")?.given,
+      notComposed,
+    }).toStrictEqual({
+      row: { 状態: "入力済み", 甲: "x", 乙: "y", 丙: false },
+      notComposed: [],
+    });
+  });
+});
+

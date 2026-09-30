@@ -35,7 +35,7 @@ import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, witnessesOf } from "./feasibility.js";
+import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, keepingInvariants, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility } from "./feasibility.js";
@@ -859,10 +859,21 @@ export function generate(
 
   const generated: GeneratedExample[] = [];
   const notComposed: string[] = [];
-  const offer = (row: GeneratedExample): void => {
+  // A row moved from `from` that breaks an invariant relating finite positions
+  // is offered with the other positions chosen again to keep it.
+  const offer = (row: GeneratedExample, from?: unknown): void => {
     const parsed = definition.input.parse(row.given);
     if (parsed.success) {
       generated.push(row);
+      return;
+    }
+    const tag = tagOf(definition.input, row.given);
+    const kept =
+      from === undefined || tag === undefined
+        ? undefined
+        : keepingInvariants(feasibilityScope(definition, tag), from, row.given);
+    if (kept !== undefined && definition.input.parse(kept).success) {
+      generated.push({ ...row, given: kept });
     } else {
       notComposed.push(`${row.name}: ${parsed.issues[0]!.message}`);
     }
@@ -902,7 +913,7 @@ export function generate(
           given: position.place(origin, className),
           reason: `${position.path}が${className}の期待結果を人間が決める必要があります`,
           ...withFrom(origin),
-        });
+        }, origin);
       }
     }
   }
