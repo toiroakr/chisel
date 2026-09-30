@@ -3,6 +3,7 @@ import type {
   AnyVariantsSchema,
   ArraySchema,
   EnumSchema,
+  DecimalSchema,
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
@@ -15,6 +16,7 @@ import {
   dateTimeCarrier,
   instantCarrier,
   timeCarrier,
+  decimalCarrier,
   integerCarrier,
   lengthCarrier,
   numberCarrier,
@@ -415,6 +417,8 @@ export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrie
       return integerCarrier;
     case "number":
       return numberCarrier;
+    case "decimal":
+      return decimalCarrier((schema as DecimalSchema).scale);
     case "instant":
       return instantCarrier;
     case "date":

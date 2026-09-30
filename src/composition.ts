@@ -6,6 +6,7 @@ import type {
   AnyVariantsSchema,
   ArraySchema,
   EnumSchema,
+  DecimalSchema,
   LiteralSchema,
   ObjectSchema,
   ObjectShape,
@@ -204,12 +205,20 @@ function takes(answered: AnySchema, taken: AnySchema): boolean {
   if (answered.kind === "enum") {
     return (answered as EnumSchema<string>).values.every(value => taken.parse(value).success);
   }
+  // A decimal is a Decimal, not a number, so it goes only into a decimal keeping
+  // at least as many digits.
+  if (answered.kind === "decimal" && taken.kind === "decimal") {
+    return (answered as DecimalSchema).scale <= (taken as DecimalSchema).scale;
+  }
   return answered.kind === taken.kind || (answered.kind === "integer" && taken.kind === "number");
 }
 
 function kindOf(schema: AnySchema): string {
   if (schema.kind === "enum") {
     return `enum ${(schema as EnumSchema<string>).values.map(value => JSON.stringify(value)).join(" | ")}`;
+  }
+  if (schema.kind === "decimal") {
+    return `decimal(${(schema as DecimalSchema).scale})`;
   }
   if (schema.kind !== "literal") {
     return schema.kind;

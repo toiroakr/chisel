@@ -1,5 +1,6 @@
 import type { Operator, Rule } from "./rule.js";
-import { describeRule, isTerm, termData } from "./rule.js";
+import type { Decimal } from "decimal.js";
+import { decimalStep, describeRule, isDecimal, isTerm, termData } from "./rule.js";
 
 export type PointRole = "ON" | "OFF" | "IN" | "OUT";
 export type PointStatus = "owed" | "excluded" | "not named" | "no point";
@@ -28,6 +29,9 @@ export interface Carrier {
   readonly format: (value: unknown) => string;
   readonly floor?: { readonly value: unknown; readonly reason: string };
   readonly ceiling?: { readonly value: unknown; readonly reason: string };
+  // Moves a bound off the carrier's grid onto it, keeping what the comparison
+  // admits; undefined when no value of the grid can meet it.
+  readonly snap?: (bound: unknown, operator: Operator) => { readonly operator: Operator; readonly bound: unknown } | undefined;
 }
 
 export const integerCarrier: Carrier = {
@@ -40,6 +44,49 @@ export const lengthCarrier: Carrier = {
   ...integerCarrier,
   floor: { value: 0, reason: "a length is never negative" },
 };
+
+// Steps by one unit of the last digit and compares exactly. A bound written off
+// that grid is moved onto it first, so `>= 0.004` in cents draws the border of
+// `>= 0.01`, whose points are values a row can hold.
+export function decimalCarrier(scale: number): Carrier {
+  const step = decimalStep(scale);
+  return {
+    compare: (left, right) => (left as Decimal).comparedTo(right as Decimal),
+    step,
+    format: String,
+    snap: (bound, operator) => {
+      if (!isDecimal(bound) || bound.decimalPlaces() <= scale) {
+        return { operator, bound };
+      }
+      switch (operator) {
+        case ">":
+        case ">=":
+          return { operator: ">=", bound: step(bound, 1) };
+        case "<":
+        case "<=":
+          return { operator: "<=", bound: step(bound, -1) };
+        default:
+          // No value of the grid equals it, so an equality names none.
+          return undefined;
+      }
+    },
+  };
+}
+
+// A difference between two decimals, or a decimal and an integer, counted in
+// units of the finer scale as a bigint, and written as the decimal it stands for.
+export function decimalUnitsCarrier(scale: number): Carrier {
+  return {
+    ...nanosecondCarrier,
+    format: value => {
+      const units = value as bigint;
+      const negative = units < 0n;
+      const digits = (negative ? -units : units).toString().padStart(scale + 1, "0");
+      const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+      return negative ? `-${text}` : text;
+    },
+  };
+}
 
 export const numberCarrier: Carrier = {
   compare: (left, right) => (left as number) - (right as number),
@@ -247,11 +294,16 @@ function borderOf(
   if (normalized === undefined) {
     return undefined;
   }
-  const { operator, bound, measure } = normalized;
+  const { measure } = normalized;
   const carrier = carrierFor(measure);
   if (carrier === undefined) {
     return undefined;
   }
+  const snapped = carrier.snap === undefined ? normalized : carrier.snap(normalized.bound, normalized.operator);
+  if (snapped === undefined) {
+    return undefined;
+  }
+  const { operator, bound } = snapped;
   if (operator === "==" || operator === "!=") {
     return namedValueBorder(rule, operator, bound, measure, carrier, drawing);
   }

@@ -1,3 +1,4 @@
+import type { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { Execution, Guard } from "./behavior.js";
 
@@ -7,7 +8,7 @@ type Moment =
   | TemporalTypes.PlainTime
   | TemporalTypes.PlainDateTime;
 
-export type Comparable = number | string | Moment;
+export type Comparable = number | string | Moment | Decimal;
 
 // Symbol.for, not Symbol(): the CLI loads spec files through tsImport in a
 // separate module graph, and a per-module symbol would not recognise their terms.
@@ -70,7 +71,7 @@ export type TermOf<T> = Term<T> &
     ? { readonly [key: string]: any }
     : [T] extends [boolean]
     ? Equatable<T>
-    : [T] extends [number | Moment]
+    : [T] extends [number | Moment | Decimal]
       ? Ordered<T>
       : [T] extends [string]
         ? Ordered<T> & Measured
@@ -338,8 +339,9 @@ function compares(rule: CompareRule, value: unknown, observe?: ComparisonObserve
   }
 }
 
-// `stepAt` names the step of the value a term reads, where it is not the default,
-// or the values it may take: an enum's that its own invariants keep.
+// `stepAt` names the step of the value a term reads, where it is not the default
+// (the value next to 0.5 in a decimal of cents is 0.51, not 1.5), or the values it
+// may take: an enum's that its own invariants keep.
 export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
   if (holds(rule, value)) {
     return value;
@@ -427,6 +429,48 @@ export type Step = (bound: unknown, direction: 1 | -1) => unknown;
 // The step of the value a path reads, or the values it may take, where it is not
 // the default.
 export type StepAt = (path: readonly string[]) => Step | { readonly among: readonly unknown[] } | undefined;
+
+// A Decimal from decimal.js, read by its methods rather than by instanceof, so a
+// specification using another copy of the library is read the same.
+export function isDecimal(value: unknown): value is Decimal {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Partial<Decimal>).comparedTo === "function" &&
+    typeof (value as Partial<Decimal>).toFixed === "function" &&
+    typeof (value as Partial<Decimal>).decimalPlaces === "function"
+  );
+}
+
+// A decimal of `scale` digits after the point, as a whole number of units of its
+// last digit: exact, and free of the precision a Decimal's arithmetic rounds to.
+// A value off that grid is rounded down or up, as `rounding` says.
+export function decimalUnits(value: Decimal, scale: number, rounding: "floor" | "ceil"): bigint {
+  const mode = rounding === "floor" ? 3 : 2; // decimal.js ROUND_FLOOR and ROUND_CEIL
+  const text = value.toFixed(scale, mode as Decimal.Rounding);
+  return BigInt(text.replace(".", ""));
+}
+
+// The Decimal a whole number of units stands for, built with the constructor of
+// `like`, so the value comes back as the kind the specification uses.
+export function decimalOfUnits(like: Decimal, units: bigint, scale: number): Decimal {
+  const negative = units < 0n;
+  const digits = (negative ? -units : units).toString().padStart(scale + 1, "0");
+  const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+  const Constructor = like.constructor as new (text: string) => Decimal;
+  return new Constructor(negative ? `-${text}` : text);
+}
+
+// Steps a decimal to the next value of `scale` digits strictly past it, so a bound
+// written off that grid, such as 0.004 in cents, steps to 0.01 above and 0 below.
+export function decimalStep(scale: number): Step {
+  return (bound, direction) => {
+    const value = bound as Decimal;
+    const units =
+      direction > 0 ? decimalUnits(value, scale, "floor") + 1n : decimalUnits(value, scale, "ceil") - 1n;
+    return decimalOfUnits(value, units, scale);
+  };
+}
 
 function step(bound: unknown, direction: 1 | -1): unknown {
   if (typeof bound === "number") {
@@ -559,6 +603,13 @@ function ordering(left: unknown, right: unknown): number {
   }
   if (typeof left === "boolean" && typeof right === "boolean") {
     return left === right ? 0 : Number.NaN;
+  }
+  // A Decimal compares exactly, by its own comparedTo.
+  if (isDecimal(left)) {
+    return left.comparedTo(right as Decimal.Value);
+  }
+  if (isDecimal(right)) {
+    return -right.comparedTo(left as Decimal.Value);
   }
   const compareInstants = (
     left as { readonly constructor?: { readonly compare?: (a: unknown, b: unknown) => number } }
