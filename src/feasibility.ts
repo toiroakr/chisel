@@ -103,24 +103,17 @@ export function feasibilityOf(
       continue;
     }
     outcomes.set(key, step.outcome);
-    const { distinction, outcome } = step;
-    if (distinction.kind === "match") {
-      groups
-        .get(groupFor(termData(distinction.on).path, "value"))!
-        .constraints.push({ operator: "==", bound: outcome });
+    const placed = placedConstraintOf(step);
+    if (placed !== undefined) {
+      groups.get(groupFor(placed.path, placed.measure))!.constraints.push(placed.constraint);
       continue;
     }
-    if (distinction.kind !== "compare") {
+    const { distinction, outcome } = step;
+    if (distinction.kind === "all" || distinction.kind === "any") {
       opaque.push(termPaths(distinction));
       continue;
     }
-    const normalized = normalize(distinction);
-    if (normalized !== undefined) {
-      const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
-      groups.get(groupFor(termData(term).path, normalized.measure))!.constraints.push({
-        operator: outcome === true ? normalized.operator : negated[normalized.operator],
-        bound: normalized.bound,
-      });
+    if (distinction.kind !== "compare") {
       continue;
     }
     const operator = outcome === true ? distinction.operator : negated[distinction.operator];
@@ -172,6 +165,32 @@ export function feasibilityOf(
     : { kind: "feasible" };
 }
 
+// The constraint a step puts on one coordinate: a match, or a comparison with a constant.
+function placedConstraintOf(
+  step: Step,
+): { readonly path: readonly string[]; readonly measure: Measure; readonly constraint: Constraint } | undefined {
+  const { distinction, outcome } = step;
+  if (distinction.kind === "match") {
+    return { path: termData(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
+  }
+  if (distinction.kind !== "compare") {
+    return undefined;
+  }
+  const normalized = normalize(distinction);
+  if (normalized === undefined) {
+    return undefined;
+  }
+  const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
+  return {
+    path: termData(term).path,
+    measure: normalized.measure,
+    constraint: {
+      operator: outcome === true ? normalized.operator : negated[normalized.operator],
+      bound: normalized.bound,
+    },
+  };
+}
+
 function stepKey(step: Step): string {
   return step.distinction.kind === "match"
     ? `match ${termData(step.distinction.on).path.join(".")}`
@@ -202,27 +221,13 @@ function sharesValue(left: readonly string[], right: readonly string[]): boolean
 
 function settle(group: Group, scope: AnySchema): Interval | boolean | undefined {
   const { path, measure } = group;
-  const discriminated = measure === "value" ? sumOwning(scope, path) : undefined;
-  if (discriminated !== undefined) {
-    // A case the sum's invariants refuse is no value the discriminant can take.
-    const discriminant = path[path.length - 1]!;
-    const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
-      .flatMap(conjuncts)
-      .filter(rule => boundTermPath(rule)?.join("\u0000") === discriminant);
-    const admitted = discriminated.variantTags.filter(tag =>
-      refusing.every(rule => holds(rule, { [discriminant]: tag })),
-    );
-    return finite(admitted, group.constraints);
+  const domain = measure === "value" ? finiteDomainAt(scope, path) : undefined;
+  if (domain !== undefined) {
+    return finite(domain, group.constraints);
   }
   const schema = schemaAtPath(scope, path);
   if (schema === undefined) {
     return undefined;
-  }
-  if (measure === "value" && schema.kind === "boolean") {
-    return finite(admittedBy([true, false], schema, scope, path), group.constraints);
-  }
-  if (measure === "value" && schema.kind === "enum") {
-    return finite(admittedBy((schema as EnumSchema<string>).values, schema, scope, path), group.constraints);
   }
   const carrier = carrierOf(schema, measure);
   if (carrier === undefined) {
@@ -408,32 +413,16 @@ export interface Witness {
 // anything else.
 export function witnessesOf(way: Pick<Way, "steps">, scope: AnySchema): readonly Witness[] | undefined {
   const groups = new Map<string, { path: readonly string[]; constraints: Constraint[] }>();
-  for (const { distinction, outcome } of way.steps) {
-    let path: readonly string[];
-    let constraint: Constraint;
-    if (distinction.kind === "match") {
-      path = termData(distinction.on).path;
-      constraint = { operator: "==", bound: outcome };
-    } else {
-      if (distinction.kind !== "compare") {
-        return undefined;
-      }
-      const normalized = normalize(distinction);
-      if (normalized === undefined || normalized.measure !== "value") {
-        return undefined;
-      }
-      const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
-      path = termData(term).path;
-      constraint = {
-        operator: outcome === true ? normalized.operator : negated[normalized.operator],
-        bound: normalized.bound,
-      };
+  for (const step of way.steps) {
+    const placed = placedConstraintOf(step);
+    if (placed === undefined || placed.measure !== "value") {
+      return undefined;
     }
-    const key = JSON.stringify(path);
+    const key = JSON.stringify(placed.path);
     if (!groups.has(key)) {
-      groups.set(key, { path, constraints: [] });
+      groups.set(key, { path: placed.path, constraints: [] });
     }
-    groups.get(key)!.constraints.push(constraint);
+    groups.get(key)!.constraints.push(placed.constraint);
   }
   const witnesses: Witness[] = [];
   for (const { path, constraints } of groups.values()) {
@@ -455,6 +444,7 @@ export function witnessesOf(way: Pick<Way, "steps">, scope: AnySchema): readonly
 function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unknown[] | undefined {
   const discriminated = sumOwning(scope, path);
   if (discriminated !== undefined) {
+    // A case the sum's invariants refuse is no value the discriminant can take.
     const discriminant = path[path.length - 1]!;
     const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
       .flatMap(conjuncts)
