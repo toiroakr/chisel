@@ -177,6 +177,21 @@ describe("chisel check with the limits of the disregards check", () => {
   });
 });
 
+describe("chisel check with the limit of the combinations feasibility tries", () => {
+  it("takes the limit from an option and leaves a way past it undecided", async () => {
+    const result = await run([
+      "check",
+      fixture("test/fixtures/finite-invariants.ts"),
+      "--feasibility-combinations",
+      "1",
+    ]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^    未決 \(undecided\): 不変条件とあわせて調べる値の組が上限の1通りを超える — 1件$/m,
+    );
+  });
+});
+
 describe("chisel check with an external implementation", () => {
   it("prints each row it could not run and why", async () => {
     const result = await run(["check", fixture("test/fixtures/external.ts")]);

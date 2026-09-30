@@ -4,7 +4,7 @@ import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
 import { boundTermPath, conjuncts, describeRule, holds, isTerm, termData, termPaths } from "./rule.js";
-import type { AnySchema, AnyVariantsSchema, EnumSchema } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { Step, Way } from "./ways.js";
 
@@ -64,6 +64,14 @@ const mirrored: Readonly<Record<Operator, Operator>> = {
 export const contradicts = "ガードの条件がこの値について両立しない";
 export const unreadable = "読めない条件が同じ値を読む別の条件と重なる";
 
+// How many combinations of finite values feasibility tries against the
+// invariants relating them, before leaving a way or a point undecided.
+export const FEASIBILITY_COMBINATION_LIMIT = 4096;
+
+export function tooManyCombinations(limit: number): string {
+  return `不変条件とあわせて調べる値の組が上限の${limit}通りを超える`;
+}
+
 export interface Placement {
   readonly path: readonly string[];
   readonly measure: Measure;
@@ -75,6 +83,7 @@ export function feasibilityOf(
   way: Pick<Way, "steps">,
   scope: AnySchema,
   placement?: Placement,
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): Feasibility {
   const groups = new Map<string, Group>();
   const relations: Relation[] = [];
@@ -134,6 +143,13 @@ export function feasibilityOf(
     }
     intervals.set(key, typeof settled === "object" ? settled : undefined);
     unsettled ||= settled === undefined && group.constraints.length > 1;
+  }
+  const joint = jointAssignment([...groups.values()], scope, combinations);
+  if (joint === "none") {
+    return { kind: "infeasible", reason: contradicts };
+  }
+  if (joint === "too many") {
+    return { kind: "undecided", reason: tooManyCombinations(combinations) };
   }
 
   const related = relations.flatMap(relation => [relation.left, relation.right]);
@@ -468,4 +484,133 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
     return admittedBy((schema as EnumSchema<string>).values, schema, scope, path);
   }
   return undefined;
+}
+
+// A rule over finite positions: each comparison reads one of them against a
+// constant with == or !=, combined with and/or/not. Its positions, or
+// undefined when any part of it reads something else.
+function finitePathsOf(
+  rule: Rule,
+  scope: AnySchema,
+  prefix: readonly string[],
+): readonly (readonly string[])[] | undefined {
+  switch (rule.kind) {
+    case "compare": {
+      const normalized = normalize(rule);
+      if (normalized === undefined || normalized.measure !== "value") {
+        return undefined;
+      }
+      if (normalized.operator !== "==" && normalized.operator !== "!=") {
+        return undefined;
+      }
+      const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
+      const path = [...prefix, ...termData(term).path];
+      return finiteDomainAt(scope, path) === undefined ? undefined : [path];
+    }
+    case "not":
+      return finitePathsOf(rule.rule, scope, prefix);
+    case "and":
+    case "or": {
+      const parts = rule.rules.map(part => finitePathsOf(part, scope, prefix));
+      return parts.some(part => part === undefined) ? undefined : parts.flat() as (readonly string[])[];
+    }
+    default:
+      return undefined;
+  }
+}
+
+// Values for the finite positions the groups constrain, together with every
+// finite position an invariant relating two or more of them reaches, that
+// keep those invariants: "none" when no such values exist, "too many" when
+// there are more combinations to try than the limit.
+function jointAssignment(
+  groups: readonly Group[],
+  scope: AnySchema,
+  combinations: number,
+): ReadonlyMap<string, unknown> | "none" | "too many" {
+  const joint = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
+    const paths = finitePathsOf(rule, scope, prefix);
+    const distinct = paths === undefined ? [] : [...new Map(paths.map(path => [JSON.stringify(path), path])).values()];
+    return distinct.length < 2 ? [] : [{ prefix, rule, paths: distinct }];
+  });
+  const constrained = groups.filter(group => group.measure === "value" && finiteDomainAt(scope, group.path) !== undefined);
+  const component = new Map(constrained.map(group => [JSON.stringify(group.path), group.path] as const));
+  const involved: (typeof joint)[number][] = [];
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const invariant of joint) {
+      const { paths } = invariant;
+      if (!involved.includes(invariant) && paths.some(path => component.has(JSON.stringify(path)))) {
+        involved.push(invariant);
+        for (const path of paths) {
+          component.set(JSON.stringify(path), path);
+        }
+        grew = true;
+      }
+    }
+  }
+  const positions = [...component.values()];
+  if (involved.length === 0) {
+    return new Map();
+  }
+  const domains = positions.map(path => {
+    const keeps = constrained.filter(group => JSON.stringify(group.path) === JSON.stringify(path));
+    return finiteDomainAt(scope, path)!.filter(value =>
+      keeps.every(group =>
+        group.constraints.every(item => (value === item.bound) === (item.operator === "==")),
+      ),
+    );
+  });
+  if (domains.reduce((product, domain) => product * domain.length, 1) > combinations) {
+    return "too many";
+  }
+  const chosen: unknown[] = [];
+  const search = (index: number): boolean => {
+    if (index === positions.length) {
+      const value = positions.reduce<unknown>((built, path, at) => writeAt(built, path, chosen[at]), {});
+      return involved.every(({ prefix, rule }) => holds(rule, readAt(value, prefix)));
+    }
+    return domains[index]!.some(candidate => {
+      chosen[index] = candidate;
+      return search(index + 1);
+    });
+  };
+  return search(0)
+    ? new Map(positions.map((path, index) => [JSON.stringify(path), chosen[index]]))
+    : "none";
+}
+
+function writeAt(value: unknown, path: readonly string[], leaf: unknown): unknown {
+  const [key, ...rest] = path;
+  if (key === undefined) {
+    return leaf;
+  }
+  const record = (typeof value === "object" && value !== null ? value : {}) as Readonly<Record<string, unknown>>;
+  return { ...record, [key]: writeAt(record[key], rest, leaf) };
+}
+
+// Every invariant written on the scope or on an object its fields hold, with
+// the path of the object it is written on.
+function scopedInvariants(
+  schema: AnySchema,
+  prefix: readonly string[],
+): readonly { readonly prefix: readonly string[]; readonly rule: Rule }[] {
+  if (schema.kind !== "object") {
+    return [];
+  }
+  const { shape } = schema as ObjectSchema<ObjectShape>;
+  return [
+    ...schema.invariants.map(rule => ({ prefix, rule })),
+    ...Object.entries(shape).flatMap(([key, field]) => scopedInvariants(field, [...prefix, key])),
+  ];
+}
+
+function readAt(value: unknown, path: readonly string[]): unknown {
+  return path.reduce<unknown>(
+    (current, key) =>
+      typeof current === "object" && current !== null
+        ? (current as Readonly<Record<string, unknown>>)[key]
+        : undefined,
+    value,
+  );
 }

@@ -31,7 +31,7 @@ import {
   decimalOfUnits,
   decimalUnits,
 } from "./rule.js";
-import { holdsNoDecimal, int, object, schemaAtPath } from "./schema.js";
+import { enumOf, holdsNoDecimal, int, object, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -67,6 +67,21 @@ export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
   return { ...variant, shape: { ...variant.shape, [DEPS]: deps } } as AnySchema;
 }
 
+// The case as feasibility reads it: the invariants written on the input sum
+// hold of every case, as the partition passes them down, and read the
+// discriminant as the one value it has under this case.
+export function feasibilityScope(definition: AnyBehavior, tag: string): AnySchema {
+  const scope = guardScope(definition, tag) as ObjectSchema<ObjectShape>;
+  const { discriminant } = definition.input;
+  return {
+    ...scope,
+    shape: Object.hasOwn(scope.shape, discriminant)
+      ? scope.shape
+      : { ...scope.shape, [discriminant]: enumOf([tag]) },
+    invariants: [...scope.invariants, ...definition.input.invariants],
+  } as AnySchema;
+}
+
 export function guardBordersOf(implementation: AnyImplementation): readonly GuardBorder[] {
   const input = implementation.behavior.input;
   const positions = positionsOf(input, { containers: true });
@@ -84,7 +99,7 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
           ).map(
             drawn => ({
               ...drawn,
-              origin: { decision, scope: guardScope(implementation.behavior, tag), tag },
+              origin: { decision, scope: feasibilityScope(implementation.behavior, tag), tag },
             }),
           ),
         ),

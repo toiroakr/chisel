@@ -19,7 +19,7 @@ import {
   ensuresBordersOf,
   guardBordersOf,
   guardPartitionsOf,
-  guardScope,
+  feasibilityScope,
 } from "./guard-borders.js";
 import {
   SpecificationError,
@@ -35,7 +35,7 @@ import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { feasibilityOf, witnessesOf } from "./feasibility.js";
+import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility } from "./feasibility.js";
@@ -328,6 +328,11 @@ export interface CheckOptions {
     readonly combinations?: number;
     readonly candidates?: number;
   };
+  // How many combinations of finite values feasibility tries against the
+  // invariants relating them; past it a way or a point is left undecided.
+  readonly feasibility?: {
+    readonly combinations?: number;
+  };
 }
 
 export async function check(
@@ -338,6 +343,11 @@ export async function check(
     combinations: disregardLimit("combinations", options.disregards?.combinations, DISREGARD_COMBINATION_LIMIT),
     candidates: disregardLimit("candidates", options.disregards?.candidates, DISREGARD_CANDIDATE_LIMIT),
   };
+  const combinations = positiveLimit(
+    "feasibility.combinations",
+    options.feasibility?.combinations,
+    FEASIBILITY_COMBINATION_LIMIT,
+  );
   const definition = specification.examples.behavior;
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
@@ -694,7 +704,7 @@ export async function check(
         if (coordinates.some(value => point.contains(value))) {
           return { ...base, status: "met" as const };
         }
-        return { ...base, ...unmetStatus(reachOf(drawn, point)) };
+        return { ...base, ...unmetStatus(reachOf(drawn, point, combinations)) };
       }),
     };
   });
@@ -735,8 +745,8 @@ export async function check(
     ) &&
     borders.every(border => border.points.every(point => point.status !== "gap"));
 
-  const arms = measureArms(specification.implementation, armsMet, armsOwed);
-  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed);
+  const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations);
+  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations);
   const lines = [
     ...(arms.status === "unavailable" ? [] : arms.arms),
     ...(rulesMeasure.status === "unavailable" ? [] : rulesMeasure.rules),
@@ -955,7 +965,7 @@ export function generate(
       const standsAt = [...rows, ...generated].some(row =>
         reachedBy(row.given, row.with).some(item => point.contains(drawn.coordinateOf(item))),
       );
-      if (standsAt || unmetStatus(reachOf(drawn, point)).status === "no row owed") {
+      if (standsAt || unmetStatus(reachOf(drawn, point, FEASIBILITY_COMBINATION_LIMIT)).status === "no row owed") {
         continue;
       }
       const origin =
@@ -1198,6 +1208,7 @@ function measureRules(
   implementation: Implementation<AnyBehavior> | undefined,
   met: readonly WayTaken[],
   owed: readonly WayTaken[],
+  combinations: number,
 ): RulesMeasure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
@@ -1224,7 +1235,7 @@ function measureRules(
           }
           return {
             ...base,
-            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag)))),
+            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations))),
           };
         }),
   );
@@ -1240,6 +1251,7 @@ function measureArms(
   implementation: Implementation<AnyBehavior> | undefined,
   met: readonly ArmTaken[],
   owed: readonly ArmTaken[],
+  combinations: number,
 ): Measure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
@@ -1260,7 +1272,7 @@ function measureArms(
     const ways = tags.flatMap(tag =>
       waysOf(decision).map(way => ({
         way,
-        feasibility: feasibilityOf(way, scopeOf(implementation, tag)),
+        feasibility: feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations),
       })),
     );
     const through = (index: number, arm: string) =>
@@ -1378,7 +1390,7 @@ function unmetStatus(
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
 }
 
-function reachOf(drawn: GuardBorder, point: BorderPoint): readonly Feasibility[] {
+function reachOf(drawn: GuardBorder, point: BorderPoint, combinations: number): readonly Feasibility[] {
   const normalized = normalize(drawn.comparison);
   if (drawn.origin === undefined || point.region === undefined || normalized === undefined) {
     return [{ kind: "feasible" }];
@@ -1398,11 +1410,11 @@ function reachOf(drawn: GuardBorder, point: BorderPoint): readonly Feasibility[]
   });
   return prefixes.length === 0
     ? [{ kind: "feasible" }]
-    : prefixes.map(steps => feasibilityOf({ steps }, scope, placement));
+    : prefixes.map(steps => feasibilityOf({ steps }, scope, placement, combinations));
 }
 
 function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnySchema {
-  return guardScope(implementation.behavior, tag);
+  return feasibilityScope(implementation.behavior, tag);
 }
 
 function coverage(
@@ -1542,6 +1554,16 @@ function disregardLimit(name: string, given: number | undefined, fallback: numbe
   }
   if (!Number.isSafeInteger(given) || given <= 0) {
     throw new SpecificationError(`disregards.${name} must be a positive integer, but was ${given}`);
+  }
+  return given;
+}
+
+function positiveLimit(name: string, given: number | undefined, fallback: number): number {
+  if (given === undefined) {
+    return fallback;
+  }
+  if (!Number.isSafeInteger(given) || given <= 0) {
+    throw new SpecificationError(`${name} must be a positive integer, but was ${given}`);
   }
   return given;
 }

@@ -58,6 +58,9 @@ const checkCommand = defineCommand({
     disregardCandidates: arg(z.coerce.number().int().positive().optional(), {
       description: "disregardsの確認で数える候補の上限（既定は4096）",
     }),
+    feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
+      description: "不変条件とあわせて道筋や境界点を確かめるときに試す値の組の上限（既定は4096）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
@@ -66,7 +69,14 @@ const checkCommand = defineCommand({
       ...(args.disregardCandidates === undefined ? {} : { candidates: args.disregardCandidates }),
     };
     const reports = await Promise.all(
-      targets.map(target => check(target.specification, { disregards })),
+      targets.map(target =>
+        check(target.specification, {
+          disregards,
+          ...(args.feasibilityCombinations === undefined
+            ? {}
+            : { feasibility: { combinations: args.feasibilityCombinations } }),
+        }),
+      ),
     );
     if (args.json) {
       const document = reportDocument(reports, { id: resolve(args.file), name: args.file });
