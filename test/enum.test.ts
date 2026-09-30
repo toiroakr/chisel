@@ -282,6 +282,24 @@ describe("a match on an enum field", () => {
       }),
     ).toThrow(new SpecificationError("match in 費目で分ける has no case for 飲食費"));
   });
+
+  it("refuses at run time a match on an enum that may be left out", () => {
+    const 任意の費目で申請する = behavior("任意の費目で申請する", {
+      input: variants("状態", { 下書き: object({ 費目: 費目.optional() }) }),
+      result: 申請する.result,
+      effects: 申請する.effects,
+    });
+
+    expect(() =>
+      implement(任意の費目で申請する, {
+        cases: {
+          下書き: action("費目で分ける", {
+            run: match(r => r.費目, { 交通費: 受ける, 宿泊費: 断る, 飲食費: 断る }),
+          }),
+        },
+      }),
+    ).toThrow(new SpecificationError("match in 費目で分ける selects $.費目, which may be left out at $.費目"));
+  });
 });
 
 describe("an enum between two stages", () => {
