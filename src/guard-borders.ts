@@ -141,6 +141,8 @@ export interface GuardPartition {
 
 interface Threshold {
   readonly path: string;
+  readonly label: string;
+  readonly described: string;
   readonly segments: readonly string[];
   readonly schema: AnySchema;
   readonly inherited: readonly Rule[];
@@ -171,6 +173,25 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
     );
     return partition === undefined ? [] : [partition];
   });
+}
+
+// An equality between a decimal and a value off its grid settles without a row:
+// every value of the grid meets `!=` and none meets `==`.
+export function offGridEqualityIn(
+  definition: AnyBehavior,
+  tag: string,
+  decision: RulesDecision<unknown, unknown, unknown, unknown>,
+): string | undefined {
+  const frames = framesAt(guardScope(definition, tag), `@${tag}`, "$");
+  for (const threshold of decision.guards.flatMap(candidate => thresholdsIn(candidate.condition, frames))) {
+    const carrier = carrierOf(threshold.schema, "value");
+    const normalized = normalize(threshold.rule)!;
+    if (threshold.schema.kind === "decimal" && carrier !== undefined && typeof snapped(carrier, normalized.operator, normalized.bound) === "string") {
+      const scale = (threshold.schema as DecimalSchema).scale;
+      return `compares ${threshold.label} with ${carrier.format(normalized.bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
+    }
+  }
+  return undefined;
 }
 
 interface Frame {
@@ -260,6 +281,8 @@ function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
     : [
         {
           path: pathOf(frame, keys),
+          label: `${frame.label}${keys.map(key => `.${key}`).join("")}`,
+          described: describeRule(rule, frames.root.label, labelsOf(frames)),
           segments: segmentsOf(frame, keys),
           schema,
           inherited: inheritedAt(frame.scope, keys),
@@ -299,9 +322,6 @@ function partitionAt(
         ]
       : [{ value: bound, lowerHoldsIt: operator === "<=" || operator === ">" }];
   });
-  if (cuts.length === 0) {
-    return undefined;
-  }
   const unique = cuts
     .filter(
       (cut, index) =>

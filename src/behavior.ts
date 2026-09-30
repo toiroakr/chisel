@@ -29,6 +29,7 @@ import {
   termData,
   rootsRead,
 } from "./rule.js";
+import { offGridEqualityIn } from "./guard-borders.js";
 import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
 
 export interface Execution<Result, Effect> {
@@ -370,6 +371,7 @@ export function implement<B extends AnyBehavior>(
   }
   for (const [decision, tags] of tagsOf) {
     checkMatch(definition, tags, decision as ImplementationCases<AnyBehavior>[string]);
+    checkGuards(definition, tags, decision as ImplementationCases<AnyBehavior>[string]);
   }
   return {
     kind: "implementation",
@@ -485,6 +487,22 @@ function checkMatch(
   const unknown = written.find(caseTag => !caseTags.has(caseTag));
   if (unknown !== undefined) {
     throw new SpecificationError(`match in ${decision.id} has a case ${unknown} the ${what} does not`);
+  }
+}
+
+function checkGuards(
+  definition: AnyBehavior,
+  tags: readonly string[],
+  decision: ImplementationCases<AnyBehavior>[string],
+): void {
+  if (decision?.kind !== "rules") {
+    return;
+  }
+  for (const tag of tags) {
+    const offGrid = offGridEqualityIn(definition, tag, decision);
+    if (offGrid !== undefined) {
+      throw new SpecificationError(`guard in ${decision.id} ${offGrid}`);
+    }
   }
 }
 
