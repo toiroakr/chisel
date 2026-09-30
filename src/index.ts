@@ -150,6 +150,7 @@ export type {
 } from "./specification.js";
 export type { EnsuresClassification, EnsuresReading, EnsuresReport } from "./ensures.js";
 export { FEASIBILITY_COMBINATION_LIMIT } from "./feasibility.js";
+export { WAY_LIMIT } from "./ways.js";
 export { reportDocument, reportSchemaVersion } from "./report-json.js";
 export type { ReportSource, Weakening } from "./report-json.js";
 export { compose, isComposition } from "./composition.js";

@@ -71,6 +71,10 @@ export const unreached = "どの値の組もこの分岐を通らない";
 // invariants relating them, before leaving a way or a point undecided.
 export const FEASIBILITY_COMBINATION_LIMIT = 4096;
 
+export function tooManyWays(limit: number): string {
+  return `道筋が上限の${limit}本を超える`;
+}
+
 export function tooManyCombinations(limit: number): string {
   return `不変条件とあわせて調べる値の組が上限の${limit}通りを超える`;
 }

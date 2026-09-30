@@ -61,6 +61,9 @@ const checkCommand = defineCommand({
     feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
       description: "不変条件とあわせて道筋や境界点を確かめるときに試す値の組の上限（既定は4096）",
     }),
+    feasibilityWays: arg(z.coerce.number().int().positive().optional(), {
+      description: "decisionごとにたどる道筋の上限。超えたdecisionは計測しない（既定は10000）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
@@ -72,9 +75,7 @@ const checkCommand = defineCommand({
       targets.map(target =>
         check(target.specification, {
           disregards,
-          ...(args.feasibilityCombinations === undefined
-            ? {}
-            : { feasibility: { combinations: args.feasibilityCombinations } }),
+          feasibility: feasibilityOptions(args),
         }),
       ),
     );
@@ -103,6 +104,9 @@ const generateCommand = defineCommand({
     feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
       description: "不変条件とあわせて行を組み立てるときに試す値の組の上限（既定は4096）",
     }),
+    feasibilityWays: arg(z.coerce.number().int().positive().optional(), {
+      description: "decisionごとにたどる道筋の上限。超えたdecisionの道筋は組み立てない（既定は10000）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
@@ -112,9 +116,7 @@ const generateCommand = defineCommand({
         target.specification.implementation,
         {
           ways: args.ways,
-          ...(args.feasibilityCombinations === undefined
-            ? {}
-            : { feasibility: { combinations: args.feasibilityCombinations } }),
+          feasibility: feasibilityOptions(args),
         },
       );
       return [
@@ -514,4 +516,14 @@ function isRunAsScript(): boolean {
 
 if (isRunAsScript()) {
   await runMain(cli);
+}
+
+function feasibilityOptions(args: {
+  readonly feasibilityCombinations?: number | undefined;
+  readonly feasibilityWays?: number | undefined;
+}): { readonly combinations?: number; readonly ways?: number } {
+  return {
+    ...(args.feasibilityCombinations === undefined ? {} : { combinations: args.feasibilityCombinations }),
+    ...(args.feasibilityWays === undefined ? {} : { ways: args.feasibilityWays }),
+  };
 }
