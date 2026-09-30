@@ -190,6 +190,8 @@ The analyzer follows the example-adequacy model of [Souther](https://github.com/
 
 Besides `c.instant()` for an exact moment (`Temporal.Instant`), `c.date()`, `c.time()` and `c.datetime()` hold a calendar date, a time of day and a wall-clock date and time (`Temporal.PlainDate`, `PlainTime` and `PlainDateTime`); a condition orders values of one of these types, and ordering two types against each other does not compile.
 
+Any schema takes `.describe("...")`, as in zod, and a behavior a `description`, saying what they mean to the people reading the specification; neither changes what is parsed or measured, and an optional field carries the description of what it holds. `variants("状態", { 下書き: c.object({...}).describe("まだ申請していない"), ... })` names each case.
+
 The common bounds have zod's shorthands, each desugaring to the same rule `refine` would take: on numbers and the temporal types `min`, `max`, `gt` and `lt` compare the value (with a bound of the same type, such as `c.date().min(Temporal.PlainDate.from("2026-01-01"))`), and on strings, arrays and records `min`, `max` and `length` compare the length, so the borders keep a value and a length apart. `refine(v => ...)` states anything else, such as a relation between two fields (`.refine(v => v.start.$lte(v.end))`); its callback returns a rule built with term operators, not a boolean, so a condition the analysis cannot read does not type-check.
 
 ```ts

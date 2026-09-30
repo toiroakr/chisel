@@ -112,6 +112,8 @@ export interface Behavior<
 > {
   readonly kind: "behavior";
   readonly name: string;
+  // What the behavior does, for the people reading the specification.
+  readonly description?: string;
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
@@ -240,6 +242,7 @@ export function behavior<
   const EffectSchema extends AnyVariantsSchema,
   const Requires extends Requirements = {},
 >(name: string, options: {
+  readonly description?: string;
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
@@ -270,6 +273,7 @@ export function behavior<
   return {
     kind: "behavior",
     name,
+    ...(options.description === undefined ? {} : { description: options.description }),
     input: options.input,
     result: options.result,
     effects: options.effects,
