@@ -1458,6 +1458,54 @@ describe("a guard comparing an expression of positions", () => {
     ).toStrictEqual([7]);
   });
 
+  it("owes no row at a point of a guard that an input invariant ordering the same fields refuses", async () => {
+    const 揃える = behavior("揃える", {
+      input: variants("状態", { 入力済み: object({ 甲: int(), 乙: int() }).refine(v => v.甲.$lte(v.乙)) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 同じ式 = implement(揃える, {
+      cases: {
+        入力済み: action("同じ式", {
+          guards: 入力 => [入力.甲.$lte(入力.乙).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("同じ式", { examples: examples(揃える, {}), implementation: 同じ式 }));
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.甲 <= $.乙")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF no row owed", "IN gap", "OUT no row owed"]);
+  });
+
+  it("still owes rows at the points of an expression whose positions an input invariant also orders", async () => {
+    const 訂正 = behavior("訂正", {
+      input: variants("状態", {
+        入力済み: object({ 甲: int().min(0), 乙: int().min(1), 丙: int().min(0) }).refine(v => v.丙.$lt(v.乙)),
+      }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 差まで = implement(訂正, {
+      cases: {
+        入力済み: action("差まで", {
+          guards: 入力 => [入力.甲.$gte(入力.乙.$minus(入力.丙)).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("差まで", { examples: examples(訂正, {}), implementation: 差まで }));
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.甲 >= $.乙 - $.丙")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF gap", "IN gap", "OUT gap"]);
+  });
+
   it("carries a constant of the expression into the border's name", async () => {
     const 余裕 = implement(釣り合わせる, {
       cases: {

@@ -131,6 +131,7 @@ export function feasibilityOf(
     weighed: readonly { readonly key: string; readonly coefficient: number }[],
     operator: Operator,
     bound: number,
+    onlyKnown = false,
   ): void => {
     const merged = new Map<string, number>();
     for (const { key, coefficient } of weighed) {
@@ -147,6 +148,9 @@ export function feasibilityOf(
     const sign = parts[0]!.coefficient < 0 ? -1 : 1;
     const canonical = parts.map(part => ({ key: part.key, coefficient: sign * part.coefficient }));
     const key = JSON.stringify(canonical);
+    if (onlyKnown && !forms.has(key)) {
+      return;
+    }
     if (!forms.has(key)) {
       forms.set(key, { parts: canonical, constraints: [] });
     }
@@ -163,11 +167,12 @@ export function feasibilityOf(
       operator,
       bound,
     );
-  const constrainForm = (form: LinearTermData, operator: Operator, bound: number): void =>
+  const constrainForm = (form: LinearTermData, operator: Operator, bound: number, onlyKnown = false): void =>
     constrain(
       form.parts.map(part => ({ key: groupFor(part.path, part.measure), coefficient: part.coefficient })),
       operator,
       bound - (form.constant as number),
+      onlyKnown,
     );
 
   if (placement !== undefined && "between" in placement) {
@@ -220,6 +225,16 @@ export function feasibilityOf(
     } else {
       relations.push(relation);
       differ(relation.left, relation.right, relation.operator, 0);
+    }
+  }
+
+  // An input invariant ordering numbers holds on every way, so it bounds a form
+  // the way constrains. Not added to a form of its own: one more form sharing
+  // the way's positions would leave forms that are settled now undecided.
+  for (const { prefix, rule } of scopedInvariants(scope, [])) {
+    const form = numericFormOf(rule, scope, prefix);
+    if (form !== undefined && form.parts.every(part => groups.has(JSON.stringify([part.path, part.measure])))) {
+      constrainForm(form, (rule as CompareRule).operator, 0, true);
     }
   }
 
@@ -386,6 +401,31 @@ function rangeOf(
 
 function isPair(form: Form): boolean {
   return form.parts.length === 2 && form.parts[0]!.coefficient === 1 && form.parts[1]!.coefficient === -1;
+}
+
+// An invariant comparing two or more integer or number positions that are never
+// left out, read as one form over paths from the scope's root.
+function numericFormOf(rule: Rule, scope: AnySchema, prefix: readonly string[]): LinearTermData | undefined {
+  if (rule.kind !== "compare" || rule.operator === "==" || rule.operator === "!=" || ![rule.left, rule.right].every(isTerm)) {
+    return undefined;
+  }
+  const form = differenceOf(rule);
+  const parts = form.parts.map(part => ({ ...part, path: [...prefix, ...part.path] }));
+  const kept = parts.every(
+    part =>
+      part.measure === "value" &&
+      !leftOutAlong(scope, part.path) &&
+      ["integer", "number"].includes(schemaAtPath(scope, part.path)?.kind ?? ""),
+  );
+  return parts.length >= 2 && kept && typeof form.constant === "number" ? { ...form, parts } : undefined;
+}
+
+function leftOutAlong(scope: AnySchema, path: readonly string[]): boolean {
+  return path.some((_, index) => {
+    const parent = schemaAtPath(scope, path.slice(0, index));
+    const field = parent?.kind === "object" ? (parent as ObjectSchema<ObjectShape>).shape[path[index]!] : undefined;
+    return field?.kind === "optional";
+  });
 }
 
 // An expression of integer or number positions, read as the left side less the
