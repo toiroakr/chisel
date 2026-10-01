@@ -105,6 +105,20 @@ export const cancelOrderExamples = c.examples(cancelOrder, {
 });
 ```
 
+Where only the case of the answer is known, as an SOP's *then* says `status == Shipped` and nothing about the shipment it answers, the row writes the case with `c.caseOf(tag)` in place of the result, as Souther's bare case name `-> Shipped` does:
+
+```ts
+"ship a picked order": {
+  given: { state: "picked", orderId: "o-1" },
+  expect: {
+    result: c.caseOf("shipped"),
+    effects: [{ type: "notifyCustomer", orderId: "o-1" }],
+  },
+},
+```
+
+The answer is then compared by its case alone, and the effects still in full. The row specifies the `shipped` result case and verifies it when the model answers that case. An `ensures` clause, which reads the answer's value, is not held against such a row, since nothing wrote the value it would read; `c.test` compares production code's answer by the case too, and a fake row standing in for a behavior whose recorded row writes only the case agrees with it when it answers that case. A case the result does not have does not compile, and is refused as `Expected result is invalid`.
+
 To build a row outside the table (a helper, or a row shared by several specifications), `example(behavior, { given, expect })` types it by the behavior, and it is put in a table under a name: `examples(cancelOrder, { "paid": paidRow })`. Rows are kept in the order written, except that names which are plain integers (`"1"`, `"100"`) come first, as JavaScript orders such keys.
 
 Changing the data or behavior model makes stale examples fail to compile. Running `generate` again emits rows for newly introduced variants, classes and border points, each composed from an answered row with only the position in question moved.

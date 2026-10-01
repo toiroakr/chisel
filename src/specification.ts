@@ -5,6 +5,7 @@ import type {
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
+  CaseOnly,
   Execution,
   Implementation,
   Todo,
@@ -28,6 +29,7 @@ import {
   TodoDecision,
   brokenEnsures,
   comparisonsReached,
+  isCaseOnly,
   isTodo,
   perform,
   runTraced,
@@ -48,7 +50,7 @@ import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
-import type { AnySchema, AnyVariantsSchema } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema, Tags } from "./schema.js";
 
 interface RunOutcome {
   readonly actual: unknown;
@@ -57,16 +59,17 @@ interface RunOutcome {
 }
 
 async function runAndCompare<B extends AnyBehavior>(
+  definition: B,
   name: string,
   given: BehaviorInput<B>,
-  expected: Execution<BehaviorResult<B>, BehaviorEffect<B>>,
+  expected: Expected<B>,
   subject: ConformanceSubject<B>,
 ): Promise<RunOutcome> {
   try {
     const actual = await subject(given);
     return {
       actual,
-      failure: isDeepStrictEqual(actual, expected)
+      failure: answers(definition, expected, actual)
         ? undefined
         : {
             name,
@@ -82,6 +85,18 @@ async function runAndCompare<B extends AnyBehavior>(
   }
 }
 
+function answers(definition: AnyBehavior, expected: Expected<AnyBehavior>, actual: unknown): boolean {
+  if (!isCaseOnly(expected.result)) {
+    return isDeepStrictEqual(actual, expected);
+  }
+  const { result, effects } = actual as Execution<unknown, unknown>;
+  return (
+    isVariantsSchema(definition.result) &&
+    tagOf(definition.result, result) === expected.result.case &&
+    isDeepStrictEqual(effects, expected.effects)
+  );
+}
+
 export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
   ? Partial<ValueDependencies<Requires>>
   : never;
@@ -91,7 +106,7 @@ export interface Example<B extends AnyBehavior> {
   readonly name: string;
   readonly given: BehaviorInput<B>;
   readonly with?: BehaviorWith<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Todo;
+  readonly expect: Expected<B> | Todo;
 }
 
 export interface ExampleSet<B extends AnyBehavior> {
@@ -285,8 +300,14 @@ export type ConformanceSubject<B extends AnyBehavior> = (
 export interface ExampleRow<B extends AnyBehavior> {
   readonly given: BehaviorInput<B>;
   readonly with?: BehaviorWith<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Todo;
+  readonly expect: Expected<B> | Todo;
 }
+
+// The answer a row states: the whole result, or only its case.
+export type Expected<B extends AnyBehavior> = Execution<
+  BehaviorResult<B> | CaseOnly<Tags<B["result"]>>,
+  BehaviorEffect<B>
+>;
 
 export function example<B extends AnyBehavior>(
   _definition: B,
@@ -518,13 +539,19 @@ export async function check(
       }
     });
 
-    const resultValidation = definition.result.parse(row.expect.result);
-    if (!resultValidation.success) {
+    const caseOnly = isCaseOnly(row.expect.result) ? row.expect.result.case : undefined;
+    const resultValid =
+      caseOnly === undefined
+        ? definition.result.parse(row.expect.result).success
+        : isVariantsSchema(definition.result) && definition.result.variantTags.includes(caseOnly);
+    if (!resultValid) {
       failures.push({ name: row.name, message: "Expected result is invalid" });
       continue;
     }
 
-    const broken = brokenEnsures(definition, row.given, row.expect.result);
+    // Not held where only the case is written: every clause reads the answer,
+    // and nothing wrote the value it would be read against.
+    const broken = caseOnly === undefined ? brokenEnsures(definition, row.given, row.expect.result) : undefined;
     if (broken !== undefined) {
       failures.push({
         name: row.name,
@@ -532,9 +559,8 @@ export async function check(
       });
     }
 
-    const resultTag = isVariantsSchema(definition.result)
-      ? tagOf(definition.result, row.expect.result)
-      : undefined;
+    const resultTag =
+      caseOnly ?? (isVariantsSchema(definition.result) ? tagOf(definition.result, row.expect.result) : undefined);
     if (resultTag !== undefined) {
       coveredResults.add(resultTag);
     }
@@ -556,6 +582,7 @@ export async function check(
       incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
     } else if (implementation !== undefined) {
       const { actual, failure, error } = await runAndCompare(
+        definition,
         row.name,
         row.given,
         row.expect,
@@ -1275,7 +1302,7 @@ export async function test<B extends AnyBehavior>(
       skipped.push({ name: row.name, reason: row.expect.reason });
       continue;
     }
-    const { actual, failure } = await runAndCompare(row.name, row.given, row.expect, subject);
+    const { actual, failure } = await runAndCompare(exampleSet.behavior, row.name, row.given, row.expect, subject);
     const broken =
       actual === undefined
         ? undefined

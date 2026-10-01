@@ -231,6 +231,23 @@ export function todo(reason = "まだ決めていません"): Todo {
   return { kind: "todo", reason };
 }
 
+// What a row writes for an answer it states only the case of, as Souther's bare
+// case name `-> Submitted` asserts the arm and none of its fields.
+export interface CaseOnly<Tag extends string = string> {
+  readonly kind: "case";
+  readonly case: Tag;
+}
+
+const caseOnlyMark = Symbol.for("chisel.caseOf");
+
+export function caseOf<const Tag extends string>(tag: Tag): CaseOnly<Tag> {
+  return Object.defineProperty({ kind: "case", case: tag }, caseOnlyMark, { value: true }) as CaseOnly<Tag>;
+}
+
+export function isCaseOnly(value: unknown): value is CaseOnly {
+  return typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[caseOnlyMark] === true;
+}
+
 export function isTodo(value: unknown): value is Todo {
   return (
     typeof value === "object" &&
