@@ -713,50 +713,32 @@ export async function check(
     };
   });
   borders.push(...guardBorders);
-  const ensuresBorders = ensuresBordersOf(definition)
-    .filter(drawn => !isDisregarded(definition, drawn))
-    .map((drawn): BorderCoverage => {
-      const coordinates = answeredGivens
-        .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
-        .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
-      return {
-        path: drawn.path,
-        rule: drawn.border.rule,
-        points: drawn.border.points.map(point => ({
-          role: point.role,
-          relation: point.relation,
-          status:
-            point.status !== "owed"
-              ? point.status
-              : coordinates.some(value => value !== undefined && point.contains(value))
-                ? "met"
-                : "gap",
-        })),
-      };
-    });
-  borders.push(...ensuresBorders);
-  const invariantPairBorders = invariantPairBordersOf(definition)
-    .filter(drawn => !isDisregarded(definition, drawn))
-    .map((drawn): BorderCoverage => {
-      const coordinates = answeredGivens
-        .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
-        .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
-      return {
-        path: drawn.path,
-        rule: drawn.border.rule,
-        points: drawn.border.points.map(point => ({
-          role: point.role,
-          relation: point.relation,
-          status:
-            point.status !== "owed"
-              ? point.status
-              : coordinates.some(value => value !== undefined && point.contains(value))
-                ? "met"
-                : "gap",
-        })),
-      };
-    });
-  borders.push(...invariantPairBorders);
+  // Not met by reaching a comparison, as a guard border is: what an ensures
+  // clause or an input invariant states holds of every input of the case.
+  const writtenCoverage = (drawn: GuardBorder): BorderCoverage => {
+    const coordinates = answeredGivens
+      .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
+      .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
+    return {
+      path: drawn.path,
+      rule: drawn.border.rule,
+      points: drawn.border.points.map(point => ({
+        role: point.role,
+        relation: point.relation,
+        status:
+          point.status !== "owed"
+            ? point.status
+            : coordinates.some(value => value !== undefined && point.contains(value))
+              ? "met"
+              : "gap",
+      })),
+    };
+  };
+  borders.push(
+    ...[...ensuresBordersOf(definition), ...invariantPairBordersOf(definition)]
+      .filter(drawn => !isDisregarded(definition, drawn))
+      .map(writtenCoverage),
+  );
   const adequate =
     fakeIssues.length === 0 &&
     specification.implementation !== undefined &&
