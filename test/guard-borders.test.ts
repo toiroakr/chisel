@@ -990,7 +990,7 @@ describe("a border an input invariant draws between two positions", () => {
 });
 
 describe("a guard comparing an expression of positions", () => {
-  it("answers by the value of the expression and lists the comparison as one Chisel cannot read yet", async () => {
+  it("draws the border on the expression and meets its points by the rows that reached it, as Souther does", async () => {
     const 釣り合わせる = behavior("釣り合わせる", {
       input: variants("状態", { 入力済み: object({ 甲: int(), 乙: int(), 丙: int() }) }),
       result: variants("結果", { 受付: object({}), 却下: object({}) }),
@@ -1014,10 +1014,83 @@ describe("a guard comparing an expression of positions", () => {
       }),
     );
 
-    expect({ failures: report.failures, comparisons: report.measures.comparisons }).toStrictEqual({
+    expect({
+      failures: report.failures,
+      comparisons: report.measures.comparisons,
+      border: report.borders.find(border => border.rule === "guard $.甲 >= $.乙 - $.丙"),
+    }).toStrictEqual({
       failures: [],
-      comparisons: { status: "partial", notRead: ["差まで: $.甲 >= $.乙 - $.丙"] },
+      comparisons: { status: "complete" },
+      border: {
+        path: "@入力済み.甲 − @入力済み.乙 + @入力済み.丙",
+        rule: "guard $.甲 >= $.乙 - $.丙",
+        points: [
+          { role: "ON", relation: "= 0", status: "met" },
+          { role: "OFF", relation: "= -1", status: "met" },
+          { role: "IN", relation: "> 0", status: "gap" },
+          { role: "OUT", relation: "< -1", status: "gap" },
+        ],
+      },
     });
+  });
+
+  const 釣り合わせる = behavior("釣り合わせる", {
+    input: variants("状態", { 入力済み: object({ 甲: int(), 乙: int(), 丙: int() }) }),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
+
+  it("offers a row at each point of the expression's border by moving one of its positions", () => {
+    const 差まで = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("差まで", {
+          guards: 入力 => [入力.甲.$gte(入力.乙.$minus(入力.丙)).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const { rows, notComposed } = generate(examples(釣り合わせる, {}), 差まで);
+    const value = (given: unknown) => {
+      const { 甲, 乙, 丙 } = given as { 甲: number; 乙: number; 丙: number };
+      return 甲 - 乙 + 丙;
+    };
+
+    expect({
+      rows: rows
+        .filter(row => row.name.startsWith("釣り合わせる: @入力済み.甲 − @入力済み.乙 + @入力済み.丙"))
+        .map(row => [row.name.slice("釣り合わせる: @入力済み.甲 − @入力済み.乙 + @入力済み.丙 ".length), value(row.given)]),
+      notComposed: notComposed.filter(line => line.includes("@入力済み.甲 − @入力済み.乙")),
+    }).toStrictEqual({ rows: [["OFF (= -1)", -1], ["IN (> 0)", 1], ["OUT (< -1)", -2]], notComposed: [] });
+  });
+
+  it("carries a constant of the expression into the border's name", async () => {
+    const 余裕 = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("余裕", {
+          guards: 入力 => [入力.甲.$plus(2).$lte(入力.乙).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("余裕", { examples: examples(釣り合わせる, {}), implementation: 余裕 }));
+
+    expect(report.borders.map(border => border.path)).toContain("@入力済み.甲 − @入力済み.乙 + 2");
+  });
+
+  it("draws the border of an input invariant comparing an expression, owing its ON and IN points", async () => {
+    const 制約 = behavior("制約", {
+      input: variants("状態", {
+        入力済み: object({ 甲: int(), 乙: int(), 丙: int() }).refine(v => v.甲.$lte(v.乙.$minus(v.丙))),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("制約", { examples: examples(制約, {}) }));
+
+    expect(
+      report.borders.map(border => `${border.path}: ${border.points.map(point => `${point.role} ${point.status}`).join(", ")}`),
+    ).toStrictEqual(["@入力済み.甲 − @入力済み.乙 + @入力済み.丙: ON gap, OFF excluded, IN gap, OUT excluded"]);
   });
 });
 

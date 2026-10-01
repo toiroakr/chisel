@@ -608,6 +608,17 @@ function termAt(path: readonly string[], measure: PositionTermData["measure"]): 
   return self;
 }
 
+export function positionTerm(path: readonly string[], measure: PositionTermData["measure"]): Term<unknown> {
+  return termAt(path, measure);
+}
+
+// The expression a comparison draws its line on: its left side less its right.
+export function differenceOf(rule: CompareRule): LinearTermData {
+  const left = linearOf(rule.left);
+  const right = linearOf(rule.right);
+  return combined(left, linearTerm(right), -1);
+}
+
 export function positionData(term: Term<unknown>): PositionTermData | undefined {
   const data = termData(term);
   return data.kind === "position" ? data : undefined;

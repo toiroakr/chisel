@@ -30,6 +30,8 @@ import {
   termPaths,
   positionData,
   positionOf,
+  positionTerm,
+  differenceOf,
   withDeps,
   decimalOfUnits,
   decimalUnits,
@@ -146,14 +148,21 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
     const frames = framesAt(scope, `@${tag}`, "$");
     const drawn = [...input.invariants, ...scope.invariants]
       .flatMap(conjuncts)
-      .flatMap(rule =>
-        rule.kind === "compare" && isTerm(rule.left) && isTerm(rule.right)
-          ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, {
-              source: "invariant",
-              describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
-            })
-          : [],
-      );
+      .flatMap(rule => {
+        const reading: Reading = {
+          source: "invariant",
+          describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
+        };
+        if (rule.kind !== "compare") {
+          return [];
+        }
+        if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
+          return betweenExpression(rule, frames, at, reading);
+        }
+        return isTerm(rule.left) && isTerm(rule.right)
+          ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, reading)
+          : [];
+      });
     return drawn.map(border => withoutPairRefusedPoints(border, drawn));
   });
 }
@@ -162,10 +171,10 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
 // measure refuses: each comparison of two positions is drawn on a difference of
 // its own, so the bounds on one difference never meet there.
 function withoutPairRefusedPoints(border: GuardBorder, all: readonly GuardBorder[]): GuardBorder {
-  const [first, second] = (border.reads ?? []).map(segments => JSON.stringify(segments));
+  const [first, second, ...more] = (border.reads ?? []).map(segments => JSON.stringify(segments));
   const others = all.flatMap(other => {
-    const [otherFirst, otherSecond] = (other.reads ?? []).map(segments => JSON.stringify(segments));
-    if (other === border || first === undefined) {
+    const [otherFirst, otherSecond, ...otherMore] = (other.reads ?? []).map(segments => JSON.stringify(segments));
+    if (other === border || first === undefined || more.length > 0 || otherMore.length > 0) {
       return [];
     }
     return otherFirst === first && otherSecond === second
@@ -527,7 +536,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     return inner === undefined ? [] : walk(rule.each, inner, at, reading);
   }
   if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
-    return [];
+    return betweenExpression(rule, frames, at, reading);
   }
   if (isTerm(rule.left) && isTerm(rule.right)) {
     return between(rule, rule.left, rule.right, frames, at, reading);
@@ -559,6 +568,106 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     border,
     coordinateOf: reached => readOperand(term, reached.scope),
     compose: (given, coordinate) => at(positionSegments)?.write(given, measure, coordinate),
+  }));
+}
+
+function betweenExpression(
+  rule: CompareRule & { readonly name?: string },
+  frames: Frames,
+  at: PositionAt,
+  reading: Reading,
+): GuardBorder[] {
+  const form = differenceOf(rule);
+  if (rule.operator === "==" || rule.operator === "!=" || typeof form.constant !== "number") {
+    return [];
+  }
+  const parts = form.parts.map(part => {
+    const term = positionTerm(part.path, part.measure);
+    const { frame, keys } = locate(term, frames);
+    const schema = schemaAt(frame.scope, keys);
+    const standsIn = frame === frames.root && keys[0] === DEPS;
+    return {
+      term,
+      coefficient: part.coefficient,
+      measure: part.measure,
+      standsIn,
+      path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
+      segments: segmentsOf(frame, keys),
+      kind: part.measure === "length" ? "integer" : schema?.kind,
+    };
+  });
+  const carrier = parts.every(part => part.kind === "integer")
+    ? integerCarrier
+    : parts.every(part => part.kind === "integer" || part.kind === "number")
+      ? numberCarrier
+      : undefined;
+  if (carrier === undefined || parts.length === 0) {
+    return [];
+  }
+  const constant = form.constant;
+  const difference: Rule = {
+    ...(rule.name === undefined ? {} : { name: rule.name }),
+    kind: "compare",
+    operator: rule.operator,
+    left: selfTerm<number>(),
+    right: 0,
+  };
+  const borders = bordersOf([difference], () => carrier, {
+    source: reading.source,
+    describe: () => reading.describe(rule, frames),
+    admits: () => true,
+  });
+  const valueOf = (part: (typeof parts)[number], scope: unknown): number | undefined => {
+    const value = readOperand(part.term, scope);
+    return value === undefined ? undefined : (value as number);
+  };
+  const written = parts
+    .map((part, index) => {
+      const size = Math.abs(part.coefficient);
+      const body = size === 1 ? part.path : `${size} * ${part.path}`;
+      return index === 0 ? (part.coefficient < 0 ? `−${body}` : body) : `${part.coefficient < 0 ? "−" : "+"} ${body}`;
+    })
+    .join(" ");
+  const path = constant === 0 ? written : `${written} ${constant < 0 ? "−" : "+"} ${Math.abs(constant)}`;
+  return borders.map(border => ({
+    path,
+    segments: (parts.find(part => !part.standsIn) ?? parts[0]!).segments,
+    reads: parts.filter(part => !part.standsIn).map(part => part.segments),
+    comparison: rule,
+    border,
+    coordinateOf: reached => {
+      let total = constant;
+      for (const part of parts) {
+        const value = valueOf(part, reached.scope);
+        if (value === undefined) {
+          return undefined;
+        }
+        total += part.coefficient * value;
+      }
+      return total;
+    },
+    compose: (given, coordinate, deps, otherSide) => {
+      const movable = parts.filter(part => !part.standsIn && Math.abs(part.coefficient) === 1);
+      const moving = otherSide === true ? movable[movable.length - 1] : movable[0];
+      const moved = moving === undefined ? undefined : at(moving.segments);
+      if (moving === undefined || moved === undefined) {
+        return undefined;
+      }
+      let rest = constant;
+      for (const part of parts) {
+        if (part === moving) {
+          continue;
+        }
+        const value = part.standsIn
+          ? (readOperand(part.term, withDeps({}, deps)) as number | undefined)
+          : (at(part.segments)?.valuesIn(given)[0] as number | undefined);
+        if (value === undefined) {
+          return undefined;
+        }
+        rest += part.coefficient * (part.measure === "length" ? sizeOf(value) : value);
+      }
+      return moved.write(given, moving.measure, ((coordinate as number) - rest) / moving.coefficient);
+    },
   }));
 }
 
@@ -789,7 +898,13 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       if (terms.some(term => positionData(term) === undefined)) {
-        return [describeRule(rule, frames.root.label, labelsOf(frames))];
+        const kinds = differenceOf(rule).parts.map(part => {
+          const { frame, keys } = locate(positionTerm(part.path, part.measure), frames);
+          return part.measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+        });
+        return kinds.every(kind => kind === "integer" || kind === "number")
+          ? []
+          : [describeRule(rule, frames.root.label, labelsOf(frames))];
       }
       const schemas = terms.map(term => {
         const { frame, keys } = locate(term, frames);
