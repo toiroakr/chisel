@@ -733,7 +733,7 @@ export async function check(
       drawn.form !== undefined &&
       owed.some(point => point.status === "met") &&
       owed.every(point => point.status === "met" || point.status === "no row owed");
-    const beside = due ? besideOf(definition, specification.implementation!, drawn, reachedIt) : undefined;
+    const beside = due ? besideOf(definition, specification.implementation!, drawn, reachedIt).beside : undefined;
     return {
       path: drawn.path,
       rule: drawn.border.rule,
@@ -1059,6 +1059,35 @@ export function generate(
           ...withFrom(origin),
         });
       }
+    }
+    if (drawn.form === undefined) {
+      continue;
+    }
+    const items = rows.flatMap(row =>
+      reachedBy(row.given, row.with).map(comparison => ({ comparison, given: row.given, deps: row.with })),
+    );
+    const owed = drawn.border.points.filter(point => point.status === "owed");
+    const standsAt = (point: BorderPoint) => items.some(item => point.contains(drawn.coordinateOf(item.comparison)));
+    const due =
+      owed.some(standsAt) &&
+      owed.every(
+        point =>
+          standsAt(point) || unmetStatus(reachOf(drawn, point, combinations, wayLimit)).status === "no row owed",
+      );
+    const found = due ? besideOf(definition, implementation!, drawn, items) : undefined;
+    if (found?.beside.status !== "not told") {
+      continue;
+    }
+    const label = `${drawn.path} 隣の線 (${found.beside.another})`;
+    if (found.given === undefined) {
+      notComposed.push(label);
+    } else {
+      offer({
+        name: `${definition.name}: ${label}`,
+        given: found.given,
+        reason: `${drawn.path}を${found.beside.another}と見分ける行の期待結果を人間が決める必要があります`,
+        ...withFrom(found.given),
+      });
     }
   }
 
@@ -1561,7 +1590,7 @@ function besideOf(
   implementation: Implementation<AnyBehavior>,
   drawn: GuardBorder,
   reachedIt: readonly { readonly comparison: ComparisonReached; readonly given: unknown; readonly deps: unknown }[],
-): Beside {
+): { readonly beside: Beside; readonly given?: unknown } {
   const parts = [...drawn.form!.parts].sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
   );
@@ -1573,7 +1602,7 @@ function besideOf(
   });
   const kept = rows.filter(row => row.kept).map(row => row.values);
   if (kept.length === 0) {
-    return { status: "undecided", reason: allOnOneSide };
+    return { beside: { status: "undecided", reason: allOnOneSide } };
   }
   const keptBelow = drawn.comparison.operator === "<" || drawn.comparison.operator === "<=";
   const line = lineTheRowsAllow(
@@ -1583,7 +1612,7 @@ function besideOf(
     rows.filter(row => !row.kept).map(row => row.values),
   );
   if (line === undefined) {
-    return { status: "told" };
+    return { beside: { status: "told" } };
   }
   const others = (drawn.origin?.decision.guards ?? []).filter(guard => !mentions(guard.condition, drawn.comparison));
   const shown = partingsOf(parts.map(part => part.coefficient), line, keptBelow, rows)
@@ -1601,9 +1630,9 @@ function besideOf(
         return [];
       }
       const visible = others.every(guard => holds(guard.condition, withDeps(given, deps)));
-      return [{ parting, rank: [visible ? 0 : 1, Math.abs(parting.steps)] as const }];
+      return [{ parting, given, rank: [visible ? 0 : 1, Math.abs(parting.steps)] as const }];
     })
-    .reduce<{ parting: Parting; rank: readonly [number, number] } | undefined>(
+    .reduce<{ parting: Parting; given: unknown; rank: readonly [number, number] } | undefined>(
       (best, candidate) =>
         best === undefined ||
         candidate.rank[0] < best.rank[0] ||
@@ -1612,13 +1641,17 @@ function besideOf(
           : best,
       undefined,
     );
-  return {
-    status: "not told",
-    another: spelled(parts.map(part => part.path), line),
-    ...(shown === undefined
-      ? {}
-      : { input: parts.map((part, index) => `${part.path} = ${shown.parting.values[index]}`).join(", ") }),
-  };
+  const another = spelled(parts.map(part => part.path), line);
+  return shown === undefined
+    ? { beside: { status: "not told", another } }
+    : {
+        beside: {
+          status: "not told",
+          another,
+          input: parts.map((part, index) => `${part.path} = ${shown.parting.values[index]}`).join(", "),
+        },
+        given: shown.given,
+      };
 }
 
 function mentions(rule: Rule, target: Rule): boolean {

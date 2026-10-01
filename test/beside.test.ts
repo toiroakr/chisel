@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { action, behavior, check, examples, implement, int, object, spec, variants } from "../src/index.js";
+import { action, behavior, check, examples, generate, implement, int, object, spec, variants } from "../src/index.js";
 
 // Souther's fixture for E1938: three guards, each of whose borders every row
 // stands at the points of, and none of which a row tells from a line beside it.
@@ -108,6 +108,16 @@ describe("telling a border from the lines beside it", () => {
       "@入力済み.x = 1, @入力済み.y = 3",
       "@入力済み.x = 1, @入力済み.y = 0",
       "@入力済み.x = 14, @入力済み.y = 23",
+    ]);
+  });
+
+  it("offers a row at the input that tells each border from the line beside it", () => {
+    const { rows } = generate(examples(判定する, southersRows), 三つの線);
+
+    expect(rows.filter(offered => offered.name.includes("隣の線")).map(offered => offered.given)).toStrictEqual([
+      { 状態: "入力済み", x: 1, y: 3 },
+      { 状態: "入力済み", x: 1, y: 0 },
+      { 状態: "入力済み", x: 14, y: 23 },
     ]);
   });
 });
