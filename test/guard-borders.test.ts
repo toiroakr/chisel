@@ -919,6 +919,32 @@ describe("a border an input invariant draws between two positions", () => {
     });
   });
 
+  it("meets a point of an invariant an object a field holds declares by an answered row writing it", async () => {
+    const 範囲 = behavior("範囲", {
+      input: variants("状態", {
+        入力済み: object({ 範囲: object({ 下限: int(), 上限: int() }).refine(v => v.下限.$lte(v.上限)) }),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(
+      spec("範囲", {
+        examples: examples(範囲, {
+          等しい: {
+            given: { 状態: "入力済み", 範囲: { 下限: 3, 上限: 3 } },
+            expect: { result: { 結果: "受付" }, effects: [] },
+          },
+        }),
+      }),
+    );
+
+    expect(
+      report.borders
+        .filter(border => border.rule.startsWith("invariant"))
+        .map(border => border.points.map(point => `${point.role} ${point.status}`).join(", ")),
+    ).toStrictEqual(["ON met, OFF excluded, IN gap, OUT excluded"]);
+  });
+
   it("draws the border of an invariant an object a field holds declares, under the field's path", async () => {
     const 範囲 = behavior("範囲", {
       input: variants("状態", {
@@ -962,6 +988,28 @@ describe("a border an input invariant draws between two positions", () => {
       borders: report.borders.filter(border => border.rule.startsWith("invariant")),
       modelIssues: report.modelIssues,
     }).toStrictEqual({ borders: [], modelIssues: ["@入力済み: 不変条件を満たす値がありません (invariant $.数量 < $.数量)"] });
+  });
+
+  it("excludes no point of an invariant by another that reads the same fields through another expression", async () => {
+    const 二つの式 = behavior("二つの式", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() })
+          .refine(v => v.数量.$plus(v.上限).$lte(0))
+          .refine(v => v.数量.$minus(v.上限).$gte(0)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("二つの式", { examples: examples(二つの式, {}) }));
+
+    expect(
+      report.borders
+        .filter(border => border.rule.startsWith("invariant"))
+        .map(border => `${border.rule}: ${border.points.map(point => `${point.role} ${point.status}`).join(", ")}`),
+    ).toStrictEqual([
+      "invariant $.数量 + $.上限 <= 0: ON gap, OFF excluded, IN gap, OUT excluded",
+      "invariant $.数量 - $.上限 >= 0: ON gap, OFF excluded, IN gap, OUT excluded",
+    ]);
   });
 
   it("reports invariants on two positions that leave no value as a model error, as it does for one position", async () => {

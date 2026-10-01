@@ -1,6 +1,6 @@
 import type { AnyBehavior, EnsuresClause } from "./behavior.js";
 import type { Rule, Term } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, termData } from "./rule.js";
+import { conjuncts, describeRule, differenceOf, holds, isTerm, termData } from "./rule.js";
 import type { AnySchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 
@@ -58,10 +58,11 @@ function classify(
   if (terms.length === 0) {
     return holds(rule, {}) ? "always holds" : "never holds";
   }
-  if (terms.length === 2 && sameTerm(terms[0]!, terms[1]!)) {
-    return rule.operator === "==" || rule.operator === "<=" || rule.operator === ">="
-      ? "always holds"
-      : "never holds";
+  if (terms.length === 2) {
+    const form = differenceOf(rule);
+    if (form.parts.length === 0) {
+      return holds({ ...rule, left: form.constant, right: 0 }, {}) ? "always holds" : "never holds";
+    }
   }
   const kinds = terms.map(term => kindOf(term, clause, definition));
   if (kinds.every(kind => kind !== undefined && numeric.has(kind))) {
@@ -74,10 +75,6 @@ function classify(
     return "exact match";
   }
   return "runtime only";
-}
-
-function sameTerm(left: Term<unknown>, right: Term<unknown>): boolean {
-  return JSON.stringify(termData(left)) === JSON.stringify(termData(right));
 }
 
 function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehavior): string | undefined {

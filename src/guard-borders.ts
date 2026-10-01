@@ -153,12 +153,22 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
         if (settledAlone(rule) !== undefined) {
           return [];
         }
-        if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
-          return betweenExpression(rule, frames, at, reading);
-        }
-        return isTerm(rule.left) && isTerm(rule.right)
-          ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, reading)
-          : [];
+        const borders = [rule.left, rule.right].some(
+          operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined,
+        )
+          ? betweenExpression(rule, frames, at, reading)
+          : isTerm(rule.left) && isTerm(rule.right)
+            ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, reading)
+            : [];
+        const keys = frame.segments.slice(1).map(segment => segment.slice(1));
+        return borders.map(border => ({
+          ...border,
+          coordinateOf: (reached: ComparisonReached) =>
+            border.coordinateOf({
+              ...reached,
+              scope: keys.reduce<unknown>((value, key) => (value as Record<string, unknown> | undefined)?.[key], reached.scope),
+            }),
+        }));
       });
       return drawn.map(border => withoutPairRefusedPoints(border, drawn));
     });
@@ -191,6 +201,12 @@ function pairInvariantsOf(
 
 // Whether a comparison of numbers holds whatever the positions hold, when its
 // positions cancel; undefined while one is left to draw a border on.
+function comparesTwoPositions(drawn: GuardBorder): boolean {
+  return [drawn.comparison.left, drawn.comparison.right].every(
+    operand => isTerm(operand) && positionData(operand as Term<unknown>) !== undefined,
+  );
+}
+
 function settledAlone(rule: CompareRule): boolean | undefined {
   if (![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")) {
     return undefined;
@@ -220,10 +236,10 @@ function objectFramesIn(frame: Frame): readonly Frame[] {
 // measure refuses: each comparison of two positions is drawn on a difference of
 // its own, so the bounds on one difference never meet there.
 function withoutPairRefusedPoints(border: GuardBorder, all: readonly GuardBorder[]): GuardBorder {
-  const [first, second, ...more] = (border.reads ?? []).map(segments => JSON.stringify(segments));
+  const [first, second] = (border.reads ?? []).map(segments => JSON.stringify(segments));
   const others = all.flatMap(other => {
-    const [otherFirst, otherSecond, ...otherMore] = (other.reads ?? []).map(segments => JSON.stringify(segments));
-    if (other === border || first === undefined || more.length > 0 || otherMore.length > 0) {
+    const [otherFirst, otherSecond] = (other.reads ?? []).map(segments => JSON.stringify(segments));
+    if (other === border || first === undefined || !comparesTwoPositions(border) || !comparesTwoPositions(other)) {
       return [];
     }
     return otherFirst === first && otherSecond === second

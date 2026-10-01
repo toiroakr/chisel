@@ -338,6 +338,20 @@ describe("how much of an ensures rule the check reads", () => {
     ]);
   });
 
+  it("classifies a comparison of two sums of the same terms written in another order as always holding", async () => {
+    const 合わせる = behavior("合わせる", {
+      input: variants("状態", { 入力済み: object({ 数量: int() }) }),
+      result: object({ 数量: int() }),
+      effects: variants("種類", {}),
+      ensures: clause => [
+        clause.always("和は順によらない", (入力, 答え) => 答え.数量.$plus(入力.数量).$eq(入力.数量.$plus(答え.数量))),
+      ],
+    });
+    const report = await check(spec("合わせる", { examples: examples(合わせる, {}) }));
+
+    expect(report.ensures.rules.map(rule => rule.classification)).toStrictEqual(["always holds"]);
+  });
+
   it("classifies a comparison of dates, times or datetimes as derivable, since they are ordered", async () => {
     const 予約する = behavior("予約する", {
       input: variants("状態", { 入力済み: object({ 予約日: date(), 開始: time(), 入館: datetime() }) }),
