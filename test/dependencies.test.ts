@@ -237,6 +237,17 @@ describe("generated rows and dependencies", () => {
     ]);
   });
 
+  it("names a dependency's placeholder after the dependency, as a field's placeholder is named after the field", () => {
+    const 担当を決める = behavior("担当を決める", {
+      input: variants("状態", { 申込済み: object({ 申込ID: string() }) }),
+      result: object({ 担当: string() }),
+      effects: variants("種類", {}),
+      requires: { 担当者ID: dependency(string()) },
+    });
+
+    expect(generate(examples(担当を決める, {})).rows.map(row => row.with)).toStrictEqual([{ 担当者ID: "<担当者ID>" }]);
+  });
+
   it("writes no stand-in for a function dependency, which a fake stands in for", () => {
     const 採番して受付する = behavior("採番して受付する", {
       input: variants("状態", { 申込済み: object({ 申込ID: string() }) }),

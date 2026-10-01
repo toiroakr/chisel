@@ -875,7 +875,7 @@ export function generate(
   const standIns = Object.fromEntries(
     Object.entries(definition.requires)
       .filter(([, declared]) => declared.takes === "nothing")
-      .map(([name, declared]) => [name, declared.output.placeholder()]),
+      .map(([name, declared]) => [name, declared.output.placeholder(name)]),
   );
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
     const written = answeredRows.find(row => row.given === origin)?.with as
