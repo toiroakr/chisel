@@ -213,6 +213,12 @@ describe("a comparison of a decimal with a value off its grid outside the guards
     );
   });
 
+  it("is refused for an expression of whole decimals, whose grid is the whole numbers", () => {
+    expect(() => object({ 甲: decimal(0), 乙: decimal(0) }).refine(v => v.甲.$plus(v.乙).$eq(d("0.5")))).toThrow(
+      new Error("refine compares $.甲 + $.乙 with 0.5, which no decimal(0) holds: $.甲 + $.乙 == 0.5"),
+    );
+  });
+
   it("is kept for an expression one of whose decimals is fine enough to hold the bound", () => {
     expect(() =>
       object({ 甲: decimal(2), 乙: decimal(3) }).refine(v => v.甲.$plus(v.乙).$eq(半端)),

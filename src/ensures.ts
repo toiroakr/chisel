@@ -1,6 +1,6 @@
 import type { AnyBehavior, EnsuresClause } from "./behavior.js";
 import type { Rule, Term } from "./rule.js";
-import { conjuncts, describeRule, differenceOf, holds, isTerm, termData } from "./rule.js";
+import { conjuncts, describeRule, differenceOf, holds, isDecimal, isTerm, termData } from "./rule.js";
 import type { AnySchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 
@@ -58,7 +58,7 @@ function classify(
   if (terms.length === 0) {
     return holds(rule, {}) ? "always holds" : "never holds";
   }
-  if (terms.length === 2) {
+  if ([rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number" || isDecimal(operand))) {
     const form = differenceOf(rule);
     if (form.parts.length === 0) {
       return holds({ ...rule, left: form.constant, right: 0 }, {}) ? "always holds" : "never holds";

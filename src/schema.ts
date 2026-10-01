@@ -782,7 +782,8 @@ function offGridExpression(
         ? (schema as DecimalSchema).scale
         : undefined;
   });
-  if (!scales.some(scale => scale !== 0) || scales.some(scale => scale === undefined)) {
+  const decimals = data.parts.filter(part => part.measure === "value" && resolve(part.path)?.kind === "decimal");
+  if (decimals.length === 0 || scales.some(scale => scale === undefined)) {
     return undefined;
   }
   const scale = Math.max(...(scales as number[]));
