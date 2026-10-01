@@ -260,16 +260,29 @@ export function feasibilityOf(
     if (isPair(form)) {
       continue;
     }
-    // Not settled on the parts' own intervals, as a pair is below: the values an
-    // expression can take once each part is bounded are not one interval to meet.
-    const free = form.parts.every(
-      part =>
-        groups.get(part.key)!.constraints.length === 0 &&
-        related.filter(other => other === part.key).length === 1 &&
-        intervals.get(part.key)?.lower === undefined &&
-        intervals.get(part.key)?.upper === undefined,
+    const alone = form.parts.every(
+      part => related.filter(other => other === part.key).length === 1 && intervals.get(part.key) !== undefined,
     );
-    unsettled ||= !free || (carrier === integerCarrier && !form.parts.some(part => Math.abs(part.coefficient) === 1));
+    const free = form.parts.every(
+      part => intervals.get(part.key)?.lower === undefined && intervals.get(part.key)?.upper === undefined,
+    );
+    if (alone && free) {
+      unsettled ||= carrier === integerCarrier && !form.parts.some(part => Math.abs(part.coefficient) === 1);
+      continue;
+    }
+    // Integers weighed by more than one leave gaps in the values their sum takes,
+    // so only a sum of whole steps is read as the one interval it fills.
+    const range =
+      alone && (carrier !== integerCarrier || form.parts.every(part => Math.abs(part.coefficient) === 1))
+        ? rangeOf(form, intervals, carrier)
+        : undefined;
+    if (range === undefined) {
+      unsettled = true;
+      continue;
+    }
+    if (ordered([...form.constraints, ...range], carrier) === false) {
+      return { kind: "infeasible", reason: contradicts };
+    }
   }
 
   for (const relation of relations) {
@@ -330,6 +343,40 @@ function stepKey(step: Step): string {
   return step.distinction.kind === "match"
     ? `match ${positionOf(step.distinction.on).path.join(".")}`
     : describeRule(step.distinction);
+}
+
+// The values a form takes as each of its parts ranges over its own interval,
+// as the constraints that bound it.
+function rangeOf(
+  form: Form,
+  intervals: ReadonlyMap<string, Interval | undefined>,
+  carrier: Carrier,
+): readonly Constraint[] {
+  const whole = (edge: Edge | undefined, direction: 1 | -1): Edge | undefined =>
+    edge === undefined || edge.inclusive || carrier !== integerCarrier
+      ? edge
+      : { value: (edge.value as number) + direction, inclusive: true };
+  const end = (side: "lower" | "upper"): Edge | undefined =>
+    form.parts.reduce<Edge | undefined>(
+      (total, { key, coefficient }) => {
+        const interval = intervals.get(key)!;
+        const taken = (coefficient > 0) === (side === "lower") ? "lower" : "upper";
+        const edge = whole(interval[taken], taken === "lower" ? 1 : -1);
+        return total === undefined || edge === undefined
+          ? undefined
+          : {
+              value: (total.value as number) + coefficient * (edge.value as number),
+              inclusive: total.inclusive && edge.inclusive,
+            };
+      },
+      { value: 0, inclusive: true },
+    );
+  const lower = end("lower");
+  const upper = end("upper");
+  return [
+    ...(lower === undefined ? [] : [{ operator: lower.inclusive ? ">=" : ">", bound: lower.value } as Constraint]),
+    ...(upper === undefined ? [] : [{ operator: upper.inclusive ? "<=" : "<", bound: upper.value } as Constraint]),
+  ];
 }
 
 function isPair(form: Form): boolean {
@@ -841,6 +888,57 @@ export function keepingInvariants(
     kept = writeAt(kept, path, value);
   }
   return kept;
+}
+
+// The value `after` becomes when each invariant ordering two or more integer or
+// number positions that it breaks is kept by moving one of its positions weighed
+// by one, and one `after` did not move away from `before`, to the nearest value
+// that keeps it; undefined when an invariant is left broken.
+export function keepingOrderings(scope: AnySchema, before: unknown, after: unknown): unknown {
+  const orderings = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
+    if (rule.kind !== "compare" || ![rule.left, rule.right].every(isTerm)) {
+      return [];
+    }
+    const form = differenceOf(rule as CompareRule);
+    const parts = form.parts.map(part => ({ ...part, path: [...prefix, ...part.path] }));
+    const numeric = parts.every(
+      part => part.measure === "value" && ["integer", "number"].includes(schemaAtPath(scope, part.path)?.kind ?? ""),
+    );
+    return parts.length >= 2 && numeric && typeof form.constant === "number"
+      ? [{ rule: rule as CompareRule, parts, constant: form.constant }]
+      : [];
+  });
+  let kept = after;
+  for (let round = 0; round <= orderings.length; round++) {
+    const broken = orderings.find(({ rule, parts, constant }) => {
+      const values = parts.map(part => readAt(kept, part.path));
+      return (
+        values.every(value => typeof value === "number") &&
+        !holds({ ...rule, left: parts.reduce((total, part, index) => total + part.coefficient * (values[index] as number), constant), right: 0 } as Rule, undefined)
+      );
+    });
+    if (broken === undefined) {
+      return kept;
+    }
+    const moving = broken.parts.find(
+      part => Math.abs(part.coefficient) === 1 && isDeepStrictEqual(readAt(before, part.path), readAt(after, part.path)),
+    );
+    if (moving === undefined) {
+      return undefined;
+    }
+    const rest = broken.parts.reduce(
+      (total, part) => (part === moving ? total : total + part.coefficient * (readAt(kept, part.path) as number)),
+      broken.constant,
+    );
+    // coefficient * x + rest <operator> 0, read as a bound on x itself.
+    const operator = moving.coefficient === 1 ? broken.rule.operator : mirrored[broken.rule.operator];
+    const bound = -rest * moving.coefficient;
+    const current = readAt(kept, moving.path) as number;
+    const nearest =
+      operator === ">" ? bound + 1 : operator === "<" ? bound - 1 : operator === "!=" ? current + 1 : bound;
+    kept = writeAt(kept, moving.path, nearest);
+  }
+  return undefined;
 }
 
 // Whether no combination the invariants relating finite positions keep gives

@@ -40,7 +40,7 @@ import { DEPS, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, finiteReach, keepingInvariants, refusedJointly, tooManyWays, unreached, witnessesOf } from "./feasibility.js";
+import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, finiteReach, keepingInvariants, keepingOrderings, refusedJointly, tooManyWays, unreached, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js";
@@ -961,10 +961,13 @@ export function generate(
       return;
     }
     const tag = tagOf(definition.input, row.given);
+    const scope = tag === undefined ? undefined : feasibilityScope(definition, tag);
+    const finite =
+      from === undefined || scope === undefined ? undefined : keepingInvariants(scope, from, row.given, combinations);
     const kept =
-      from === undefined || tag === undefined
-        ? undefined
-        : keepingInvariants(feasibilityScope(definition, tag), from, row.given, combinations);
+      finite === undefined || definition.input.parse(finite).success
+        ? finite
+        : keepingOrderings(scope!, from, finite);
     if (kept !== undefined && definition.input.parse(kept).success) {
       generated.push({ ...row, given: kept });
     } else {
@@ -1027,7 +1030,7 @@ export function generate(
             given: position.write(origin, border.measure, point.witness),
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
             ...withFrom(origin),
-          });
+          }, origin);
         }
       }
     }
@@ -1052,7 +1055,7 @@ export function generate(
           given: position.write(origin, "value", item.witness),
           reason: `${drawn.path}が${item.name}の期待結果を人間が決める必要があります`,
           ...withFrom(origin),
-        });
+        }, origin);
       }
     }
   }
@@ -1075,8 +1078,8 @@ export function generate(
       const origin =
         origins.find(given => reachedBy(given, withFrom(given).with).length > 0) ??
         definition.input.placeholder();
-      const candidates = [false, true]
-        .map(other => drawn.compose(origin, point.witness, withFrom(origin).with, other))
+      const candidates = sidesOf(drawn)
+        .map(side => drawn.compose(origin, point.witness, withFrom(origin).with, side))
         .filter(candidate => candidate !== undefined);
       const given = candidates.find(candidate => definition.input.parse(candidate).success) ?? candidates[0];
       if (given === undefined) {
@@ -1135,8 +1138,8 @@ export function generate(
       }
       const origin =
         origins.find(under) ?? definition.input.placeholderFor(drawn.segments[0]!.slice(1));
-      const given = [false, true]
-        .map(other => drawn.compose(origin, point.witness, withFrom(origin).with, other))
+      const given = sidesOf(drawn)
+        .map(side => drawn.compose(origin, point.witness, withFrom(origin).with, side))
         .find(candidate => candidate !== undefined && definition.input.parse(candidate).success);
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
@@ -1683,6 +1686,10 @@ function besideOf(
         given: shown.given,
         origin: rows[shown.parting.from]!.given,
       };
+}
+
+function sidesOf(drawn: GuardBorder): readonly number[] {
+  return Array.from({ length: drawn.sides ?? 2 }, (_, side) => side);
 }
 
 function mentions(rule: Rule, target: Rule): boolean {

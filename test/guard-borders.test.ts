@@ -1276,7 +1276,7 @@ describe("a guard comparing an expression of positions", () => {
     ).toStrictEqual(["gap", "gap", "gap"]);
   });
 
-  it("leaves a way undecided when a position of the expression is also compared on its own", async () => {
+  it("settles a way when a position of the expression is also compared on its own, by the range that leaves it", async () => {
     const 下限つき = implement(釣り合わせる, {
       cases: {
         入力済み: action("下限つき", {
@@ -1286,6 +1286,25 @@ describe("a guard comparing an expression of positions", () => {
       },
     });
     const report = await check(spec("下限つき", { examples: examples(釣り合わせる, {}), implementation: 下限つき }));
+
+    expect(
+      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : [],
+    ).toStrictEqual(["gap", "gap", "gap"]);
+  });
+
+  it("leaves a way undecided when a position of the expression is part of another expression too", async () => {
+    const 二つの式 = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("二つの式", {
+          guards: 入力 => [
+            入力.甲.$gte(入力.乙.$plus(入力.丙)).$else(却下),
+            入力.甲.$lte(入力.乙.$minus(入力.丙)).$else(却下),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("二つの式", { examples: examples(釣り合わせる, {}), implementation: 二つの式 }));
 
     expect(
       report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : [],
@@ -1307,6 +1326,73 @@ describe("a guard comparing an expression of positions", () => {
       rows: rows.filter(row => row.name.includes("2 * @入力済み.甲")).map(row => row.name),
       notComposed: notComposed.filter(line => line.includes("2 * @入力済み.甲")).length,
     }).toStrictEqual({ rows: [], notComposed: 3 });
+  });
+
+  const 下限のある = behavior("下限のある", {
+    input: variants("状態", { 入力済み: object({ 甲: int().min(0), 乙: int().min(0), 丙: int().min(0) }) }),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 下限のある差まで = implement(下限のある, {
+    cases: {
+      入力済み: action("下限のある差まで", {
+        guards: 入力 => [入力.甲.$gte(入力.乙.$minus(入力.丙)).$else(却下)],
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
+    },
+  });
+
+  it("owes a row at each point of an expression of three bounded positions that their ranges reach", async () => {
+    const report = await check(
+      spec("下限のある差まで", { examples: examples(下限のある, {}), implementation: 下限のある差まで }),
+    );
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.甲 >= $.乙 - $.丙")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF gap", "IN gap", "OUT gap"]);
+  });
+
+  it("owes no row at a point of an expression that the ranges of its positions leave no value at", async () => {
+    const 上限のある = behavior("上限のある", {
+      input: variants("状態", { 入力済み: object({ 甲: int().min(0), 乙: int().max(0), 丙: int().min(0) }) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 上限のある差まで = implement(上限のある, {
+      cases: {
+        入力済み: action("上限のある差まで", {
+          guards: 入力 => [入力.甲.$gte(入力.乙.$minus(入力.丙)).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(
+      spec("上限のある差まで", { examples: examples(上限のある, {}), implementation: 上限のある差まで }),
+    );
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.甲 >= $.乙 - $.丙")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF no row owed", "IN gap", "OUT no row owed"]);
+  });
+
+  it("offers rows standing at every point of an expression of three bounded positions, moving a part its bound lets move", () => {
+    const { rows, notComposed } = generate(examples(下限のある, {}), 下限のある差まで);
+    const values = rows.map(row => {
+      const { 甲, 乙, 丙 } = row.given as { 甲: number; 乙: number; 丙: number };
+      return 甲 - 乙 + 丙;
+    });
+
+    expect({
+      ON: values.some(value => value === 0),
+      OFF: values.some(value => value === -1),
+      IN: values.some(value => value > 0),
+      OUT: values.some(value => value < -1),
+      notComposed: notComposed.filter(line => line.includes("@入力済み.甲 − @入力済み.乙")),
+    }).toStrictEqual({ ON: true, OFF: true, IN: true, OUT: true, notComposed: [] });
   });
 
   it("carries a constant of the expression into the border's name", async () => {

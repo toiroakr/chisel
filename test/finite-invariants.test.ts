@@ -336,3 +336,41 @@ describe("classes the invariants relating finite positions leave no combination 
   });
 });
 
+
+describe("a row moved across an invariant ordering two numbers", () => {
+  const 減らす = behavior("減らす", {
+    input: variants("向き", {
+      減: object({ 記録: int().min(1), 正: int().min(0) }).refine("減の訂正", v => v.正.$lt(v.記録)),
+    }),
+    result: variants("結果", { 反映: object({}) }),
+    effects: variants("種類", {}),
+  });
+
+  it("moves the other number the invariant orders it against so the row keeps the invariant", () => {
+    const { rows, notComposed } = generate(examples(減らす, {}));
+
+    expect({
+      row: rows.find(row => row.name === "減らす: @減.正 IN (> 0)")?.given,
+      notComposed,
+    }).toStrictEqual({ row: { 向き: "減", 記録: 2, 正: 1 }, notComposed: [] });
+  });
+
+  it("moves the other number the invariant orders it against through an expression", () => {
+    const 余裕 = behavior("余裕", {
+      input: variants("向き", {
+        減: object({ 記録: int().min(1), 正: int().min(0) }).refine(v => v.正.$plus(2).$lte(v.記録)),
+      }),
+      result: variants("結果", { 反映: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const { rows, notComposed } = generate(examples(余裕, {}));
+
+    expect({
+      row: rows.find(row => row.name === "余裕: @減.正 IN (> 0)")?.given,
+      notComposed,
+    }).toStrictEqual({
+      row: { 向き: "減", 記録: 3, 正: 1 },
+      notComposed: ["余裕: @減.記録 ON (= 1): Invariant violated: $.正 + 2 <= $.記録"],
+    });
+  });
+});

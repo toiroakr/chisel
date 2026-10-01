@@ -59,7 +59,9 @@ export interface GuardBorder {
   };
   readonly form?: BorderForm;
   coordinateOf(reached: ComparisonReached): unknown;
-  compose(given: unknown, coordinate: unknown, deps?: unknown, other?: boolean): unknown;
+  // How many ways compose has of writing a point, tried in order as `side`.
+  readonly sides?: number;
+  compose(given: unknown, coordinate: unknown, deps?: unknown, side?: number): unknown;
 }
 
 // The weighed positions of a border over two or more integer or number
@@ -737,6 +739,9 @@ function betweenExpression(
     })
     .join(" ");
   const path = constant === 0 ? written : `${written} ${constant < 0 ? "−" : "+"} ${Math.abs(constant)}`;
+  // Each part weighed by one can be moved onto any value, and the first the input
+  // takes is written: an earlier one may be held to a bound of its own.
+  const movable = parts.filter(part => !part.standsIn && Math.abs(part.coefficient) === 1);
   const weighed: BorderForm | undefined =
     parts.length > 1 && parts.every(part => !part.standsIn)
       ? {
@@ -766,9 +771,9 @@ function betweenExpression(
       }
       return total;
     },
-    compose: (given, coordinate, deps, otherSide) => {
-      const movable = parts.filter(part => !part.standsIn && Math.abs(part.coefficient) === 1);
-      const moving = otherSide === true ? movable[movable.length - 1] : movable[0];
+    sides: movable.length,
+    compose: (given, coordinate, deps, side) => {
+      const moving = movable[side ?? 0];
       const moved = moving === undefined ? undefined : at(moving.segments);
       if (moving === undefined || moved === undefined) {
         return undefined;
@@ -868,7 +873,8 @@ function between(
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
     },
-    compose: (given, coordinate, deps, otherSide) => {
+    compose: (given, coordinate, deps, side) => {
+      const otherSide = side === 1;
       // Move the side that can take every value of the difference: the finer of
       // a decimal and an integer, and never a stand-in, which a row writes as given.
       const preferred = first.standsIn || (!second.standsIn && second.scale > first.scale);
