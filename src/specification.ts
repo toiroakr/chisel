@@ -19,6 +19,7 @@ import {
   comparisonsNotReadOf,
   ensuresBordersOf,
   invariantContradictionsOf,
+  mayBeLeftOut,
   invariantPairBordersOf,
   guardBordersOf,
   guardPartitionsOf,
@@ -674,7 +675,9 @@ export async function check(
   }
   const modelIssues = [
     ...positionsOf(definition.input).map(position => ({ path: position.path, borders: position.borders })),
-    ...[...pairGroups.values()].map(group => ({ path: group[0]!.path, borders: group.map(drawn => drawn.border) })),
+    ...[...pairGroups.values()]
+      .filter(group => !(group[0]!.reads ?? []).some(segments => mayBeLeftOut(definition, segments)))
+      .map(group => ({ path: group[0]!.path, borders: group.map(drawn => drawn.border) })),
   ].flatMap(({ path, borders }) => {
     const emptied = emptiedBy(borders);
     return emptied === undefined

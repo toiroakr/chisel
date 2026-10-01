@@ -990,6 +990,30 @@ describe("a border an input invariant draws between two positions", () => {
     }).toStrictEqual({ borders: [], modelIssues: ["@入力済み: 不変条件を満たす値がありません (invariant $.数量 < $.数量)"] });
   });
 
+  it("reports no model error for a self-cancelling invariant on a field that may be left out, which an input without it keeps", async () => {
+    const 省略できる = behavior("省略できる", {
+      input: variants("状態", { 入力済み: object({ 数量: int().optional() }).refine(v => v.数量.$lt(v.数量)) }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("省略できる", { examples: examples(省略できる, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([]);
+  });
+
+  it("tells apart a key holding a NUL from the nested path it would spell when joined", async () => {
+    const 紛らわしい = behavior("紛らわしい", {
+      input: variants("状態", {
+        入力済み: object({ "a\u0000b": int(), a: object({ b: int() }) }).refine(v => v["a\u0000b"].$minus(v.a.b).$lt(0)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("紛らわしい", { examples: examples(紛らわしい, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([]);
+  });
+
   it("excludes no point of an invariant by another that reads the same fields through another expression", async () => {
     const 二つの式 = behavior("二つの式", {
       input: variants("状態", {
@@ -1027,6 +1051,21 @@ describe("a border an input invariant draws between two positions", () => {
     expect(report.modelIssues).toStrictEqual([
       "@入力済み.数量 − @入力済み.上限: 不変条件を満たす値がありません (invariant $.数量 <= $.上限, invariant $.上限 < $.数量)",
     ]);
+  });
+
+  it("reports no model error for invariants on two positions that leave no value, when one may be left out", async () => {
+    const 省略できる = behavior("省略できる", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int().optional(), 上限: int() })
+          .refine(v => v.数量.$lte(v.上限))
+          .refine(v => v.上限.$lt(v.数量)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("省略できる", { examples: examples(省略できる, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([]);
   });
 
   it("draws no border when the behavior disregards either of the two positions", async () => {

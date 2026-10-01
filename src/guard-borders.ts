@@ -186,15 +186,44 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
     });
 }
 
-// An input invariant whose sides cancel, such as $.x < $.x, holds of no value.
+// An input invariant whose sides cancel, such as $.x < $.x, holds of no value,
+// unless a field it reads may be left out: a comparison with it absent holds.
 export function invariantContradictionsOf(definition: AnyBehavior): readonly string[] {
   return pairInvariantsOf(definition).flatMap(({ frame, rule }) =>
-    settledAlone(rule) === false
+    settledAlone(rule) === false &&
+    !readPathsOf(rule).some(path => mayBeLeftOut(definition, [...frame.segments, ...path.map(key => `.${key}`)]))
       ? [
           `${frame.path}: 不変条件を満たす値がありません (invariant ${rule.name === undefined ? "" : `${rule.name}: `}${describeRule(rule, frame.label)})`,
         ]
       : [],
   );
+}
+
+function readPathsOf(rule: CompareRule): readonly (readonly string[])[] {
+  return [rule.left, rule.right].flatMap(operand => {
+    if (!isTerm(operand)) {
+      return [];
+    }
+    const data = termData(operand as Term<unknown>);
+    return data.kind === "position" ? [data.path] : data.parts.map(part => part.path);
+  });
+}
+
+// Whether a position an object invariant reads, named by segments such as
+// ["@case", ".key"], is or lies under a field that may be left out.
+export function mayBeLeftOut(definition: AnyBehavior, segments: readonly string[]): boolean {
+  const [caseSegment, ...keys] = segments;
+  let schema = definition.input.variants[caseSegment!.slice(1)] as AnySchema | undefined;
+  for (const key of keys) {
+    if (schema === undefined || schema.kind === "optional") {
+      return schema !== undefined;
+    }
+    if (schema.kind !== "object" || !key.startsWith(".")) {
+      return false;
+    }
+    schema = (schema as ObjectSchema<ObjectShape>).shape[key.slice(1)];
+  }
+  return schema?.kind === "optional";
 }
 
 function pairInvariantsOf(

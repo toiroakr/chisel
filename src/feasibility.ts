@@ -630,7 +630,7 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
     const discriminant = path[path.length - 1]!;
     const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
       .flatMap(conjuncts)
-      .filter(rule => boundTermPath(rule)?.join("\u0000") === discriminant);
+      .filter(rule => isDeepStrictEqual(boundTermPath(rule), [discriminant]));
     return discriminated.variantTags.filter(tag =>
       refusing.every(rule => holds(rule, { [discriminant]: tag })),
     );
