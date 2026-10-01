@@ -18,6 +18,60 @@ import {
   variants,
 } from "../src/index.js";
 
+describe("arithmetic on numeric terms", () => {
+  const 釣り合う = object({ 甲: int(), 乙: int(), 丙: int() }).refine(v => v.甲.$gte(v.乙.$minus(v.丙)));
+
+  it("compares the value of a sum or difference of positions, as Souther conditions do", () => {
+    expect([
+      釣り合う.parse({ 甲: 2, 乙: 5, 丙: 3 }).success,
+      釣り合う.parse({ 甲: 1, 乙: 5, 丙: 3 }).success,
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("adds a constant to a position", () => {
+    const 余裕あり = object({ 甲: int(), 乙: int() }).refine(v => v.甲.$plus(2).$lte(v.乙));
+
+    expect([余裕あり.parse({ 甲: 3, 乙: 5 }).success, 余裕あり.parse({ 甲: 4, 乙: 5 }).success]).toStrictEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("writes the expression in the condition it reports a value breaks", () => {
+    const parsed = 釣り合う.parse({ 甲: 1, 乙: 5, 丙: 3 });
+
+    expect(parsed.success ? [] : parsed.issues.map(issue => issue.message)).toStrictEqual([
+      "Invariant violated: $.甲 >= $.乙 - $.丙",
+    ]);
+  });
+
+  it("stands in with a value that keeps an invariant comparing an expression with a position, by moving the position", () => {
+    const 余裕あり = object({ 甲: int(), 乙: int() }).refine(v => v.甲.$plus(2).$lte(v.乙));
+
+    expect(余裕あり.parse(余裕あり.placeholder()).success).toBe(true);
+  });
+
+  it("writes 0 for an expression whose positions cancel", () => {
+    const 打ち消す = object({ 甲: int() }).refine(v => v.甲.$minus(v.甲).$ne(0));
+    const parsed = 打ち消す.parse({ 甲: 1 });
+
+    expect(parsed.success ? [] : parsed.issues.map(issue => issue.message)).toStrictEqual(["Invariant violated: 0 != 0"]);
+  });
+
+  it("holds an expression one of whose positions is left out, as a comparison with an absent operand holds", () => {
+    const 任意 = object({ 甲: int(), 乙: int(), 丙: int().optional() }).refine(v => v.甲.$gte(v.乙.$minus(v.丙)));
+
+    expect(任意.parse({ 甲: 0, 乙: 5 }).success).toBe(true);
+  });
+
+  it("does not compile arithmetic on a string", () => {
+    // @ts-expect-error only numeric terms add and subtract
+    const 誤り = (v: TermOf<{ readonly 名前: string }>) => v.名前.$plus(1);
+
+    expect(typeof 誤り).toBe("function");
+  });
+});
+
 describe("terms", () => {
   it("reads a field by its own name, so a field may share its name with an operator", () => {
     const 長さ付き = object({ length: int() }).refine(v => v.length.$gte(1));

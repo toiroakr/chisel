@@ -27,7 +27,7 @@ import {
   depsTerm,
   withDeps,
   termData,
-  rootsRead,
+  rootsRead, positionOf,
 } from "./rule.js";
 import { offGridEqualityIn } from "./guard-borders.js";
 import { scopesOf } from "./ensures.js";
@@ -231,6 +231,27 @@ export function todo(reason = "まだ決めていません"): Todo {
   return { kind: "todo", reason };
 }
 
+// What a row writes for an answer it states only the case of, as Souther's bare
+// case name `-> Submitted` asserts the arm and none of its fields.
+declare const caseOnlyBrand: unique symbol;
+
+export interface CaseOnly<Tag extends string = string> {
+  readonly kind: "case";
+  readonly case: Tag;
+  // Not structural: only caseOf writes the mark isCaseOnly reads at run time.
+  readonly [caseOnlyBrand]: true;
+}
+
+const caseOnlyMark = Symbol.for("chisel.caseOf");
+
+export function caseOf<const Tag extends string>(tag: Tag): CaseOnly<Tag> {
+  return Object.defineProperty({ kind: "case", case: tag }, caseOnlyMark, { value: true }) as CaseOnly<Tag>;
+}
+
+export function isCaseOnly(value: unknown): value is CaseOnly {
+  return typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[caseOnlyMark] === true;
+}
+
 export function isTodo(value: unknown): value is Todo {
   return (
     typeof value === "object" &&
@@ -300,7 +321,7 @@ function disregardedPaths(
   written: Readonly<Record<string, ((input: never) => readonly Term<unknown>[]) | undefined>>,
 ): Readonly<Record<string, readonly (readonly string[])[]>> {
   const pathsOf = (builder: (input: never) => readonly Term<unknown>[]) =>
-    builder(selfTerm() as never).map(term => termData(term).path);
+    builder(selfTerm() as never).map(term => positionOf(term).path);
   const byDefault = written.$default === undefined ? [] : pathsOf(written.$default);
   const covered = input.variantTags.filter(tag => ownAt(written, tag) === undefined);
   const declares = (tag: string, keys: readonly string[]) =>
@@ -454,7 +475,7 @@ function checkMatch(
   if (decision?.kind !== "rules" || typeof decision.otherwise === "function") {
     return;
   }
-  const keys = termData(decision.otherwise.on).path;
+  const keys = positionOf(decision.otherwise.on).path;
   const caseTags = new Set<string>();
   let what = "sum";
   for (const tag of tags) {

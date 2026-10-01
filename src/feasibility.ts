@@ -1,10 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Carrier } from "./border.js";
-import { normalize } from "./border.js";
+import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
-import type { CompareRule, Operator, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, holds, isTerm, readOperand, termData, termPaths } from "./rule.js";
+import type { CompareRule, LinearTermData, Operator, Rule, Term } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
@@ -79,11 +79,32 @@ export function tooManyCombinations(limit: number): string {
   return `不変条件とあわせて調べる値の組が上限の${limit}通りを超える`;
 }
 
-export interface Placement {
-  readonly path: readonly string[];
-  readonly measure: Measure;
-  readonly operator: Operator;
-  readonly bound: unknown;
+export type Placement =
+  | {
+      readonly path: readonly string[];
+      readonly measure: Measure;
+      readonly operator: Operator;
+      readonly bound: unknown;
+    }
+  | {
+      readonly between: readonly [
+        { readonly path: readonly string[]; readonly measure: Measure },
+        { readonly path: readonly string[]; readonly measure: Measure },
+      ];
+      readonly operator: Operator;
+      readonly bound: unknown;
+    }
+  | {
+      readonly form: LinearTermData;
+      readonly operator: Operator;
+      readonly bound: unknown;
+    };
+
+// A sum of coordinates weighed by whole numbers, as a comparison of two of
+// them or of an expression constrains it.
+interface Form {
+  readonly parts: readonly { readonly key: string; readonly coefficient: number }[];
+  readonly constraints: Constraint[];
 }
 
 export function feasibilityOf(
@@ -104,7 +125,67 @@ export function feasibilityOf(
     return key;
   };
 
-  if (placement !== undefined) {
+  const forms = new Map<string, Form>();
+  let constant = true;
+  const constrain = (
+    weighed: readonly { readonly key: string; readonly coefficient: number }[],
+    operator: Operator,
+    bound: number,
+    onlyKnown = false,
+  ): void => {
+    const merged = new Map<string, number>();
+    for (const { key, coefficient } of weighed) {
+      merged.set(key, (merged.get(key) ?? 0) + coefficient);
+    }
+    const parts = [...merged]
+      .filter(([, coefficient]) => coefficient !== 0)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, coefficient]) => ({ key, coefficient }));
+    if (parts.length === 0) {
+      constant &&= holds({ kind: "compare", left: 0, operator, right: bound } as Rule, undefined);
+      return;
+    }
+    const sign = parts[0]!.coefficient < 0 ? -1 : 1;
+    const canonical = parts.map(part => ({ key: part.key, coefficient: sign * part.coefficient }));
+    const key = JSON.stringify(canonical);
+    if (onlyKnown && !forms.has(key)) {
+      return;
+    }
+    if (!forms.has(key)) {
+      forms.set(key, { parts: canonical, constraints: [] });
+    }
+    forms
+      .get(key)!
+      .constraints.push(sign === 1 ? { operator, bound } : { operator: mirrored[operator], bound: -bound });
+  };
+  const differ = (left: string, right: string, operator: Operator, bound: number): void =>
+    constrain(
+      [
+        { key: left, coefficient: 1 },
+        { key: right, coefficient: -1 },
+      ],
+      operator,
+      bound,
+    );
+  const constrainForm = (form: LinearTermData, operator: Operator, bound: number, onlyKnown = false): void =>
+    constrain(
+      form.parts.map(part => ({ key: groupFor(part.path, part.measure), coefficient: part.coefficient })),
+      operator,
+      bound - (form.constant as number),
+      onlyKnown,
+    );
+
+  if (placement !== undefined && "between" in placement) {
+    const [left, right] = placement.between;
+    differ(
+      groupFor(left.path, left.measure),
+      groupFor(right.path, right.measure),
+      placement.operator,
+      placement.bound as number,
+    );
+  } else if (placement !== undefined && "form" in placement) {
+    constrainForm(placement.form, placement.operator, placement.bound as number);
+  } else if (placement !== undefined) {
     groups
       .get(groupFor(placement.path, placement.measure))!
       .constraints.push({ operator: placement.operator, bound: placement.bound });
@@ -133,11 +214,27 @@ export function feasibilityOf(
       continue;
     }
     const operator = outcome === true ? distinction.operator : negated[distinction.operator];
+    const form = readableFormOf(distinction, scope);
+    if (form !== undefined) {
+      constrainForm(form, operator, 0);
+      continue;
+    }
     const relation = relationOf(distinction, operator, groupFor);
     if (relation === undefined) {
       opaque.push(termPaths(distinction));
     } else {
       relations.push(relation);
+      differ(relation.left, relation.right, relation.operator, 0);
+    }
+  }
+
+  // An input invariant ordering numbers holds on every way, so it bounds a form
+  // the way constrains. Not added to a form of its own: one more form sharing
+  // the way's positions would leave forms that are settled now undecided.
+  for (const { prefix, rule } of scopedInvariants(scope, [])) {
+    const form = numericFormOf(rule, scope, prefix);
+    if (form !== undefined && form.parts.every(part => groups.has(JSON.stringify([part.path, part.measure])))) {
+      constrainForm(form, (rule as CompareRule).operator, 0, true);
     }
   }
 
@@ -159,7 +256,55 @@ export function feasibilityOf(
     return { kind: "undecided", reason: tooManyCombinations(combinations) };
   }
 
-  const related = relations.flatMap(relation => [relation.left, relation.right]);
+  if (!constant) {
+    return { kind: "infeasible", reason: contradicts };
+  }
+  const related = [...forms.values()].flatMap(form => form.parts.map(part => part.key));
+  for (const form of forms.values()) {
+    const carrier = differenceCarrierOf(
+      form.parts.map(part => groups.get(part.key)!),
+      scope,
+    );
+    if (carrier === undefined) {
+      unsettled ||= form.constraints.length > 1;
+      continue;
+    }
+    if (ordered(form.constraints, carrier) === false) {
+      return { kind: "infeasible", reason: contradicts };
+    }
+    const alone = form.parts.every(
+      part => related.filter(other => other === part.key).length === 1 && intervals.get(part.key) !== undefined,
+    );
+    // A pair shared with another form is still settled on its intervals below,
+    // as a relation, so only one it alone constrains is read on its range here.
+    if (isPair(form)) {
+      if (alone && ordered([...form.constraints, ...rangeOf(form, intervals, carrier)], carrier) === false) {
+        return { kind: "infeasible", reason: contradicts };
+      }
+      continue;
+    }
+    const free = form.parts.every(
+      part => intervals.get(part.key)?.lower === undefined && intervals.get(part.key)?.upper === undefined,
+    );
+    if (alone && free) {
+      unsettled ||= carrier === integerCarrier && !form.parts.some(part => Math.abs(part.coefficient) === 1);
+      continue;
+    }
+    // Integers weighed by more than one leave gaps in the values their sum takes,
+    // so only a sum of whole steps is read as the one interval it fills.
+    const range =
+      alone && (carrier !== integerCarrier || form.parts.every(part => Math.abs(part.coefficient) === 1))
+        ? rangeOf(form, intervals, carrier)
+        : undefined;
+    if (range === undefined) {
+      unsettled = true;
+      continue;
+    }
+    if (ordered([...form.constraints, ...range], carrier) === false) {
+      return { kind: "infeasible", reason: contradicts };
+    }
+  }
+
   for (const relation of relations) {
     const left = intervals.get(relation.left);
     const right = intervals.get(relation.right);
@@ -194,7 +339,7 @@ function placedConstraintOf(
 ): { readonly path: readonly string[]; readonly measure: Measure; readonly constraint: Constraint } | undefined {
   const { distinction, outcome } = step;
   if (distinction.kind === "match") {
-    return { path: termData(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
+    return { path: positionOf(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
   }
   if (distinction.kind !== "compare") {
     return undefined;
@@ -205,7 +350,7 @@ function placedConstraintOf(
   }
   const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
   return {
-    path: termData(term).path,
+    path: positionOf(term).path,
     measure: normalized.measure,
     constraint: {
       operator: outcome === true ? normalized.operator : negated[normalized.operator],
@@ -216,8 +361,94 @@ function placedConstraintOf(
 
 function stepKey(step: Step): string {
   return step.distinction.kind === "match"
-    ? `match ${termData(step.distinction.on).path.join(".")}`
+    ? `match ${positionOf(step.distinction.on).path.join(".")}`
     : describeRule(step.distinction);
+}
+
+// The values a form takes as each of its parts ranges over its own interval,
+// as the constraints that bound it.
+function rangeOf(
+  form: Form,
+  intervals: ReadonlyMap<string, Interval | undefined>,
+  carrier: Carrier,
+): readonly Constraint[] {
+  const whole = (edge: Edge | undefined, direction: 1 | -1): Edge | undefined =>
+    edge === undefined || edge.inclusive || carrier !== integerCarrier
+      ? edge
+      : { value: (edge.value as number) + direction, inclusive: true };
+  const end = (side: "lower" | "upper"): Edge | undefined =>
+    form.parts.reduce<Edge | undefined>(
+      (total, { key, coefficient }) => {
+        const interval = intervals.get(key)!;
+        const taken = (coefficient > 0) === (side === "lower") ? "lower" : "upper";
+        const edge = whole(interval[taken], taken === "lower" ? 1 : -1);
+        return total === undefined || edge === undefined
+          ? undefined
+          : {
+              value: (total.value as number) + coefficient * (edge.value as number),
+              inclusive: total.inclusive && edge.inclusive,
+            };
+      },
+      { value: 0, inclusive: true },
+    );
+  const lower = end("lower");
+  const upper = end("upper");
+  return [
+    ...(lower === undefined ? [] : [{ operator: lower.inclusive ? ">=" : ">", bound: lower.value } as Constraint]),
+    ...(upper === undefined ? [] : [{ operator: upper.inclusive ? "<=" : "<", bound: upper.value } as Constraint]),
+  ];
+}
+
+function isPair(form: Form): boolean {
+  return form.parts.length === 2 && form.parts[0]!.coefficient === 1 && form.parts[1]!.coefficient === -1;
+}
+
+// An invariant comparing two or more integer or number positions that are never
+// left out, read as one form over paths from the scope's root.
+function numericFormOf(rule: Rule, scope: AnySchema, prefix: readonly string[]): LinearTermData | undefined {
+  if (
+    rule.kind !== "compare" ||
+    rule.operator === "==" ||
+    rule.operator === "!=" ||
+    ![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")
+  ) {
+    return undefined;
+  }
+  const form = differenceOf(rule);
+  const parts = form.parts.map(part => ({ ...part, path: [...prefix, ...part.path] }));
+  const kept = parts.every(
+    part =>
+      part.measure === "value" &&
+      !leftOutAlong(scope, part.path) &&
+      ["integer", "number"].includes(schemaAtPath(scope, part.path)?.kind ?? ""),
+  );
+  return parts.length >= 2 && kept && typeof form.constant === "number" ? { ...form, parts } : undefined;
+}
+
+function leftOutAlong(scope: AnySchema, path: readonly string[]): boolean {
+  return path.some((_, index) => {
+    const parent = schemaAtPath(scope, path.slice(0, index));
+    const field = parent?.kind === "object" ? (parent as ObjectSchema<ObjectShape>).shape[path[index]!] : undefined;
+    return field?.kind === "optional";
+  });
+}
+
+// An expression of integer or number positions, read as the left side less the
+// right; a decimal or another kind of part leaves the comparison unread.
+function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | undefined {
+  if (![rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
+    return undefined;
+  }
+  const form = differenceOf(rule);
+  const kinds = form.parts.map(part =>
+    part.measure === "length" ? "integer" : schemaAtPath(scope, part.path)?.kind,
+  );
+  // A part that may be left out is not one: the comparison holds without it.
+  return typeof form.constant === "number" &&
+    kinds.every(kind => kind === "integer" || kind === "number") &&
+    !form.parts.some(part => leftOutAlong(scope, part.path))
+    ? form
+    : undefined;
 }
 
 function relationOf(
@@ -228,13 +459,29 @@ function relationOf(
   if (!isTerm(rule.left) || !isTerm(rule.right)) {
     return undefined;
   }
-  const left = termData(rule.left as Term<unknown>);
-  const right = termData(rule.right as Term<unknown>);
+  const left = positionData(rule.left as Term<unknown>);
+  const right = positionData(rule.right as Term<unknown>);
+  if (left === undefined || right === undefined) {
+    return undefined;
+  }
   return {
     left: groupFor(left.path, left.measure),
     right: groupFor(right.path, right.measure),
     operator,
   };
+}
+
+// Only a difference counted in whole steps or in plain numbers is settled here;
+// two decimals or two instants differ in units their readers convert to, which
+// the steps of a way do not carry.
+function differenceCarrierOf(sides: readonly Group[], scope: AnySchema): Carrier | undefined {
+  const kinds = sides.map(side =>
+    side.measure === "length" ? "integer" : schemaAtPath(scope, side.path)?.kind,
+  );
+  if (kinds.every(kind => kind === "integer")) {
+    return integerCarrier;
+  }
+  return kinds.every(kind => kind === "integer" || kind === "number") ? numberCarrier : undefined;
 }
 
 function sharesValue(left: readonly string[], right: readonly string[]): boolean {
@@ -483,7 +730,7 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
     const discriminant = path[path.length - 1]!;
     const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
       .flatMap(conjuncts)
-      .filter(rule => boundTermPath(rule)?.join("\u0000") === discriminant);
+      .filter(rule => isDeepStrictEqual(boundTermPath(rule), [discriminant]));
     return discriminated.variantTags.filter(tag =>
       refusing.every(rule => holds(rule, { [discriminant]: tag })),
     );
@@ -509,10 +756,13 @@ function finitePathsOf(
   switch (rule.kind) {
     case "compare": {
       if (isTerm(rule.left) && isTerm(rule.right)) {
-        const sides = [rule.left, rule.right].map(side => termData(side as Term<unknown>));
-        const paths = sides.map(side => [...prefix, ...side.path]);
+        const sides = [rule.left, rule.right].map(side => positionData(side as Term<unknown>));
+        if (sides.some(side => side === undefined)) {
+          return undefined;
+        }
+        const paths = sides.map(side => [...prefix, ...side!.path]);
         return (rule.operator === "==" || rule.operator === "!=") &&
-          sides.every(side => side.measure === "value") &&
+          sides.every(side => side!.measure === "value") &&
           paths.every(path => finiteDomainAt(scope, path) !== undefined)
           ? paths
           : undefined;
@@ -525,7 +775,7 @@ function finitePathsOf(
         return undefined;
       }
       const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
-      const path = [...prefix, ...termData(term).path];
+      const path = [...prefix, ...positionOf(term).path];
       return finiteDomainAt(scope, path) === undefined ? undefined : [path];
     }
     case "not":
@@ -693,6 +943,99 @@ export function keepingInvariants(
   return kept;
 }
 
+// The value `after` becomes when each invariant ordering two or more integer or
+// number positions that it breaks is kept by moving one of its positions weighed
+// by one, and one `after` did not move away from `before`, to the nearest value
+// that keeps it; undefined when an invariant is left broken.
+export function keepingOrderings(scope: AnySchema, before: unknown, after: unknown): unknown {
+  const orderings = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
+    if (rule.kind !== "compare" || ![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")) {
+      return [];
+    }
+    const form = differenceOf(rule as CompareRule);
+    const parts = form.parts.map(part => ({ ...part, path: [...prefix, ...part.path] }));
+    const numeric = parts.every(
+      part => part.measure === "value" && ["integer", "number"].includes(schemaAtPath(scope, part.path)?.kind ?? ""),
+    );
+    return parts.length >= 2 && numeric && typeof form.constant === "number"
+      ? [{ rule: rule as CompareRule, parts, constant: form.constant }]
+      : [];
+  });
+  let kept = after;
+  // A part moved once stays: moving it again to keep a later ordering would
+  // break the one it was moved for, so a chain is kept by moving its next part.
+  const moved = new Set<string>();
+  for (let round = 0; round <= orderings.length; round++) {
+    const broken = orderings.find(({ rule, parts, constant }) => {
+      const values = parts.map(part => readAt(kept, part.path));
+      return (
+        values.every(value => typeof value === "number") &&
+        !holds({ ...rule, left: parts.reduce((total, part, index) => total + part.coefficient * (values[index] as number), constant), right: 0 } as Rule, undefined)
+      );
+    });
+    if (broken === undefined) {
+      return kept;
+    }
+    const moving = broken.parts.find(
+      part =>
+        Math.abs(part.coefficient) === 1 &&
+        !moved.has(JSON.stringify(part.path)) &&
+        isDeepStrictEqual(readAt(before, part.path), readAt(after, part.path)),
+    );
+    if (moving === undefined) {
+      return undefined;
+    }
+    const rest = broken.parts.reduce(
+      (total, part) => (part === moving ? total : total + part.coefficient * (readAt(kept, part.path) as number)),
+      broken.constant,
+    );
+    // coefficient * x + rest <operator> 0, read as a bound on x itself.
+    const operator = moving.coefficient === 1 ? broken.rule.operator : mirrored[broken.rule.operator];
+    const bound = -rest * moving.coefficient;
+    const current = readAt(kept, moving.path) as number;
+    const nearest =
+      operator === "!=" ? current + 1 : nearestKeeping(scope, moving.path, operator, bound);
+    if (nearest === undefined) {
+      return undefined;
+    }
+    kept = writeAt(kept, moving.path, nearest);
+    moved.add(JSON.stringify(moving.path));
+  }
+  return undefined;
+}
+
+// The value nearest `bound` on the side `operator` keeps that the position's
+// own bounds admit: an integer steps by one, and a number, which has no step,
+// takes the middle of what is left when less than one is.
+function nearestKeeping(
+  scope: AnySchema,
+  path: readonly string[],
+  operator: Operator,
+  bound: number,
+): number | undefined {
+  const settled = settle({ path, measure: "value", constraints: [{ operator, bound }] }, scope);
+  if (typeof settled !== "object") {
+    return settled === false ? undefined : bound;
+  }
+  const lower = settled.lower?.value as number | undefined;
+  const upper = settled.upper?.value as number | undefined;
+  if (operator === ">" || operator === ">=") {
+    const from = lower ?? bound;
+    if (settled.carrier === integerCarrier || settled.lower?.inclusive !== false) {
+      return settled.lower?.inclusive === false ? from + 1 : from;
+    }
+    return upper !== undefined && upper - from <= 1 ? (from + upper) / 2 : from + 1;
+  }
+  if (operator === "<" || operator === "<=") {
+    const from = upper ?? bound;
+    if (settled.carrier === integerCarrier || settled.upper?.inclusive !== false) {
+      return settled.upper?.inclusive === false ? from - 1 : from;
+    }
+    return lower !== undefined && from - lower <= 1 ? (from + lower) / 2 : from - 1;
+  }
+  return bound;
+}
+
 // Whether no combination the invariants relating finite positions keep gives
 // the position at `path` this value.
 export function refusedJointly(
@@ -825,7 +1168,7 @@ function inWayOrder(left: Way, right: Way): number {
 }
 
 function describeStep(step: Step): string {
-  return step.distinction.kind === "match" ? `match ${termData(step.distinction.on).path.join(".")}` : describeRule(step.distinction);
+  return step.distinction.kind === "match" ? `match ${positionOf(step.distinction.on).path.join(".")}` : describeRule(step.distinction);
 }
 
 function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): readonly (readonly string[])[] | undefined {
@@ -834,7 +1177,10 @@ function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): read
     switch (rule.kind) {
       case "compare":
         return [rule.left, rule.right].filter(isTerm).every(side => {
-          const data = termData(side as Term<unknown>);
+          const data = positionData(side as Term<unknown>);
+          if (data === undefined) {
+            return false;
+          }
           paths.push(data.path);
           return data.measure === "value";
         });
@@ -852,7 +1198,7 @@ function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): read
   }
   const { otherwise } = decision;
   if (typeof otherwise !== "function") {
-    paths.push(termData(otherwise.on).path);
+    paths.push(positionOf(otherwise.on).path);
   }
   return paths.some(path => path[0] === DEPS) ? undefined : paths;
 }

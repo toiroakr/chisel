@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { Execution, Guard } from "./behavior.js";
@@ -14,10 +15,26 @@ export type Comparable = number | string | Moment | Decimal;
 // separate module graph, and a per-module symbol would not recognise their terms.
 const TERM = Symbol.for("chisel.term");
 
-export interface TermData {
+export interface PositionTermData {
+  readonly kind: "position";
   readonly path: readonly string[];
   readonly measure: "value" | "length";
 }
+
+export interface LinearPart {
+  readonly path: readonly string[];
+  readonly measure: "value" | "length";
+  readonly coefficient: number;
+}
+
+// A sum of positions weighed by whole numbers, plus a constant.
+export interface LinearTermData {
+  readonly kind: "linear";
+  readonly parts: readonly LinearPart[];
+  readonly constant: number | Decimal;
+}
+
+export type TermData = PositionTermData | LinearTermData;
 
 export type Term<T> = {
   readonly [TERM]: TermData;
@@ -44,6 +61,11 @@ interface Ordered<T> {
   $ne(other: Operand<T>): Rule & Condition;
 }
 
+interface Arithmetic<T> {
+  $plus(other: Operand<T>): TermOf<T>;
+  $minus(other: Operand<T>): TermOf<T>;
+}
+
 interface Equatable<T> {
   $eq(other: Operand<T>): Rule & Condition;
   $ne(other: Operand<T>): Rule & Condition;
@@ -60,7 +82,18 @@ interface Quantified<E> {
 
 // Operators carry the `$` prefix rather than fields, so a field reads as it does
 // on the value `run` receives, and a field named `length` or `all` stays ordinary.
-type TermOperator = "$lt" | "$lte" | "$gt" | "$gte" | "$eq" | "$ne" | "$length" | "$all" | "$any";
+type TermOperator =
+  | "$lt"
+  | "$lte"
+  | "$gt"
+  | "$gte"
+  | "$eq"
+  | "$ne"
+  | "$length"
+  | "$all"
+  | "$any"
+  | "$plus"
+  | "$minus";
 
 type Fields<T> = {
   readonly [K in Exclude<keyof T & string, TermOperator>]-?: TermOf<Exclude<T[K], undefined>>;
@@ -71,7 +104,9 @@ export type TermOf<T> = Term<T> &
     ? { readonly [key: string]: any }
     : [T] extends [boolean]
     ? Equatable<T>
-    : [T] extends [number | Moment | Decimal]
+    : [T] extends [number | Decimal]
+      ? Ordered<T> & Arithmetic<T>
+      : [T] extends [Moment]
       ? Ordered<T>
       : [T] extends [string]
         ? Ordered<T> & Measured
@@ -203,10 +238,10 @@ export function rootTerm<T>(key: string): TermOf<T> {
 export function termPaths(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
     case "compare":
-      return [rule.left, rule.right].filter(isTerm).map(term => termData(term).path);
+      return [rule.left, rule.right].filter(isTerm).flatMap(term => pathsOf(termData(term)));
     case "all":
     case "any":
-      return [termData(rule.of).path];
+      return [positionOf(rule.of).path];
     case "and":
     case "or":
       return rule.rules.flatMap(termPaths);
@@ -252,19 +287,13 @@ export function boundTermPath(rule: Rule): readonly string[] | undefined {
     return undefined;
   }
   if (isTerm(rule.left) !== isTerm(rule.right)) {
-    return termData((isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>).path;
+    return positionData((isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>)?.path;
   }
   return undefined;
 }
 
 export function shiftTerms(rule: CompareRule): CompareRule {
-  const shift = (operand: unknown): unknown => {
-    if (!isTerm(operand)) {
-      return operand;
-    }
-    const data = termData(operand);
-    return termAt(data.path.slice(1), data.measure);
-  };
+  const shift = (operand: unknown): unknown => (isTerm(operand) ? shiftedTerm(termData(operand)) : operand);
   return { ...rule, left: shift(rule.left), right: shift(rule.right) };
 }
 
@@ -273,13 +302,7 @@ export function stepInto(rule: Rule, key: string): Rule | undefined {
   if (rule.kind !== "compare" || path === undefined || path[0] !== key) {
     return undefined;
   }
-  const shift = (operand: unknown): unknown => {
-    if (!isTerm(operand)) {
-      return operand;
-    }
-    const data = termData(operand);
-    return termAt(data.path.slice(1), data.measure);
-  };
+  const shift = (operand: unknown): unknown => (isTerm(operand) ? shiftedTerm(termData(operand)) : operand);
   return { ...rule, left: shift(rule.left), right: shift(rule.right) };
 }
 
@@ -372,9 +395,12 @@ export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
 }
 
 function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | undefined): unknown {
-  const [term, other, operator] = isTerm(rule.left)
-    ? [rule.left, rule.right, rule.operator]
-    : [rule.right, rule.left, mirrored[rule.operator]];
+  const [term, other, operator] =
+    isTerm(rule.left) && positionData(rule.left) !== undefined
+      ? [rule.left, rule.right, rule.operator]
+      : isTerm(rule.right) && positionData(rule.right) !== undefined
+        ? [rule.right, rule.left, mirrored[rule.operator]]
+        : [rule.left, rule.right, rule.operator];
   if (!isTerm(term)) {
     return value;
   }
@@ -382,7 +408,11 @@ function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | u
   if (bound === undefined) {
     return value;
   }
-  const { path, measure } = termData(term);
+  const position = positionData(term);
+  if (position === undefined) {
+    return value;
+  }
+  const { path, measure } = position;
   const named = measure === "value" ? stepAt?.(path) : undefined;
   if (named !== undefined && typeof named !== "function") {
     // A value of a finite domain is chosen, not stepped to: the first one the rule
@@ -545,8 +575,8 @@ const OPERATORS: Readonly<Record<string, Operator>> = {
   ne: "!=",
 };
 
-function termAt(path: readonly string[], measure: TermData["measure"]): Term<unknown> {
-  const data: TermData = { path, measure };
+function termAt(path: readonly string[], measure: PositionTermData["measure"]): Term<unknown> {
+  const data: PositionTermData = { kind: "position", path, measure };
   const self: Term<unknown> = new Proxy({} as Term<unknown>, {
     get: (_target, key) => {
       if (key === TERM) {
@@ -564,6 +594,10 @@ function termAt(path: readonly string[], measure: TermData["measure"]): Term<unk
         return (other: unknown) => compare(operator, self, other);
       }
       switch (name) {
+        case "plus":
+          return (other: unknown) => linearTerm(combined(data, other, 1));
+        case "minus":
+          return (other: unknown) => linearTerm(combined(data, other, -1));
         case "length":
           return () => termAt(path, "length");
         case "all":
@@ -578,6 +612,147 @@ function termAt(path: readonly string[], measure: TermData["measure"]): Term<unk
   return self;
 }
 
+export function positionTerm(path: readonly string[], measure: PositionTermData["measure"]): Term<unknown> {
+  return termAt(path, measure);
+}
+
+// The expression a comparison draws its line on: its left side less its right.
+export function differenceOf(rule: CompareRule): LinearTermData {
+  const left = linearOf(rule.left);
+  const right = linearOf(rule.right);
+  return combined(left, linearTerm(right), -1);
+}
+
+export function positionData(term: Term<unknown>): PositionTermData | undefined {
+  const data = termData(term);
+  return data.kind === "position" ? data : undefined;
+}
+
+// Where only one position can stand, such as what a match selects or what $all
+// ranges over, an expression is refused rather than read as some position.
+export function positionOf(term: Term<unknown>): PositionTermData {
+  const data = positionData(term);
+  if (data === undefined) {
+    throw new Error(`${describeTerm(term)} is an expression of positions, not one position`);
+  }
+  return data;
+}
+
+function pathsOf(data: TermData): readonly (readonly string[])[] {
+  return data.kind === "position" ? [data.path] : data.parts.map(part => part.path);
+}
+
+function shiftedTerm(data: TermData): Term<unknown> {
+  return data.kind === "position"
+    ? termAt(data.path.slice(1), data.measure)
+    : linearTerm({ ...data, parts: data.parts.map(part => ({ ...part, path: part.path.slice(1) })) });
+}
+
+function linearOf(operand: unknown): LinearTermData {
+  if (!isTerm(operand)) {
+    return { kind: "linear", parts: [], constant: operand as number | Decimal };
+  }
+  const data = termData(operand);
+  return data.kind === "linear"
+    ? data
+    : { kind: "linear", parts: [{ path: data.path, measure: data.measure, coefficient: 1 }], constant: 0 };
+}
+
+function combined(data: TermData, other: unknown, sign: 1 | -1): LinearTermData {
+  const base: LinearTermData =
+    data.kind === "linear"
+      ? data
+      : { kind: "linear", parts: [{ path: data.path, measure: data.measure, coefficient: 1 }], constant: 0 };
+  const right = linearOf(other);
+  const parts = [...base.parts];
+  for (const part of right.parts) {
+    const index = parts.findIndex(
+      existing => existing.measure === part.measure && isDeepStrictEqual(existing.path, part.path),
+    );
+    const coefficient = sign * part.coefficient;
+    if (index === -1) {
+      parts.push({ ...part, coefficient });
+    } else {
+      parts[index] = { ...parts[index]!, coefficient: parts[index]!.coefficient + coefficient };
+    }
+  }
+  return {
+    kind: "linear",
+    parts: parts.filter(part => part.coefficient !== 0),
+    constant: sum(base.constant, scaled(right.constant, sign)) as number | Decimal,
+  };
+}
+
+function linearTerm(data: LinearTermData): Term<unknown> {
+  const self: Term<unknown> = new Proxy({} as Term<unknown>, {
+    get: (_target, key) => {
+      if (key === TERM) {
+        return data;
+      }
+      if (typeof key !== "string" || !key.startsWith("$")) {
+        return undefined;
+      }
+      const name = key.slice(1);
+      const operator = Object.hasOwn(OPERATORS, name) ? OPERATORS[name] : undefined;
+      if (operator !== undefined) {
+        return (other: unknown) => compare(operator, self, other);
+      }
+      if (name === "plus") {
+        return (other: unknown) => linearTerm(combined(data, other, 1));
+      }
+      if (name === "minus") {
+        return (other: unknown) => linearTerm(combined(data, other, -1));
+      }
+      return undefined;
+    },
+    has: (_target, key) => key === TERM,
+  });
+  return self;
+}
+
+function readLinear(data: LinearTermData, value: unknown): unknown {
+  let total: unknown = data.constant;
+  for (const part of data.parts) {
+    const found = read(termAt(part.path, part.measure), value);
+    if (found === undefined) {
+      return undefined;
+    }
+    total = sum(total, scaled(found, part.coefficient));
+  }
+  return total;
+}
+
+function scaled(value: unknown, coefficient: number): unknown {
+  return isDecimal(value) ? value.times(coefficient) : (value as number) * coefficient;
+}
+
+function sum(left: unknown, right: unknown): unknown {
+  if (isDecimal(left)) {
+    return left.plus(right as Decimal | number);
+  }
+  if (isDecimal(right)) {
+    return right.plus(left as number);
+  }
+  return (left as number) + (right as number);
+}
+
+function describeLinear(data: LinearTermData, describePart: (part: LinearPart) => string): string {
+  const pieces = data.parts.map((part, index) => {
+    const size = Math.abs(part.coefficient);
+    const sign = part.coefficient < 0 ? "-" : "+";
+    const body = size === 1 ? describePart(part) : `${size} * ${describePart(part)}`;
+    return index === 0 ? (sign === "-" ? `-${body}` : body) : `${sign} ${body}`;
+  });
+  const constant = data.constant;
+  const zero = isDecimal(constant) ? constant.isZero() : constant === 0;
+  if (!zero) {
+    const negative = isDecimal(constant) ? constant.isNegative() : (constant as number) < 0;
+    const size = isDecimal(constant) ? constant.abs().toString() : String(Math.abs(constant as number));
+    pieces.push(pieces.length === 0 ? String(constant) : `${negative ? "-" : "+"} ${size}`);
+  }
+  return pieces.length === 0 ? "0" : pieces.join(" ");
+}
+
 export function readOperand(operand: unknown, value: unknown): unknown {
   return read(operand, value);
 }
@@ -586,7 +761,11 @@ function read(operand: unknown, value: unknown): unknown {
   if (!isTerm(operand)) {
     return operand;
   }
-  const { path, measure } = termData(operand);
+  const data = termData(operand);
+  if (data.kind === "linear") {
+    return readLinear(data, value);
+  }
+  const { path, measure } = data;
   const found = path.reduce<unknown>(
     (current, key) =>
       typeof current === "object" && current !== null
@@ -634,7 +813,11 @@ function describeOperand(operand: unknown, path: string, elements: ElementLabels
   if (!isTerm(operand)) {
     return typeof operand === "string" ? JSON.stringify(operand) : String(operand);
   }
-  const { path: keys, measure } = termData(operand);
+  const data = termData(operand);
+  if (data.kind === "linear") {
+    return describeLinear(data, part => describeOperand(termAt(part.path, part.measure), path, elements));
+  }
+  const { path: keys, measure } = data;
   const [first = "", ...rest] = keys;
   const location = (
     first === DEPS

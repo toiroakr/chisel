@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { isCaseOnly } from "./behavior.js";
 import type { Rule } from "./rule.js";
 import { holds } from "./rule.js";
 import type { Schema } from "./schema.js";
@@ -257,7 +258,9 @@ export function fakeWarningsOf(requires: Requirements, tables: readonly FakeTabl
           row =>
             row.expect.kind !== "todo" &&
             isDeepStrictEqual(row.given, asked) &&
-            !isDeepStrictEqual(row.expect.result, answer),
+            !(isCaseOnly(row.expect.result)
+              ? isVariantsSchema(behavior.result) && tagOf(behavior.result, answer) === row.expect.result.case
+              : isDeepStrictEqual(row.expect.result, answer)),
         )
         .map(
           row =>

@@ -1,6 +1,6 @@
 import type { AnyBehavior, EnsuresClause } from "./behavior.js";
 import type { Rule, Term } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, termData } from "./rule.js";
+import { conjuncts, describeRule, differenceOf, holds, isDecimal, isTerm, termData } from "./rule.js";
 import type { AnySchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 
@@ -58,10 +58,11 @@ function classify(
   if (terms.length === 0) {
     return holds(rule, {}) ? "always holds" : "never holds";
   }
-  if (terms.length === 2 && sameTerm(terms[0]!, terms[1]!)) {
-    return rule.operator === "==" || rule.operator === "<=" || rule.operator === ">="
-      ? "always holds"
-      : "never holds";
+  if ([rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number" || isDecimal(operand))) {
+    const form = differenceOf(rule);
+    if (form.parts.length === 0) {
+      return holds({ ...rule, left: form.constant, right: 0 }, {}) ? "always holds" : "never holds";
+    }
   }
   const kinds = terms.map(term => kindOf(term, clause, definition));
   if (kinds.every(kind => kind !== undefined && numeric.has(kind))) {
@@ -76,14 +77,21 @@ function classify(
   return "runtime only";
 }
 
-function sameTerm(left: Term<unknown>, right: Term<unknown>): boolean {
-  const a = termData(left);
-  const b = termData(right);
-  return a.measure === b.measure && a.path.join("\u0000") === b.path.join("\u0000");
+function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehavior): string | undefined {
+  const data = termData(term);
+  if (data.kind === "linear") {
+    const kinds = data.parts.map(part => kindAt(part.path, part.measure, clause, definition));
+    return kinds.every(kind => kind !== undefined && numeric.has(kind)) ? "number" : undefined;
+  }
+  return kindAt(data.path, data.measure, clause, definition);
 }
 
-function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehavior): string | undefined {
-  const { path, measure } = termData(term);
+function kindAt(
+  path: readonly string[],
+  measure: "value" | "length",
+  clause: EnsuresClause,
+  definition: AnyBehavior,
+): string | undefined {
   if (measure === "length") {
     return "integer";
   }

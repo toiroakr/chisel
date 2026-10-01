@@ -5,6 +5,7 @@ import type {
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
+  CaseOnly,
   Execution,
   Implementation,
   Todo,
@@ -17,6 +18,9 @@ import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
+  invariantContradictionsOf,
+  mayBeLeftOut,
+  invariantPairBordersOf,
   guardBordersOf,
   guardPartitionsOf,
   feasibilityScope,
@@ -26,24 +30,28 @@ import {
   TodoDecision,
   brokenEnsures,
   comparisonsReached,
+  isCaseOnly,
   isTodo,
   perform,
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
+import { DEPS, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
-import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, finiteReach, keepingInvariants, refusedJointly, tooManyWays, unreached, witnessesOf } from "./feasibility.js";
+import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, finiteReach, keepingInvariants, keepingOrderings, refusedJointly, tooManyWays, unreached, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
-import type { Feasibility, Reached, Witness } from "./feasibility.js";
+import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
+import type { Beside } from "./beside.js";
+import type { Parting } from "./beside.js";
+import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
-import type { AnySchema, AnyVariantsSchema } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema, Tags } from "./schema.js";
 
 interface RunOutcome {
   readonly actual: unknown;
@@ -52,16 +60,17 @@ interface RunOutcome {
 }
 
 async function runAndCompare<B extends AnyBehavior>(
+  definition: B,
   name: string,
   given: BehaviorInput<B>,
-  expected: Execution<BehaviorResult<B>, BehaviorEffect<B>>,
+  expected: Expected<B>,
   subject: ConformanceSubject<B>,
 ): Promise<RunOutcome> {
   try {
     const actual = await subject(given);
     return {
       actual,
-      failure: isDeepStrictEqual(actual, expected)
+      failure: answers(definition, expected, actual)
         ? undefined
         : {
             name,
@@ -77,6 +86,18 @@ async function runAndCompare<B extends AnyBehavior>(
   }
 }
 
+function answers(definition: AnyBehavior, expected: Expected<AnyBehavior>, actual: unknown): boolean {
+  if (!isCaseOnly(expected.result)) {
+    return isDeepStrictEqual(actual, expected);
+  }
+  const { result, effects } = actual as Execution<unknown, unknown>;
+  return (
+    isVariantsSchema(definition.result) &&
+    tagOf(definition.result, result) === expected.result.case &&
+    isDeepStrictEqual(effects, expected.effects)
+  );
+}
+
 export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
   ? Partial<ValueDependencies<Requires>>
   : never;
@@ -86,7 +107,7 @@ export interface Example<B extends AnyBehavior> {
   readonly name: string;
   readonly given: BehaviorInput<B>;
   readonly with?: BehaviorWith<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Todo;
+  readonly expect: Expected<B> | Todo;
 }
 
 export interface ExampleSet<B extends AnyBehavior> {
@@ -243,6 +264,8 @@ export interface BorderCoverage {
     readonly status: "met" | "gap" | "excluded" | "not named" | "no point" | "no row owed" | "undecided";
     readonly reason?: string;
   }[];
+  // Present once every point a guard border over two or more positions owes is met.
+  readonly beside?: Beside;
 }
 
 export type PartitionCoverage =
@@ -278,8 +301,14 @@ export type ConformanceSubject<B extends AnyBehavior> = (
 export interface ExampleRow<B extends AnyBehavior> {
   readonly given: BehaviorInput<B>;
   readonly with?: BehaviorWith<B>;
-  readonly expect: Execution<BehaviorResult<B>, BehaviorEffect<B>> | Todo;
+  readonly expect: Expected<B> | Todo;
 }
+
+// The answer a row states: the whole result, or only its case.
+export type Expected<B extends AnyBehavior> = Execution<
+  BehaviorResult<B> | CaseOnly<Tags<B["result"]>>,
+  BehaviorEffect<B>
+>;
 
 export function example<B extends AnyBehavior>(
   _definition: B,
@@ -376,7 +405,12 @@ export async function check(
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
   const armsOwed: ArmTaken[] = [];
-  const reached: { readonly tag: string | undefined; readonly comparison: ComparisonReached }[] = [];
+  const reached: {
+    readonly tag: string | undefined;
+    readonly comparison: ComparisonReached;
+    readonly given: unknown;
+    readonly deps: unknown;
+  }[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
   const fakeIssues = fakeIssuesOf(definition.requires, definition.name, specification.fakes);
@@ -506,13 +540,19 @@ export async function check(
       }
     });
 
-    const resultValidation = definition.result.parse(row.expect.result);
-    if (!resultValidation.success) {
+    const caseOnly = isCaseOnly(row.expect.result) ? row.expect.result.case : undefined;
+    const resultValid =
+      caseOnly === undefined
+        ? definition.result.parse(row.expect.result).success
+        : isVariantsSchema(definition.result) && definition.result.variantTags.includes(caseOnly);
+    if (!resultValid) {
       failures.push({ name: row.name, message: "Expected result is invalid" });
       continue;
     }
 
-    const broken = brokenEnsures(definition, row.given, row.expect.result);
+    // Not held where only the case is written: every clause reads the answer,
+    // and nothing wrote the value it would be read against.
+    const broken = caseOnly === undefined ? brokenEnsures(definition, row.given, row.expect.result) : undefined;
     if (broken !== undefined) {
       failures.push({
         name: row.name,
@@ -520,9 +560,8 @@ export async function check(
       });
     }
 
-    const resultTag = isVariantsSchema(definition.result)
-      ? tagOf(definition.result, row.expect.result)
-      : undefined;
+    const resultTag =
+      caseOnly ?? (isVariantsSchema(definition.result) ? tagOf(definition.result, row.expect.result) : undefined);
     if (resultTag !== undefined) {
       coveredResults.add(resultTag);
     }
@@ -544,6 +583,7 @@ export async function check(
       incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
     } else if (implementation !== undefined) {
       const { actual, failure, error } = await runAndCompare(
+        definition,
         row.name,
         row.given,
         row.expect,
@@ -551,7 +591,12 @@ export async function check(
           const traced = await runTraced(implementation, input, standIns(row) as never);
           armsMet.push(...traced.arms);
           reached.push(
-            ...traced.comparisons.map(comparison => ({ tag: tagOf(definition.input, input), comparison })),
+            ...traced.comparisons.map(comparison => ({
+              tag: tagOf(definition.input, input),
+              comparison,
+              given: input,
+              deps: standIns(row),
+            })),
           );
           if (traced.way !== undefined) {
             waysMet.push(traced.way);
@@ -623,16 +668,32 @@ export async function check(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
-  const modelIssues = positionsOf(definition.input).flatMap(position => {
-    const emptied = emptiedBy(position.borders);
+  const pairGroups = new Map<string, GuardBorder[]>();
+  for (const drawn of invariantPairBordersOf(definition)) {
+    // One form however it is written: the same paths in different weights, as
+    // x − y beside x + y, bound different coordinates.
+    const weighed = differenceOf(drawn.comparison).parts;
+    const entries = (drawn.reads ?? [])
+      .map((segments, index) => ({
+        at: JSON.stringify([segments, weighed[index]?.measure]),
+        coefficient: weighed[index]?.coefficient ?? 0,
+      }))
+      .sort((left, right) => (left.at < right.at ? -1 : left.at > right.at ? 1 : 0));
+    const sign = (entries[0]?.coefficient ?? 1) < 0 ? -1 : 1;
+    const key = JSON.stringify(entries.map(entry => [entry.at, sign * entry.coefficient]));
+    pairGroups.set(key, [...(pairGroups.get(key) ?? []), drawn]);
+  }
+  const modelIssues = [
+    ...positionsOf(definition.input).map(position => ({ path: position.path, borders: position.borders })),
+    ...[...pairGroups.values()]
+      .filter(group => !(group[0]!.reads ?? []).some(segments => mayBeLeftOut(definition, segments)))
+      .map(group => ({ path: group[0]!.path, borders: group.map(drawn => drawn.border) })),
+  ].flatMap(({ path, borders }) => {
+    const emptied = emptiedBy(borders);
     return emptied === undefined
       ? []
-      : [
-          `${position.path}: 不変条件を満たす値がありません (${emptied
-            .map(border => border.rule)
-            .join(", ")})`,
-        ];
-  });
+      : [`${path}: 不変条件を満たす値がありません (${emptied.map(border => border.rule).join(", ")})`];
+  }).concat(invariantContradictionsOf(definition));
   const partitions = positions.map((position, index): PartitionCoverage => {
     const drawn = guardPartitions.find(partition =>
       isDeepStrictEqual(partition.segments, position.segments),
@@ -693,26 +754,37 @@ export async function check(
   const guardBorders = (
     specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
   ).map((drawn): BorderCoverage => {
-    const coordinates = reached
-      .filter(item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag)
-      .map(item => drawn.coordinateOf(item.comparison));
+    const reachedIt = reached.filter(
+      item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag,
+    );
+    const coordinates = reachedIt.map(item => drawn.coordinateOf(item.comparison));
+    const points = drawn.border.points.map(point => {
+      const base = { role: point.role, relation: point.relation };
+      if (point.status !== "owed") {
+        return { ...base, status: point.status };
+      }
+      if (coordinates.some(value => point.contains(value))) {
+        return { ...base, status: "met" as const };
+      }
+      return { ...base, ...unmetStatus(reachOf(drawn, point, combinations, wayLimit)) };
+    });
+    const owed = drawn.border.points.flatMap((point, index) => (point.status === "owed" ? [points[index]!] : []));
+    const due =
+      drawn.form !== undefined &&
+      owed.some(point => point.status === "met") &&
+      owed.every(point => point.status === "met" || point.status === "no row owed");
+    const beside = due ? besideOf(definition, specification.implementation!, drawn, reachedIt).beside : undefined;
     return {
       path: drawn.path,
       rule: drawn.border.rule,
-      points: drawn.border.points.map(point => {
-        const base = { role: point.role, relation: point.relation };
-        if (point.status !== "owed") {
-          return { ...base, status: point.status };
-        }
-        if (coordinates.some(value => point.contains(value))) {
-          return { ...base, status: "met" as const };
-        }
-        return { ...base, ...unmetStatus(reachOf(drawn, point, combinations, wayLimit)) };
-      }),
+      points,
+      ...(beside === undefined ? {} : { beside }),
     };
   });
   borders.push(...guardBorders);
-  const ensuresBorders = ensuresBordersOf(definition).map((drawn): BorderCoverage => {
+  // Not met by reaching a comparison, as a guard border is: what an ensures
+  // clause or an input invariant states holds of every input of the case.
+  const writtenCoverage = (drawn: GuardBorder): BorderCoverage => {
     const coordinates = answeredGivens
       .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
       .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
@@ -730,8 +802,12 @@ export async function check(
               : "gap",
       })),
     };
-  });
-  borders.push(...ensuresBorders);
+  };
+  borders.push(
+    ...[...ensuresBordersOf(definition), ...invariantPairBordersOf(definition)]
+      .filter(drawn => !disregardsBorder(definition, drawn))
+      .map(writtenCoverage),
+  );
   const adequate =
     fakeIssues.length === 0 &&
     specification.implementation !== undefined &&
@@ -746,7 +822,8 @@ export async function check(
     partitions.every(
       partition => partition.kind !== "divided" || partition.missing.length === 0,
     ) &&
-    borders.every(border => border.points.every(point => point.status !== "gap"));
+    borders.every(border => border.points.every(point => point.status !== "gap")) &&
+    borders.every(border => border.beside?.status !== "not told");
 
   const plans = plansOf(specification.implementation, combinations, wayLimit);
   const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans);
@@ -758,7 +835,9 @@ export async function check(
   const armGap = lines.some(line => line.status === "gap" || line.status === "answer owed");
   const armUndecided =
     lines.some(line => line.status === "undecided") ||
-    borders.some(border => border.points.some(point => point.status === "undecided"));
+    borders.some(
+      border => border.points.some(point => point.status === "undecided") || border.beside?.status === "undecided",
+    );
   const unreadComparisons =
     specification.implementation === undefined
       ? []
@@ -865,9 +944,17 @@ export function generate(
 
   const answeredRows = rows.filter(row => !isTodo(row.expect));
   const origins = answeredRows.map(row => row.given);
+  const standIns = Object.fromEntries(
+    Object.entries(definition.requires)
+      .filter(([, declared]) => declared.takes === "nothing")
+      .map(([name, declared]) => [name, declared.output.placeholder(name)]),
+  );
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
-    const written = answeredRows.find(row => row.given === origin)?.with;
-    return written === undefined ? {} : { with: written };
+    const written = answeredRows.find(row => row.given === origin)?.with as
+      | Readonly<Record<string, unknown>>
+      | undefined;
+    const standing = { ...standIns, ...written };
+    return Object.keys(standing).length === 0 && written === undefined ? {} : { with: standing };
   };
   const originFor = (position: Position): unknown =>
     origins.find(given => position.valuesIn(given).length > 0) ??
@@ -884,10 +971,13 @@ export function generate(
       return;
     }
     const tag = tagOf(definition.input, row.given);
+    const scope = tag === undefined ? undefined : feasibilityScope(definition, tag);
+    const finite =
+      from === undefined || scope === undefined ? undefined : keepingInvariants(scope, from, row.given, combinations);
     const kept =
-      from === undefined || tag === undefined
-        ? undefined
-        : keepingInvariants(feasibilityScope(definition, tag), from, row.given, combinations);
+      finite === undefined || definition.input.parse(finite).success
+        ? finite
+        : keepingOrderings(scope!, from, finite);
     if (kept !== undefined && definition.input.parse(kept).success) {
       generated.push({ ...row, given: kept });
     } else {
@@ -905,7 +995,10 @@ export function generate(
     tag => !existing.has(tag) && !refused.includes(tag),
   )) {
     const given = definition.input.placeholderFor(tag);
-    offer({ name: `${definition.name}: ${tag}`, given, reason: `${tag}の期待結果を人間が決める必要があります` }, given);
+    offer(
+      { name: `${definition.name}: ${tag}`, given, reason: `${tag}の期待結果を人間が決める必要があります`, ...withFrom(given) },
+      given,
+    );
   }
 
   for (const position of measuredPositionsOf(definition, guardDivided, guardRead, combinations)) {
@@ -947,7 +1040,7 @@ export function generate(
             given: position.write(origin, border.measure, point.witness),
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
             ...withFrom(origin),
-          });
+          }, origin);
         }
       }
     }
@@ -972,7 +1065,7 @@ export function generate(
           given: position.write(origin, "value", item.witness),
           reason: `${drawn.path}が${item.name}の期待結果を人間が決める必要があります`,
           ...withFrom(origin),
-        });
+        }, origin);
       }
     }
   }
@@ -995,7 +1088,17 @@ export function generate(
       const origin =
         origins.find(given => reachedBy(given, withFrom(given).with).length > 0) ??
         definition.input.placeholder();
-      const given = drawn.compose(origin, point.witness, withFrom(origin).with);
+      const candidates = sidesOf(drawn)
+        .map(side => drawn.compose(origin, point.witness, withFrom(origin).with, side))
+        .filter(candidate => candidate !== undefined);
+      // A row the input takes stands at the point only once the guards before
+      // the comparison let it through, which moving another part may not.
+      const reaches = (candidate: unknown) =>
+        reachedBy(candidate, withFrom(origin).with).some(item => point.contains(drawn.coordinateOf(item)));
+      const given =
+        candidates.find(candidate => definition.input.parse(candidate).success && reaches(candidate)) ??
+        candidates.find(candidate => !definition.input.parse(candidate).success) ??
+        candidates.find(candidate => definition.input.parse(candidate).success);
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
       } else {
@@ -1004,7 +1107,67 @@ export function generate(
           given,
           reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
           ...withFrom(origin),
-        });
+        }, origin);
+      }
+    }
+    if (drawn.form === undefined) {
+      continue;
+    }
+    const items = rows.flatMap(row =>
+      reachedBy(row.given, row.with).map(comparison => ({ comparison, given: row.given, deps: row.with })),
+    );
+    const owed = drawn.border.points.filter(point => point.status === "owed");
+    const standsAt = (point: BorderPoint) => items.some(item => point.contains(drawn.coordinateOf(item.comparison)));
+    const due =
+      owed.some(standsAt) &&
+      owed.every(
+        point =>
+          standsAt(point) || unmetStatus(reachOf(drawn, point, combinations, wayLimit)).status === "no row owed",
+      );
+    const found = due ? besideOf(definition, implementation!, drawn, items) : undefined;
+    if (found?.beside.status !== "not told") {
+      continue;
+    }
+    const label = `${drawn.path} 隣の線 (${found.beside.another})`;
+    if (found.given === undefined) {
+      notComposed.push(label);
+    } else {
+      offer({
+        name: `${definition.name}: ${label}`,
+        given: found.given,
+        reason: `${drawn.path}を${found.beside.another}と見分ける行の期待結果を人間が決める必要があります`,
+        ...(found.deps === undefined ? withFrom(found.given) : { with: { ...standIns, ...(found.deps as object) } }),
+      });
+    }
+  }
+
+  for (const drawn of invariantPairBordersOf(definition).filter(drawn => !disregardsBorder(definition, drawn))) {
+    const under = (given: unknown) => drawn.segments[0] === `@${tagOf(definition.input, given)}`;
+    for (const point of drawn.border.points) {
+      if (point.status !== "owed" || point.witness === undefined) {
+        continue;
+      }
+      const standsAt = [...rows, ...generated].some(
+        row => under(row.given) && point.contains(drawn.coordinateOf({ rule: drawn.comparison, scope: row.given })),
+      );
+      if (standsAt) {
+        continue;
+      }
+      const origin =
+        origins.find(under) ?? definition.input.placeholderFor(drawn.segments[0]!.slice(1));
+      const candidates = sidesOf(drawn)
+        .map(side => drawn.compose(origin, point.witness, withFrom(origin).with, side))
+        .filter(candidate => candidate !== undefined);
+      const given = candidates.find(candidate => definition.input.parse(candidate).success) ?? candidates[0];
+      if (given === undefined) {
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
+      } else {
+        offer({
+          name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
+          given,
+          reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
+          ...withFrom(origin),
+        }, origin);
       }
     }
   }
@@ -1129,7 +1292,7 @@ export function generate(
         return undefined;
       }
       const matched = last.distinction;
-      const keys = termData(matched.on).path;
+      const keys = positionOf(matched.on).path;
       // A match on an enum selects the position itself; one on a sum field's
       // discriminant selects the field holding it.
       const at = (path: readonly string[]) =>
@@ -1163,7 +1326,7 @@ export async function test<B extends AnyBehavior>(
       skipped.push({ name: row.name, reason: row.expect.reason });
       continue;
     }
-    const { actual, failure } = await runAndCompare(row.name, row.given, row.expect, subject);
+    const { actual, failure } = await runAndCompare(exampleSet.behavior, row.name, row.given, row.expect, subject);
     const broken =
       actual === undefined
         ? undefined
@@ -1473,6 +1636,98 @@ function unmetStatus(
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
 }
 
+function besideOf(
+  definition: AnyBehavior,
+  implementation: Implementation<AnyBehavior>,
+  drawn: GuardBorder,
+  reachedIt: readonly { readonly comparison: ComparisonReached; readonly given: unknown; readonly deps: unknown }[],
+): { readonly beside: Beside; readonly given?: unknown; readonly deps?: unknown } {
+  const parts = [...drawn.form!.parts].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+  const rows = reachedIt.flatMap(item => {
+    const values = parts.map(part => part.valueOf(item.comparison.scope));
+    return values.every(value => value !== undefined)
+      ? [{ values, kept: holds(drawn.comparison, item.comparison.scope), given: item.given, deps: item.deps }]
+      : [];
+  });
+  const kept = rows.filter(row => row.kept).map(row => row.values);
+  if (kept.length === 0) {
+    return { beside: { status: "undecided", reason: allOnOneSide } };
+  }
+  const keptBelow = drawn.comparison.operator === "<" || drawn.comparison.operator === "<=";
+  const line = lineTheRowsAllow(
+    parts.map(part => part.coefficient),
+    keptBelow,
+    kept,
+    rows.filter(row => !row.kept).map(row => row.values),
+  );
+  if (line === undefined) {
+    return { beside: { status: "told" } };
+  }
+  const others = (drawn.origin?.decision.guards ?? []).filter(guard => !mentions(guard.condition, drawn.comparison));
+  const shown = partingsOf(parts.map(part => part.coefficient), line, keptBelow, rows)
+    .flatMap(parting => {
+      const given = parts.reduce<unknown>(
+        (written, part, index) => (written === undefined ? undefined : part.write(written, parting.values[index]!)),
+        rows[parting.from]!.given,
+      );
+      const deps = rows[parting.from]!.deps;
+      const reaches =
+        given !== undefined &&
+        definition.input.parse(given).success &&
+        comparisonsReached(implementation, given, deps).some(item => item.rule === drawn.comparison);
+      if (!reaches) {
+        return [];
+      }
+      const visible = others.every(guard => holds(guard.condition, withDeps(given, deps)));
+      return [{ parting, given, rank: [visible ? 0 : 1, Math.abs(parting.steps)] as const }];
+    })
+    .reduce<{ parting: Parting; given: unknown; rank: readonly [number, number] } | undefined>(
+      (best, candidate) =>
+        best === undefined ||
+        candidate.rank[0] < best.rank[0] ||
+        (candidate.rank[0] === best.rank[0] && candidate.rank[1] < best.rank[1])
+          ? candidate
+          : best,
+      undefined,
+    );
+  const another = spelled(parts.map(part => part.path), line);
+  return shown === undefined
+    ? { beside: { status: "not told", another } }
+    : {
+        beside: {
+          status: "not told",
+          another,
+          input: parts.map((part, index) => `${part.path} = ${shown.parting.values[index]}`).join(", "),
+        },
+        given: shown.given,
+        deps: rows[shown.parting.from]!.deps,
+      };
+}
+
+function sidesOf(drawn: GuardBorder): readonly number[] {
+  return Array.from({ length: drawn.sides ?? 2 }, (_, side) => side);
+}
+
+function mentions(rule: Rule, target: Rule): boolean {
+  if (rule === target) {
+    return true;
+  }
+  switch (rule.kind) {
+    case "and":
+    case "or":
+      return rule.rules.some(part => mentions(part, target));
+    case "not":
+      return mentions(rule.rule, target);
+    case "all":
+    case "any":
+      return mentions(rule.each, target);
+    default:
+      return false;
+  }
+}
+
 function reachOf(
   drawn: GuardBorder,
   point: BorderPoint,
@@ -1480,18 +1735,28 @@ function reachOf(
   wayLimit: number,
 ): readonly Feasibility[] {
   const normalized = normalize(drawn.comparison);
-  if (drawn.origin === undefined || point.region === undefined || normalized === undefined) {
+  const { left, right } = drawn.comparison;
+  if (drawn.origin === undefined || point.region === undefined) {
     return [{ kind: "feasible" }];
   }
   const { decision, scope } = drawn.origin;
-  const term = (
-    isTerm(drawn.comparison.left) ? drawn.comparison.left : drawn.comparison.right
-  ) as Term<unknown>;
-  const placement = {
-    path: termData(term).path,
-    measure: normalized.measure,
-    ...point.region,
-  };
+  let placement: Placement;
+  if (normalized !== undefined) {
+    const term = (isTerm(left) ? left : right) as Term<unknown>;
+    placement = { path: positionOf(term).path, measure: normalized.measure, ...point.region };
+  } else if (
+    isTerm(left) &&
+    isTerm(right) &&
+    positionData(left as Term<unknown>) !== undefined &&
+    positionData(right as Term<unknown>) !== undefined
+  ) {
+    const side = (term: Term<unknown>) => ({ path: positionOf(term).path, measure: positionOf(term).measure });
+    placement = { between: [side(left as Term<unknown>), side(right as Term<unknown>)], ...point.region };
+  } else if ([left, right].some(operand => isTerm(operand))) {
+    placement = { form: differenceOf(drawn.comparison), ...point.region };
+  } else {
+    return [{ kind: "feasible" }];
+  }
   const prefixes: (readonly Way["steps"][number][])[] = [];
   let followed = 0;
   for (const way of eachWayOf(decision)) {
@@ -1527,7 +1792,11 @@ function coverage(
   };
 }
 
-function isDisregarded(definition: AnyBehavior, position: Position): boolean {
+function disregardsBorder(definition: AnyBehavior, drawn: GuardBorder): boolean {
+  return [drawn.segments, ...(drawn.reads ?? [])].some(segments => isDisregarded(definition, { segments }));
+}
+
+function isDisregarded(definition: AnyBehavior, position: Pick<Position, "segments">): boolean {
   return Object.entries(definition.disregards).some(([tag, paths]) =>
     paths.some(keys => isUnder(position, [`@${tag}`, ...keys.map(key => `.${key}`)])),
   );
@@ -1541,7 +1810,7 @@ function trailKey(segments: readonly string[]): string {
   return JSON.stringify(segments);
 }
 
-function isUnder(position: Position, prefix: readonly string[]): boolean {
+function isUnder(position: Pick<Position, "segments">, prefix: readonly string[]): boolean {
   const named = namedSegments(position);
   return prefix.every((segment, index) => named[index] === segment);
 }
@@ -1553,11 +1822,17 @@ function segmentsRead(
   root: readonly string[],
   elements: ReadonlyMap<string, readonly string[] | undefined>,
 ): (readonly string[])[] {
-  const trailOf = (term: unknown): readonly string[] | undefined => {
-    if (!isTerm(term)) {
-      return undefined;
-    }
-    const [head, ...rest] = termData(term).path;
+  const trailsOf = (term: unknown): (readonly string[])[] =>
+    isTerm(term)
+      ? termPaths({ kind: "compare", operator: "==", left: term, right: 0 }).flatMap(path => {
+          const trail = trailAt(path);
+          return trail === undefined ? [] : [trail];
+        })
+      : [];
+  const trailOf = (term: unknown): readonly string[] | undefined =>
+    isTerm(term) ? trailAt(positionOf(term as Term<unknown>).path) : undefined;
+  const trailAt = (path: readonly string[]): readonly string[] | undefined => {
+    const [head, ...rest] = path;
     if (head === undefined || head === DEPS) {
       return undefined;
     }
@@ -1569,10 +1844,7 @@ function segmentsRead(
   };
   switch (rule.kind) {
     case "compare":
-      return [rule.left, rule.right].flatMap(term => {
-        const trail = trailOf(term);
-        return trail === undefined ? [] : [trail];
-      });
+      return [rule.left, rule.right].flatMap(trailsOf);
     case "all":
     case "any": {
       const of = trailOf(rule.of);
@@ -1603,12 +1875,12 @@ function guardReadSegmentsOf(implementation: AnyImplementation | undefined): rea
     const matched =
       typeof decision.otherwise === "function"
         ? []
-        : [[...root, ...termData(decision.otherwise.on).path.map(key => `.${key}`)]];
+        : [[...root, ...positionOf(decision.otherwise.on).path.map(key => `.${key}`)]];
     return [...decision.guards.flatMap(item => segmentsRead(item.condition, root, new Map())), ...matched];
   });
 }
 
-function namedSegments(position: Position): readonly string[] {
+function namedSegments(position: Pick<Position, "segments">): readonly string[] {
   const [inputCase, ...rest] = position.segments;
   return [inputCase!, ...rest.filter(segment => segment !== "?" && !segment.startsWith("@"))];
 }

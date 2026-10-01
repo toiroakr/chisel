@@ -46,6 +46,7 @@ export type {
 
 export type { Comparable, Condition, InvariantRule, Operand, Operator, Rule, Term, TermOf } from "./rule.js";
 
+export type { Beside } from "./beside.js";
 export { formatTypeScriptValue } from "./codegen.js";
 
 export { dependency, fake, FakeMiss } from "./dependency.js";
@@ -72,10 +73,12 @@ export type {
 export {
   action,
   behavior,
+  caseOf,
   external,
   implement,
   isBehavior,
   match,
+  isCaseOnly,
   isTodo,
   todo,
   perform,
@@ -90,6 +93,7 @@ export type {
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,
+  CaseOnly,
   CasesWithDefault,
   ControlPolicy,
   ControlTable,
@@ -131,6 +135,7 @@ export type {
   ExampleFailure,
   ExampleRow,
   ExampleSet,
+  Expected,
   GeneratedExample,
   Incompleteness,
   GenerationOptions,

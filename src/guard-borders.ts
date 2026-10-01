@@ -20,6 +20,7 @@ import {
   conjuncts,
   describeRule,
   holds,
+  isDecimal,
   isTerm,
   readOperand,
   selfTerm,
@@ -27,11 +28,16 @@ import {
   sizeOf,
   stepInto,
   termData,
+  termPaths,
+  positionData,
+  positionOf,
+  positionTerm,
+  differenceOf,
   withDeps,
   decimalOfUnits,
   decimalUnits,
 } from "./rule.js";
-import { enumOf, holdsNoDecimal, int, object, schemaAtPath } from "./schema.js";
+import { enumOf, holdsNoDecimal, int, isVariantsSchema, object, offGridEquality, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -44,6 +50,7 @@ import type {
 export interface GuardBorder {
   readonly path: string;
   readonly segments: readonly string[];
+  readonly reads?: readonly (readonly string[])[];
   readonly comparison: CompareRule;
   readonly border: Border;
   readonly origin?: {
@@ -51,8 +58,22 @@ export interface GuardBorder {
     readonly scope: AnySchema;
     readonly tag: string;
   };
+  readonly form?: BorderForm;
   coordinateOf(reached: ComparisonReached): unknown;
-  compose(given: unknown, coordinate: unknown, deps?: unknown): unknown;
+  // How many ways compose has of writing a point, tried in order as `side`.
+  readonly sides?: number;
+  compose(given: unknown, coordinate: unknown, deps?: unknown, side?: number): unknown;
+}
+
+// The weighed positions of a border over two or more integer or number
+// positions, which the lines beside it are drawn from (src/beside.ts).
+export interface BorderForm {
+  readonly parts: readonly {
+    readonly path: string;
+    readonly coefficient: number;
+    valueOf(scope: unknown): number | undefined;
+    write(given: unknown, value: number): unknown;
+  }[];
 }
 
 export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
@@ -129,12 +150,187 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
   );
 }
 
+// An invariant comparing one position with a constant draws its border on that
+// position (src/border.ts); this one draws those comparing two positions, which
+// no single position carries.
+export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
+  const positions = positionsOf(definition.input, { containers: true });
+  const at = (segments: readonly string[]): Position | undefined =>
+    positions.find(position => isDeepStrictEqual(position.segments, segments));
+  const reading: Reading = {
+    source: "invariant",
+    describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
+  };
+  const invariants = pairInvariantsOf(definition);
+  return definition.input.variantTags.flatMap(tag => {
+      const drawn = invariants.filter(invariant => invariant.tag === tag).flatMap(({ frame, rule }) => {
+        const frames: Frames = { root: frame, elements: {} };
+        if (settledAlone(rule) !== undefined) {
+          return [];
+        }
+        const borders = [rule.left, rule.right].some(
+          operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined,
+        )
+          ? betweenExpression(rule, frames, at, reading)
+          : isTerm(rule.left) && isTerm(rule.right)
+            ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, reading)
+            : [];
+        const keys = frame.segments.slice(1).map(segment => segment.slice(1));
+        return borders.map(border => ({
+          ...border,
+          coordinateOf: (reached: ComparisonReached) =>
+            border.coordinateOf({
+              ...reached,
+              scope: keys.reduce<unknown>((value, key) => (value as Record<string, unknown> | undefined)?.[key], reached.scope),
+            }),
+        }));
+      });
+      return drawn.map(border => withoutPairRefusedPoints(border, drawn));
+    });
+}
+
+// An input invariant whose sides cancel, such as $.x < $.x, holds of no value,
+// unless a field it reads may be left out: a comparison with it absent holds.
+export function invariantContradictionsOf(definition: AnyBehavior): readonly string[] {
+  return pairInvariantsOf(definition).flatMap(({ frame, rule }) =>
+    settledAlone(rule) === false &&
+    !readPathsOf(rule).some(path => mayBeLeftOut(definition, [...frame.segments, ...path.map(key => `.${key}`)]))
+      ? [
+          `${frame.path}: 不変条件を満たす値がありません (invariant ${rule.name === undefined ? "" : `${rule.name}: `}${describeRule(rule, frame.label)})`,
+        ]
+      : [],
+  );
+}
+
+function readPathsOf(rule: CompareRule): readonly (readonly string[])[] {
+  return [rule.left, rule.right].flatMap(operand => {
+    if (!isTerm(operand)) {
+      return [];
+    }
+    const data = termData(operand as Term<unknown>);
+    return data.kind === "position" ? [data.path] : data.parts.map(part => part.path);
+  });
+}
+
+// Whether a position an object invariant reads, named by segments such as
+// ["@case", ".key"], is or lies under a field that may be left out.
+export function mayBeLeftOut(definition: AnyBehavior, segments: readonly string[]): boolean {
+  const [caseSegment, ...keys] = segments;
+  return leavesOut(definition.input.variants[caseSegment!.slice(1)] as AnySchema | undefined, keys);
+}
+
+// A sum field leaves a path out when any of its cases does: the path names a
+// field its cases share, and a value may be of the case that omits it.
+function leavesOut(schema: AnySchema | undefined, keys: readonly string[]): boolean {
+  if (schema === undefined) {
+    return false;
+  }
+  if (schema.kind === "optional") {
+    return true;
+  }
+  if (isVariantsSchema(schema)) {
+    const [key, ...rest] = keys;
+    return key?.startsWith("@") === true
+      ? leavesOut(schema.variants[key.slice(1)] as AnySchema | undefined, rest)
+      : schema.variantTags.some(tag => leavesOut(schema.variants[tag] as AnySchema, keys));
+  }
+  const [key, ...rest] = keys;
+  if (key === undefined || schema.kind !== "object" || !key.startsWith(".")) {
+    return false;
+  }
+  return leavesOut((schema as ObjectSchema<ObjectShape>).shape[key.slice(1)], rest);
+}
+
+function pairInvariantsOf(
+  definition: AnyBehavior,
+): readonly { readonly tag: string; readonly frame: Frame; readonly rule: CompareRule & { readonly name?: string } }[] {
+  const input = definition.input;
+  return input.variantTags.flatMap(tag => {
+    const scope = input.variants[tag] as AnySchema;
+    return objectFramesIn({ scope, path: `@${tag}`, segments: [`@${tag}`], label: "$" }).flatMap(frame =>
+      [...(frame.scope === scope ? input.invariants : []), ...frame.scope.invariants]
+        .flatMap(conjuncts)
+        .flatMap(rule => (rule.kind === "compare" ? [{ tag, frame, rule }] : [])),
+    );
+  });
+}
+
+// Whether a comparison of numbers holds whatever the positions hold, when its
+// positions cancel; undefined while one is left to draw a border on.
+function comparesTwoPositions(drawn: GuardBorder): boolean {
+  return [drawn.comparison.left, drawn.comparison.right].every(
+    operand => isTerm(operand) && positionData(operand as Term<unknown>) !== undefined,
+  );
+}
+
+function settledAlone(rule: CompareRule): boolean | undefined {
+  if (![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number" || isDecimal(operand))) {
+    return undefined;
+  }
+  const form = differenceOf(rule);
+  if (form.parts.length > 0) {
+    return undefined;
+  }
+  // Compared by its sign, so a decimal constant is read as a number is.
+  const sign = typeof form.constant === "number" ? Math.sign(form.constant) : (form.constant as Decimal).comparedTo(0);
+  return holds({ kind: "compare", left: sign, operator: rule.operator, right: 0 } as Rule, undefined);
+}
+
+// Optionals, arrays, records and sum fields are not descended, as the invariants
+// relating finite positions are not (src/feasibility.ts).
+function objectFramesIn(frame: Frame): readonly Frame[] {
+  if (frame.scope.kind !== "object") {
+    return [];
+  }
+  const shape = (frame.scope as ObjectSchema<ObjectShape>).shape;
+  return [
+    frame,
+    ...Object.entries(shape).flatMap(([key, field]) =>
+      objectFramesIn({ scope: field, path: pathOf(frame, [key]), segments: segmentsOf(frame, [key]), label: "$" }),
+    ),
+  ];
+}
+
+// Not left to bordersOf, which excludes a point another bound on the same
+// measure refuses: each comparison of two positions is drawn on a difference of
+// its own, so the bounds on one difference never meet there.
+function withoutPairRefusedPoints(border: GuardBorder, all: readonly GuardBorder[]): GuardBorder {
+  const [first, second] = (border.reads ?? []).map(segments => JSON.stringify(segments));
+  const others = all.flatMap(other => {
+    const [otherFirst, otherSecond] = (other.reads ?? []).map(segments => JSON.stringify(segments));
+    if (other === border || first === undefined || !comparesTwoPositions(border) || !comparesTwoPositions(other)) {
+      return [];
+    }
+    return otherFirst === first && otherSecond === second
+      ? [{ other, sign: 1 }]
+      : otherFirst === second && otherSecond === first
+        ? [{ other, sign: -1 }]
+        : [];
+  });
+  const refuses = (witness: unknown): boolean =>
+    others.some(({ other, sign }) => {
+      const value = sign * (typeof witness === "bigint" ? Number(witness > 0n) - Number(witness < 0n) : (witness as number));
+      return !holds({ ...other.comparison, left: value, right: 0 } as Rule, undefined);
+    });
+  return {
+    ...border,
+    border: {
+      ...border.border,
+      points: border.border.points.map(point =>
+        point.status === "owed" && point.witness !== undefined && refuses(point.witness)
+          ? { ...point, status: "excluded" }
+          : point,
+      ),
+    },
+  };
+}
+
 function unrooted(rule: Rule): Rule | undefined {
   if (rule.kind !== "compare") {
     return undefined;
   }
   const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
-  if (terms.length === 0 || terms.some(term => termData(term).path[0] !== "input")) {
+  if (terms.length === 0 || termPaths(rule).some(path => path[0] !== "input")) {
     return undefined;
   }
   return shiftTerms(rule);
@@ -204,7 +400,10 @@ export function offGridEqualityIn(
       return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
     }
   }
-  return undefined;
+  const scope = guardScope(definition, tag);
+  return decision.guards
+    .map(candidate => offGridEquality(candidate.condition, path => schemaAtPath(scope, path), "$"))
+    .find(found => found !== undefined);
 }
 
 interface Frame {
@@ -227,7 +426,7 @@ function locate(
   term: Term<unknown>,
   frames: Frames,
 ): { readonly frame: Frame; readonly keys: readonly string[] } {
-  const keys = termData(term).path;
+  const keys = positionOf(term).path;
   const element = keys[0] === undefined ? undefined : frames.elements[keys[0]];
   return element === undefined
     ? { frame: frames.root, keys }
@@ -442,7 +641,7 @@ function admittedRange(
 }
 
 interface Reading {
-  readonly source: "guard" | "ensures";
+  readonly source: "guard" | "ensures" | "invariant";
   describe(rule: CompareRule, frames: Frames): string;
 }
 
@@ -462,6 +661,9 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     const inner = enter(rule, frames);
     return inner === undefined ? [] : walk(rule.each, inner, at, reading);
   }
+  if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
+    return betweenExpression(rule, frames, at, reading);
+  }
   if (isTerm(rule.left) && isTerm(rule.right)) {
     return between(rule, rule.left, rule.right, frames, at, reading);
   }
@@ -470,7 +672,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     return [];
   }
   const { frame, keys } = locate(term, frames);
-  const { measure } = termData(term);
+  const { measure } = positionOf(term);
   const schema = schemaAt(frame.scope, keys);
   if (schema === undefined) {
     return [];
@@ -495,8 +697,123 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
   }));
 }
 
+function betweenExpression(
+  rule: CompareRule & { readonly name?: string },
+  frames: Frames,
+  at: PositionAt,
+  reading: Reading,
+): GuardBorder[] {
+  const form = differenceOf(rule);
+  if (rule.operator === "==" || rule.operator === "!=" || typeof form.constant !== "number") {
+    return [];
+  }
+  const parts = form.parts.map(part => {
+    const term = positionTerm(part.path, part.measure);
+    const { frame, keys } = locate(term, frames);
+    const schema = schemaAt(frame.scope, keys);
+    const standsIn = frame === frames.root && keys[0] === DEPS;
+    return {
+      term,
+      coefficient: part.coefficient,
+      measure: part.measure,
+      standsIn,
+      path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
+      segments: segmentsOf(frame, keys),
+      kind: part.measure === "length" ? "integer" : schema?.kind,
+    };
+  });
+  const carrier = parts.every(part => part.kind === "integer")
+    ? integerCarrier
+    : parts.every(part => part.kind === "integer" || part.kind === "number")
+      ? numberCarrier
+      : undefined;
+  if (carrier === undefined || parts.length === 0) {
+    return [];
+  }
+  const constant = form.constant;
+  const difference: Rule = {
+    ...(rule.name === undefined ? {} : { name: rule.name }),
+    kind: "compare",
+    operator: rule.operator,
+    left: selfTerm<number>(),
+    right: 0,
+  };
+  const borders = bordersOf([difference], () => carrier, {
+    source: reading.source,
+    describe: () => reading.describe(rule, frames),
+    admits: () => true,
+  });
+  const valueOf = (part: (typeof parts)[number], scope: unknown): number | undefined => {
+    const value = readOperand(part.term, scope);
+    return value === undefined ? undefined : (value as number);
+  };
+  const written = parts
+    .map((part, index) => {
+      const size = Math.abs(part.coefficient);
+      const body = size === 1 ? part.path : `${size} * ${part.path}`;
+      return index === 0 ? (part.coefficient < 0 ? `−${body}` : body) : `${part.coefficient < 0 ? "−" : "+"} ${body}`;
+    })
+    .join(" ");
+  const path = constant === 0 ? written : `${written} ${constant < 0 ? "−" : "+"} ${Math.abs(constant)}`;
+  // Each part weighed by one can be moved onto any value, and the first the input
+  // takes is written: an earlier one may be held to a bound of its own.
+  const movable = parts.filter(part => !part.standsIn && Math.abs(part.coefficient) === 1);
+  const weighed: BorderForm | undefined =
+    parts.length > 1 && parts.every(part => !part.standsIn)
+      ? {
+          parts: parts.map(part => ({
+            path: part.path,
+            coefficient: part.coefficient,
+            valueOf: scope => valueOf(part, scope),
+            write: (given, value) => at(part.segments)?.write(given, part.measure, value),
+          })),
+        }
+      : undefined;
+  return borders.map(border => ({
+    path,
+    segments: (parts.find(part => !part.standsIn) ?? parts[0]!).segments,
+    reads: parts.filter(part => !part.standsIn).map(part => part.segments),
+    comparison: rule,
+    border,
+    ...(weighed === undefined ? {} : { form: weighed }),
+    coordinateOf: reached => {
+      let total = constant;
+      for (const part of parts) {
+        const value = valueOf(part, reached.scope);
+        if (value === undefined) {
+          return undefined;
+        }
+        total += part.coefficient * value;
+      }
+      return total;
+    },
+    sides: movable.length,
+    compose: (given, coordinate, deps, side) => {
+      const moving = movable[side ?? 0];
+      const moved = moving === undefined ? undefined : at(moving.segments);
+      if (moving === undefined || moved === undefined) {
+        return undefined;
+      }
+      let rest = constant;
+      for (const part of parts) {
+        if (part === moving) {
+          continue;
+        }
+        const value = part.standsIn
+          ? (readOperand(part.term, withDeps({}, deps)) as number | undefined)
+          : (at(part.segments)?.valuesIn(given)[0] as number | undefined);
+        if (value === undefined) {
+          return undefined;
+        }
+        rest += part.coefficient * (part.measure === "length" && !part.standsIn ? sizeOf(value) : value);
+      }
+      return moved.write(given, moving.measure, ((coordinate as number) - rest) / moving.coefficient);
+    },
+  }));
+}
+
 function between(
-  rule: CompareRule,
+  rule: CompareRule & { readonly name?: string },
   left: Term<unknown>,
   right: Term<unknown>,
   frames: Frames,
@@ -505,7 +822,7 @@ function between(
 ): GuardBorder[] {
   const sides = [left, right].map(term => {
     const { frame, keys } = locate(term, frames);
-    const { measure } = termData(term);
+    const { measure } = positionOf(term);
     const schema = schemaAt(frame.scope, keys);
     const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
@@ -529,7 +846,8 @@ function between(
       : first.kind === second.kind
         ? MOMENTS[first.kind ?? ""]
         : undefined;
-  const difference: CompareRule = {
+  const difference: Rule = {
+    ...(rule.name === undefined ? {} : { name: rule.name }),
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),
@@ -547,20 +865,37 @@ function between(
     }
     return moment === undefined ? (value as number) : moment.read(value, side);
   };
+  const form: BorderForm | undefined = sides.every(
+    side => !side.standsIn && (side.kind === "integer" || side.kind === "number"),
+  )
+    ? {
+        parts: sides.map((side, index) => ({
+          path: side.path,
+          coefficient: index === 0 ? 1 : -1,
+          valueOf: scope => read(side, scope) as number | undefined,
+          write: (given, value) => at(side.segments)?.write(given, side.measure, value),
+        })),
+      }
+    : undefined;
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,
     segments: (first.standsIn ? second : first).segments,
+    reads: sides.filter(side => !side.standsIn).map(side => side.segments),
     comparison: rule,
     border,
+    ...(form === undefined ? {} : { form }),
     coordinateOf: reached => {
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
     },
-    compose: (given, coordinate, deps) => {
+    compose: (given, coordinate, deps, side) => {
+      const otherSide = side === 1;
       // Move the side that can take every value of the difference: the finer of
       // a decimal and an integer, and never a stand-in, which a row writes as given.
-      const moveSecond = first.standsIn || (!second.standsIn && second.scale > first.scale);
+      const preferred = first.standsIn || (!second.standsIn && second.scale > first.scale);
+      const swappable = !first.standsIn && !second.standsIn && first.scale === second.scale;
+      const moveSecond = otherSide === true && swappable ? !preferred : preferred;
       const [moving, fixed, sign] = moveSecond ? [second, first, -1] : [first, second, 1];
       const moved = moving.standsIn ? undefined : at(moving.segments);
       const other = fixed.standsIn
@@ -717,11 +1052,20 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
     }
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
+      if (terms.some(term => positionData(term) === undefined)) {
+        const kinds = differenceOf(rule).parts.map(part => {
+          const { frame, keys } = locate(positionTerm(part.path, part.measure), frames);
+          return part.measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+        });
+        return kinds.every(kind => kind === "integer" || kind === "number")
+          ? []
+          : [describeRule(rule, frames.root.label, labelsOf(frames))];
+      }
       const schemas = terms.map(term => {
         const { frame, keys } = locate(term, frames);
         const schema = schemaAt(frame.scope, keys);
         // The length of an enum is not read: see carrierOf.
-        return termData(term).measure === "length" ? (schema?.kind === "enum" ? undefined : int()) : schema;
+        return positionOf(term).measure === "length" ? (schema?.kind === "enum" ? undefined : int()) : schema;
       });
       const sides = schemas.map(
         (schema): Side => ({

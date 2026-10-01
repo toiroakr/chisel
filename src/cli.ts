@@ -8,6 +8,7 @@ import { tsImport } from "tsx/esm/api";
 import { z } from "zod";
 import { isBehavior } from "./behavior.js";
 import type { AnyBehavior } from "./behavior.js";
+import type { Beside } from "./beside.js";
 import { formatKey, formatTypeScriptValue } from "./codegen.js";
 import {
   spec,
@@ -295,6 +296,17 @@ const pointStatusLabels: Readonly<Record<BorderCoverage["points"][number]["statu
   undecided: "未決 (undecided)",
 };
 
+function besideLabel(beside: Beside): string {
+  switch (beside.status) {
+    case "told":
+      return "見分けた (told)";
+    case "not told":
+      return `! ${beside.another} と見分ける行がない${beside.input === undefined ? "" : `: ${beside.input} に行を書く`}`;
+    case "undecided":
+      return `未決 (undecided): ${beside.reason}`;
+  }
+}
+
 function formatBorders(borders: readonly BorderCoverage[]): string[] {
   if (borders.length === 0) {
     return [];
@@ -307,6 +319,7 @@ function formatBorders(borders: readonly BorderCoverage[]): string[] {
         point =>
           `      ${point.role.padEnd(3)} ${padDisplay(point.relation, 20)} ${pointStatusLabels[point.status]}`,
       ),
+      ...(border.beside === undefined ? [] : [`      ${padDisplay("隣の線", 24)} ${besideLabel(border.beside)}`]),
     ]),
   ];
 }

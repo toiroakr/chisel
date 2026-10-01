@@ -162,6 +162,14 @@ describe("verdict over a rules decision", () => {
             given: { 状態: "商品あり", カートID: "c-4", 明細: [{ 数量: 5, 在庫数: 3 }] },
             expect: { result: { 結果: "不可", 理由: "在庫不足" }, effects: [] },
           },
+          "在庫一つをちょうど使い切る": {
+            given: { 状態: "商品あり", カートID: "c-5", 明細: [{ 数量: 1, 在庫数: 1 }] },
+            expect: { result: { 結果: "確定", カートID: "c-5" }, effects: [] },
+          },
+          "在庫十をちょうど使い切る": {
+            given: { 状態: "商品あり", カートID: "c-6", 明細: [{ 数量: 10, 在庫数: 10 }] },
+            expect: { result: { 結果: "確定", カートID: "c-6" }, effects: [] },
+          },
         }),
         implementation: 在庫を確かめて確定する,
       }),

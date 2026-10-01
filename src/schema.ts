@@ -10,7 +10,7 @@ import {
   isTerm,
   satisfy,
   selfTerm,
-  termData,
+  termData, positionData, positionOf,
 } from "./rule.js";
 
 export interface ValidationIssue {
@@ -712,12 +712,11 @@ function temporalPlain(type: PlainType): { from(text: string): unknown; new (...
 // An equality between a decimal and a value with more digits than it keeps
 // settles without a row, so it is written by mistake.
 export function holdsNoDecimal(schema: AnySchema, operator: Operator, bound: unknown): boolean {
-  return (
-    schema.kind === "decimal" &&
-    (operator === "==" || operator === "!=") &&
-    isDecimal(bound) &&
-    bound.decimalPlaces() > (schema as DecimalSchema).scale
-  );
+  return schema.kind === "decimal" && offGrid((schema as DecimalSchema).scale, operator, bound);
+}
+
+function offGrid(scale: number, operator: Operator, bound: unknown): boolean {
+  return (operator === "==" || operator === "!=") && isDecimal(bound) && bound.decimalPlaces() > scale;
 }
 
 // Says where a rule compares a decimal with such a value, reading each term's
@@ -736,7 +735,7 @@ export function offGridEquality(
       return offGridEquality(rule.rule, resolve, label, labels);
     case "all":
     case "any": {
-      const of = termData(rule.of).path;
+      const of = positionOf(rule.of).path;
       const collection = resolve(of);
       const element = collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
       const inner = (path: readonly string[]) =>
@@ -745,16 +744,54 @@ export function offGridEquality(
     }
     case "compare": {
       const [term, bound] = isTerm(rule.left) ? [rule.left, rule.right] : [rule.right, rule.left];
-      if (!isTerm(term) || isTerm(bound) || termData(term).measure !== "value") {
+      if (isTerm(term) && !isTerm(bound) && positionData(term as Term<unknown>) === undefined) {
+        return offGridExpression(rule, term as Term<unknown>, bound, resolve, label, labels);
+      }
+      const position = isTerm(term) && !isTerm(bound) ? positionData(term as Term<unknown>) : undefined;
+      if (position === undefined || position.measure !== "value") {
         return undefined;
       }
-      const { path } = termData(term as Term<unknown>);
+      const { path } = position;
       const schema = resolve(path);
       return schema !== undefined && holdsNoDecimal(schema, rule.operator, bound)
         ? `compares ${nameOf(path, label, labels)} with ${String(bound)}, which no decimal(${(schema as DecimalSchema).scale}) holds: ${describeRule(rule, label, labels)}`
         : undefined;
     }
   }
+}
+
+// An expression of integers and decimals takes only values on the grid of its
+// finest decimal, shifted by its constant.
+function offGridExpression(
+  rule: Rule & { readonly kind: "compare" },
+  term: Term<unknown>,
+  bound: unknown,
+  resolve: (path: readonly string[]) => AnySchema | undefined,
+  label: string,
+  labels: ElementLabels,
+): string | undefined {
+  const data = termData(term);
+  if (data.kind !== "linear" || !isDecimal(bound)) {
+    return undefined;
+  }
+  const scales = data.parts.map(part => {
+    const schema = part.measure === "length" ? undefined : resolve(part.path);
+    return part.measure === "length" || schema?.kind === "integer"
+      ? 0
+      : schema?.kind === "decimal"
+        ? (schema as DecimalSchema).scale
+        : undefined;
+  });
+  const decimals = data.parts.filter(part => part.measure === "value" && resolve(part.path)?.kind === "decimal");
+  if (decimals.length === 0 || scales.some(scale => scale === undefined)) {
+    return undefined;
+  }
+  const scale = Math.max(...(scales as number[]));
+  if (!offGrid(scale, rule.operator, bound.minus(data.constant as Decimal.Value))) {
+    return undefined;
+  }
+  const written = describeRule(rule, label, labels);
+  return `compares ${written.slice(0, written.lastIndexOf(` ${rule.operator} `))} with ${String(bound)}, which no decimal(${scale}) holds: ${written}`;
 }
 
 function nameOf(path: readonly string[], label: string, labels: ElementLabels): string {
