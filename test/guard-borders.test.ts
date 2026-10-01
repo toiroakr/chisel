@@ -936,6 +936,34 @@ describe("a border an input invariant draws between two positions", () => {
     ).toStrictEqual(["@入力済み.範囲.下限 − @入力済み.範囲.上限: ON gap, OFF excluded, IN gap, OUT excluded"]);
   });
 
+  it("draws no border for an invariant comparing a position with itself, which every value keeps", async () => {
+    const 自明 = behavior("自明", {
+      input: variants("状態", { 入力済み: object({ 数量: int() }).refine(v => v.数量.$lte(v.数量)) }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("自明", { examples: examples(自明, {}) }));
+
+    expect({
+      borders: report.borders.filter(border => border.rule.startsWith("invariant")),
+      modelIssues: report.modelIssues,
+    }).toStrictEqual({ borders: [], modelIssues: [] });
+  });
+
+  it("reports an invariant comparing a position with itself that no value keeps as a model error", async () => {
+    const 不能 = behavior("不能", {
+      input: variants("状態", { 入力済み: object({ 数量: int() }).refine(v => v.数量.$lt(v.数量)) }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("不能", { examples: examples(不能, {}) }));
+
+    expect({
+      borders: report.borders.filter(border => border.rule.startsWith("invariant")),
+      modelIssues: report.modelIssues,
+    }).toStrictEqual({ borders: [], modelIssues: ["@入力済み: 不変条件を満たす値がありません (invariant $.数量 < $.数量)"] });
+  });
+
   it("reports invariants on two positions that leave no value as a model error, as it does for one position", async () => {
     const 矛盾する = behavior("矛盾する", {
       input: variants("状態", {

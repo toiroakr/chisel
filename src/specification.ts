@@ -17,6 +17,7 @@ import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
+  invariantContradictionsOf,
   invariantPairBordersOf,
   guardBordersOf,
   guardPartitionsOf,
@@ -637,7 +638,7 @@ export async function check(
     return emptied === undefined
       ? []
       : [`${path}: 不変条件を満たす値がありません (${emptied.map(border => border.rule).join(", ")})`];
-  });
+  }).concat(invariantContradictionsOf(definition));
   const partitions = positions.map((position, index): PartitionCoverage => {
     const drawn = guardPartitions.find(partition =>
       isDeepStrictEqual(partition.segments, position.segments),

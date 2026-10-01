@@ -139,22 +139,18 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
 // position (src/border.ts); this one draws those comparing two positions, which
 // no single position carries.
 export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
-  const input = definition.input;
-  const positions = positionsOf(input, { containers: true });
+  const positions = positionsOf(definition.input, { containers: true });
   const at = (segments: readonly string[]): Position | undefined =>
     positions.find(position => isDeepStrictEqual(position.segments, segments));
-  return input.variantTags.flatMap(tag => {
-    const scope = input.variants[tag] as AnySchema;
-    const drawn = objectFramesIn({ scope, path: `@${tag}`, segments: [`@${tag}`], label: "$" }).flatMap(frame =>
-      [...(frame.scope === scope ? input.invariants : []), ...frame.scope.invariants]
-      .flatMap(conjuncts)
-      .flatMap(rule => {
-        const reading: Reading = {
-          source: "invariant",
-          describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
-        };
+  const reading: Reading = {
+    source: "invariant",
+    describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
+  };
+  const invariants = pairInvariantsOf(definition);
+  return definition.input.variantTags.flatMap(tag => {
+      const drawn = invariants.filter(invariant => invariant.tag === tag).flatMap(({ frame, rule }) => {
         const frames: Frames = { root: frame, elements: {} };
-        if (rule.kind !== "compare") {
+        if (settledAlone(rule) !== undefined) {
           return [];
         }
         if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
@@ -163,10 +159,46 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
         return isTerm(rule.left) && isTerm(rule.right)
           ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, reading)
           : [];
-      }),
+      });
+      return drawn.map(border => withoutPairRefusedPoints(border, drawn));
+    });
+}
+
+// An input invariant whose sides cancel, such as $.x < $.x, holds of no value.
+export function invariantContradictionsOf(definition: AnyBehavior): readonly string[] {
+  return pairInvariantsOf(definition).flatMap(({ frame, rule }) =>
+    settledAlone(rule) === false
+      ? [
+          `${frame.path}: 不変条件を満たす値がありません (invariant ${rule.name === undefined ? "" : `${rule.name}: `}${describeRule(rule, frame.label)})`,
+        ]
+      : [],
+  );
+}
+
+function pairInvariantsOf(
+  definition: AnyBehavior,
+): readonly { readonly tag: string; readonly frame: Frame; readonly rule: CompareRule & { readonly name?: string } }[] {
+  const input = definition.input;
+  return input.variantTags.flatMap(tag => {
+    const scope = input.variants[tag] as AnySchema;
+    return objectFramesIn({ scope, path: `@${tag}`, segments: [`@${tag}`], label: "$" }).flatMap(frame =>
+      [...(frame.scope === scope ? input.invariants : []), ...frame.scope.invariants]
+        .flatMap(conjuncts)
+        .flatMap(rule => (rule.kind === "compare" ? [{ tag, frame, rule }] : [])),
     );
-    return drawn.map(border => withoutPairRefusedPoints(border, drawn));
   });
+}
+
+// Whether a comparison of numbers holds whatever the positions hold, when its
+// positions cancel; undefined while one is left to draw a border on.
+function settledAlone(rule: CompareRule): boolean | undefined {
+  if (![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")) {
+    return undefined;
+  }
+  const form = differenceOf(rule);
+  return form.parts.length === 0 && typeof form.constant === "number"
+    ? holds({ kind: "compare", left: form.constant, operator: rule.operator, right: 0 } as Rule, undefined)
+    : undefined;
 }
 
 // Optionals, arrays, records and sum fields are not descended, as the invariants
