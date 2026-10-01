@@ -949,6 +949,38 @@ describe("a border an input invariant draws between two positions", () => {
   });
 });
 
+describe("a guard comparing an expression of positions", () => {
+  it("answers by the value of the expression and lists the comparison as one Chisel cannot read yet", async () => {
+    const 釣り合わせる = behavior("釣り合わせる", {
+      input: variants("状態", { 入力済み: object({ 甲: int(), 乙: int(), 丙: int() }) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 差まで = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("差まで", {
+          guards: 入力 => [入力.甲.$gte(入力.乙.$minus(入力.丙)).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(
+      spec("差まで", {
+        examples: examples(釣り合わせる, {
+          足りる: { given: { 状態: "入力済み", 甲: 2, 乙: 5, 丙: 3 }, expect: { result: { 結果: "受付" }, effects: [] } },
+          足りない: { given: { 状態: "入力済み", 甲: 1, 乙: 5, 丙: 3 }, expect: { result: { 結果: "却下" }, effects: [] } },
+        }),
+        implementation: 差まで,
+      }),
+    );
+
+    expect({ failures: report.failures, comparisons: report.measures.comparisons }).toStrictEqual({
+      failures: [],
+      comparisons: { status: "partial", notRead: ["差まで: $.甲 >= $.乙 - $.丙"] },
+    });
+  });
+});
+
 describe("an equality between two positions", () => {
   const 照合する = behavior("照合する", {
     input: variants("状態", { 入力済み: object({ 請求額: int(), 入金額: int() }) }),

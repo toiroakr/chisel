@@ -10,7 +10,7 @@ import {
   isTerm,
   satisfy,
   selfTerm,
-  termData,
+  termData, positionData, positionOf,
 } from "./rule.js";
 
 export interface ValidationIssue {
@@ -736,7 +736,7 @@ export function offGridEquality(
       return offGridEquality(rule.rule, resolve, label, labels);
     case "all":
     case "any": {
-      const of = termData(rule.of).path;
+      const of = positionOf(rule.of).path;
       const collection = resolve(of);
       const element = collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
       const inner = (path: readonly string[]) =>
@@ -745,10 +745,11 @@ export function offGridEquality(
     }
     case "compare": {
       const [term, bound] = isTerm(rule.left) ? [rule.left, rule.right] : [rule.right, rule.left];
-      if (!isTerm(term) || isTerm(bound) || termData(term).measure !== "value") {
+      const position = isTerm(term) && !isTerm(bound) ? positionData(term as Term<unknown>) : undefined;
+      if (position === undefined || position.measure !== "value") {
         return undefined;
       }
-      const { path } = termData(term as Term<unknown>);
+      const { path } = position;
       const schema = resolve(path);
       return schema !== undefined && holdsNoDecimal(schema, rule.operator, bound)
         ? `compares ${nameOf(path, label, labels)} with ${String(bound)}, which no decimal(${(schema as DecimalSchema).scale}) holds: ${describeRule(rule, label, labels)}`

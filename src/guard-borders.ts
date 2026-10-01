@@ -27,6 +27,9 @@ import {
   sizeOf,
   stepInto,
   termData,
+  termPaths,
+  positionData,
+  positionOf,
   withDeps,
   decimalOfUnits,
   decimalUnits,
@@ -195,7 +198,7 @@ function unrooted(rule: Rule): Rule | undefined {
     return undefined;
   }
   const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
-  if (terms.length === 0 || terms.some(term => termData(term).path[0] !== "input")) {
+  if (terms.length === 0 || termPaths(rule).some(path => path[0] !== "input")) {
     return undefined;
   }
   return shiftTerms(rule);
@@ -288,7 +291,7 @@ function locate(
   term: Term<unknown>,
   frames: Frames,
 ): { readonly frame: Frame; readonly keys: readonly string[] } {
-  const keys = termData(term).path;
+  const keys = positionOf(term).path;
   const element = keys[0] === undefined ? undefined : frames.elements[keys[0]];
   return element === undefined
     ? { frame: frames.root, keys }
@@ -523,6 +526,9 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     const inner = enter(rule, frames);
     return inner === undefined ? [] : walk(rule.each, inner, at, reading);
   }
+  if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
+    return [];
+  }
   if (isTerm(rule.left) && isTerm(rule.right)) {
     return between(rule, rule.left, rule.right, frames, at, reading);
   }
@@ -531,7 +537,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     return [];
   }
   const { frame, keys } = locate(term, frames);
-  const { measure } = termData(term);
+  const { measure } = positionOf(term);
   const schema = schemaAt(frame.scope, keys);
   if (schema === undefined) {
     return [];
@@ -566,7 +572,7 @@ function between(
 ): GuardBorder[] {
   const sides = [left, right].map(term => {
     const { frame, keys } = locate(term, frames);
-    const { measure } = termData(term);
+    const { measure } = positionOf(term);
     const schema = schemaAt(frame.scope, keys);
     const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
@@ -780,11 +786,14 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
     }
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
+      if (terms.some(term => positionData(term) === undefined)) {
+        return [describeRule(rule, frames.root.label, labelsOf(frames))];
+      }
       const schemas = terms.map(term => {
         const { frame, keys } = locate(term, frames);
         const schema = schemaAt(frame.scope, keys);
         // The length of an enum is not read: see carrierOf.
-        return termData(term).measure === "length" ? (schema?.kind === "enum" ? undefined : int()) : schema;
+        return positionOf(term).measure === "length" ? (schema?.kind === "enum" ? undefined : int()) : schema;
       });
       const sides = schemas.map(
         (schema): Side => ({

@@ -32,7 +32,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, isTerm, termData } from "./rule.js";
+import { DEPS, describeRule, describeTerm, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -1175,7 +1175,7 @@ export function generate(
         return undefined;
       }
       const matched = last.distinction;
-      const keys = termData(matched.on).path;
+      const keys = positionOf(matched.on).path;
       // A match on an enum selects the position itself; one on a sum field's
       // discriminant selects the field holding it.
       const at = (path: readonly string[]) =>
@@ -1534,9 +1534,14 @@ function reachOf(
   let placement: Placement;
   if (normalized !== undefined) {
     const term = (isTerm(left) ? left : right) as Term<unknown>;
-    placement = { path: termData(term).path, measure: normalized.measure, ...point.region };
-  } else if (isTerm(left) && isTerm(right)) {
-    const side = (term: Term<unknown>) => ({ path: termData(term).path, measure: termData(term).measure });
+    placement = { path: positionOf(term).path, measure: normalized.measure, ...point.region };
+  } else if (
+    isTerm(left) &&
+    isTerm(right) &&
+    positionData(left as Term<unknown>) !== undefined &&
+    positionData(right as Term<unknown>) !== undefined
+  ) {
+    const side = (term: Term<unknown>) => ({ path: positionOf(term).path, measure: positionOf(term).measure });
     placement = { between: [side(left as Term<unknown>), side(right as Term<unknown>)], ...point.region };
   } else {
     return [{ kind: "feasible" }];
@@ -1606,11 +1611,17 @@ function segmentsRead(
   root: readonly string[],
   elements: ReadonlyMap<string, readonly string[] | undefined>,
 ): (readonly string[])[] {
-  const trailOf = (term: unknown): readonly string[] | undefined => {
-    if (!isTerm(term)) {
-      return undefined;
-    }
-    const [head, ...rest] = termData(term).path;
+  const trailsOf = (term: unknown): (readonly string[])[] =>
+    isTerm(term)
+      ? termPaths({ kind: "compare", operator: "==", left: term, right: 0 }).flatMap(path => {
+          const trail = trailAt(path);
+          return trail === undefined ? [] : [trail];
+        })
+      : [];
+  const trailOf = (term: unknown): readonly string[] | undefined =>
+    isTerm(term) ? trailAt(positionOf(term as Term<unknown>).path) : undefined;
+  const trailAt = (path: readonly string[]): readonly string[] | undefined => {
+    const [head, ...rest] = path;
     if (head === undefined || head === DEPS) {
       return undefined;
     }
@@ -1622,10 +1633,7 @@ function segmentsRead(
   };
   switch (rule.kind) {
     case "compare":
-      return [rule.left, rule.right].flatMap(term => {
-        const trail = trailOf(term);
-        return trail === undefined ? [] : [trail];
-      });
+      return [rule.left, rule.right].flatMap(trailsOf);
     case "all":
     case "any": {
       const of = trailOf(rule.of);
@@ -1656,7 +1664,7 @@ function guardReadSegmentsOf(implementation: AnyImplementation | undefined): rea
     const matched =
       typeof decision.otherwise === "function"
         ? []
-        : [[...root, ...termData(decision.otherwise.on).path.map(key => `.${key}`)]];
+        : [[...root, ...positionOf(decision.otherwise.on).path.map(key => `.${key}`)]];
     return [...decision.guards.flatMap(item => segmentsRead(item.condition, root, new Map())), ...matched];
   });
 }

@@ -4,7 +4,7 @@ import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, holds, isTerm, readOperand, termData, termPaths } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
@@ -244,7 +244,7 @@ function placedConstraintOf(
 ): { readonly path: readonly string[]; readonly measure: Measure; readonly constraint: Constraint } | undefined {
   const { distinction, outcome } = step;
   if (distinction.kind === "match") {
-    return { path: termData(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
+    return { path: positionOf(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
   }
   if (distinction.kind !== "compare") {
     return undefined;
@@ -255,7 +255,7 @@ function placedConstraintOf(
   }
   const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
   return {
-    path: termData(term).path,
+    path: positionOf(term).path,
     measure: normalized.measure,
     constraint: {
       operator: outcome === true ? normalized.operator : negated[normalized.operator],
@@ -266,7 +266,7 @@ function placedConstraintOf(
 
 function stepKey(step: Step): string {
   return step.distinction.kind === "match"
-    ? `match ${termData(step.distinction.on).path.join(".")}`
+    ? `match ${positionOf(step.distinction.on).path.join(".")}`
     : describeRule(step.distinction);
 }
 
@@ -278,8 +278,11 @@ function relationOf(
   if (!isTerm(rule.left) || !isTerm(rule.right)) {
     return undefined;
   }
-  const left = termData(rule.left as Term<unknown>);
-  const right = termData(rule.right as Term<unknown>);
+  const left = positionData(rule.left as Term<unknown>);
+  const right = positionData(rule.right as Term<unknown>);
+  if (left === undefined || right === undefined) {
+    return undefined;
+  }
   return {
     left: groupFor(left.path, left.measure),
     right: groupFor(right.path, right.measure),
@@ -572,10 +575,13 @@ function finitePathsOf(
   switch (rule.kind) {
     case "compare": {
       if (isTerm(rule.left) && isTerm(rule.right)) {
-        const sides = [rule.left, rule.right].map(side => termData(side as Term<unknown>));
-        const paths = sides.map(side => [...prefix, ...side.path]);
+        const sides = [rule.left, rule.right].map(side => positionData(side as Term<unknown>));
+        if (sides.some(side => side === undefined)) {
+          return undefined;
+        }
+        const paths = sides.map(side => [...prefix, ...side!.path]);
         return (rule.operator === "==" || rule.operator === "!=") &&
-          sides.every(side => side.measure === "value") &&
+          sides.every(side => side!.measure === "value") &&
           paths.every(path => finiteDomainAt(scope, path) !== undefined)
           ? paths
           : undefined;
@@ -588,7 +594,7 @@ function finitePathsOf(
         return undefined;
       }
       const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
-      const path = [...prefix, ...termData(term).path];
+      const path = [...prefix, ...positionOf(term).path];
       return finiteDomainAt(scope, path) === undefined ? undefined : [path];
     }
     case "not":
@@ -888,7 +894,7 @@ function inWayOrder(left: Way, right: Way): number {
 }
 
 function describeStep(step: Step): string {
-  return step.distinction.kind === "match" ? `match ${termData(step.distinction.on).path.join(".")}` : describeRule(step.distinction);
+  return step.distinction.kind === "match" ? `match ${positionOf(step.distinction.on).path.join(".")}` : describeRule(step.distinction);
 }
 
 function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): readonly (readonly string[])[] | undefined {
@@ -897,7 +903,10 @@ function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): read
     switch (rule.kind) {
       case "compare":
         return [rule.left, rule.right].filter(isTerm).every(side => {
-          const data = termData(side as Term<unknown>);
+          const data = positionData(side as Term<unknown>);
+          if (data === undefined) {
+            return false;
+          }
           paths.push(data.path);
           return data.measure === "value";
         });
@@ -915,7 +924,7 @@ function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): read
   }
   const { otherwise } = decision;
   if (typeof otherwise !== "function") {
-    paths.push(termData(otherwise.on).path);
+    paths.push(positionOf(otherwise.on).path);
   }
   return paths.some(path => path[0] === DEPS) ? undefined : paths;
 }

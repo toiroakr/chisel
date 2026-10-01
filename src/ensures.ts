@@ -77,13 +77,24 @@ function classify(
 }
 
 function sameTerm(left: Term<unknown>, right: Term<unknown>): boolean {
-  const a = termData(left);
-  const b = termData(right);
-  return a.measure === b.measure && a.path.join("\u0000") === b.path.join("\u0000");
+  return JSON.stringify(termData(left)) === JSON.stringify(termData(right));
 }
 
 function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehavior): string | undefined {
-  const { path, measure } = termData(term);
+  const data = termData(term);
+  if (data.kind === "linear") {
+    const kinds = data.parts.map(part => kindAt(part.path, part.measure, clause, definition));
+    return kinds.every(kind => kind !== undefined && numeric.has(kind)) ? "number" : undefined;
+  }
+  return kindAt(data.path, data.measure, clause, definition);
+}
+
+function kindAt(
+  path: readonly string[],
+  measure: "value" | "length",
+  clause: EnsuresClause,
+  definition: AnyBehavior,
+): string | undefined {
   if (measure === "length") {
     return "integer";
   }

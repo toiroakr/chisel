@@ -1,6 +1,6 @@
-import type { Operator, Rule } from "./rule.js";
+import type { Operator, Rule, Term } from "./rule.js";
 import type { Decimal } from "decimal.js";
-import { decimalStep, describeRule, isDecimal, isTerm, termData } from "./rule.js";
+import { decimalStep, describeRule, isDecimal, isTerm, termData, positionData } from "./rule.js";
 
 export type PointRole = "ON" | "OFF" | "IN" | "OUT";
 export type PointStatus = "owed" | "excluded" | "not named" | "no point";
@@ -545,15 +545,13 @@ export function normalize(
   if (rule.kind !== "compare") {
     return undefined;
   }
-  if (isTerm(rule.left) && !isTerm(rule.right)) {
-    return { operator: rule.operator, bound: rule.right, measure: termData(rule.left).measure };
+  const left = isTerm(rule.left) ? positionData(rule.left as Term<unknown>) : undefined;
+  const right = isTerm(rule.right) ? positionData(rule.right as Term<unknown>) : undefined;
+  if (left !== undefined && !isTerm(rule.right)) {
+    return { operator: rule.operator, bound: rule.right, measure: left.measure };
   }
-  if (isTerm(rule.right) && !isTerm(rule.left)) {
-    return {
-      operator: mirrored[rule.operator],
-      bound: rule.left,
-      measure: termData(rule.right).measure,
-    };
+  if (right !== undefined && !isTerm(rule.left)) {
+    return { operator: mirrored[rule.operator], bound: rule.left, measure: right.measure };
   }
   return undefined;
 }
