@@ -12,6 +12,7 @@ import {
   implement,
   date,
   datetime,
+  dependency,
   instant,
   int,
   number,
@@ -1393,6 +1394,53 @@ describe("a guard comparing an expression of positions", () => {
       OUT: values.some(value => value < -1),
       notComposed: notComposed.filter(line => line.includes("@入力済み.甲 − @入力済み.乙")),
     }).toStrictEqual({ ON: true, OFF: true, IN: true, OUT: true, notComposed: [] });
+  });
+
+  it("owes no row on a way through an expression of two positions that their own bounds leave no value at", async () => {
+    const 届かない = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("届かない", {
+          guards: 入力 => [
+            入力.甲.$lte(3).$else(却下),
+            入力.乙.$gte(0).$else(却下),
+            入力.甲.$minus(入力.乙).$gte(5).$else(却下),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("届かない", { examples: examples(釣り合わせる, {}), implementation: 届かない }));
+
+    expect(
+      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : [],
+    ).toStrictEqual(["no row owed", "gap", "gap", "gap"]);
+  });
+
+  it("writes a point of an expression holding the length of a stand-in at the coordinate it names", () => {
+    const 依存の長さ = behavior("依存の長さ", {
+      input: variants("状態", { 入力済み: object({ 甲: int() }) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+      requires: { 明細: dependency(array(int())) },
+    });
+    const 長さまで = implement(依存の長さ, {
+      cases: {
+        入力済み: action("長さまで", {
+          guards: (入力, deps) => [入力.甲.$plus(deps.明細.$length()).$lte(10).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const { rows } = generate(
+      examples(依存の長さ, {
+        三つ: { given: { 状態: "入力済み", 甲: 0 }, with: { 明細: [1, 2, 3] }, expect: { result: { 結果: "受付" }, effects: [] } },
+      }),
+      長さまで,
+    );
+
+    expect(
+      rows.filter(row => row.name.includes(" ON ")).map(row => (row.given as { 甲: number }).甲),
+    ).toStrictEqual([7]);
   });
 
   it("carries a constant of the expression into the border's name", async () => {

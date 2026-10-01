@@ -257,12 +257,17 @@ export function feasibilityOf(
     if (ordered(form.constraints, carrier) === false) {
       return { kind: "infeasible", reason: contradicts };
     }
-    if (isPair(form)) {
-      continue;
-    }
     const alone = form.parts.every(
       part => related.filter(other => other === part.key).length === 1 && intervals.get(part.key) !== undefined,
     );
+    // A pair shared with another form is still settled on its intervals below,
+    // as a relation, so only one it alone constrains is read on its range here.
+    if (isPair(form)) {
+      if (alone && ordered([...form.constraints, ...rangeOf(form, intervals, carrier)], carrier) === false) {
+        return { kind: "infeasible", reason: contradicts };
+      }
+      continue;
+    }
     const free = form.parts.every(
       part => intervals.get(part.key)?.lower === undefined && intervals.get(part.key)?.upper === undefined,
     );

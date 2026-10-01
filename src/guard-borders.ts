@@ -789,7 +789,7 @@ function betweenExpression(
         if (value === undefined) {
           return undefined;
         }
-        rest += part.coefficient * (part.measure === "length" ? sizeOf(value) : value);
+        rest += part.coefficient * (part.measure === "length" && !part.standsIn ? sizeOf(value) : value);
       }
       return moved.write(given, moving.measure, ((coordinate as number) - rest) / moving.coefficient);
     },
