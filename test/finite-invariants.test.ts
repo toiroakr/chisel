@@ -9,6 +9,7 @@ import {
   generate,
   implement,
   int,
+  number,
   object,
   spec,
   variants,
@@ -372,5 +373,21 @@ describe("a row moved across an invariant ordering two numbers", () => {
       row: { 向き: "減", 記録: 3, 正: 1 },
       notComposed: ["余裕: @減.記録 ON (= 1): Invariant violated: $.正 + 2 <= $.記録"],
     });
+  });
+
+  it("moves a number the invariant orders against to a value its own bound admits, as a number takes no whole step", () => {
+    const 連続 = behavior("連続", {
+      input: variants("向き", {
+        減: object({ 記録: number().min(1).max(1.5), 正: int().min(0) }).refine(v => v.正.$lt(v.記録)),
+      }),
+      result: variants("結果", { 反映: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const { rows } = generate(examples(連続, {}));
+    const row = rows.find(offered => offered.name === "連続: @減.正 IN (> 0)")?.given as
+      | { 記録: number; 正: number }
+      | undefined;
+
+    expect(row !== undefined && row.正 === 1 && row.記録 > 1 && row.記録 <= 1.5).toBe(true);
   });
 });

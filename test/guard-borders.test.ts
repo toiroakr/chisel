@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   generate,
@@ -1015,6 +1016,37 @@ describe("a border an input invariant draws between two positions", () => {
     const report = await check(spec("選べる", { examples: examples(選べる, {}) }));
 
     expect(report.modelIssues).toStrictEqual([]);
+  });
+
+  it("reports a self-cancelling invariant on decimals compared with a decimal that no value keeps as a model error", async () => {
+    const 小数 = behavior("小数", {
+      input: variants("状態", {
+        入力済み: object({ 額: decimal(2) }).refine(v => v.額.$minus(v.額).$ne(new Decimal(0))),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("小数", { examples: examples(小数, {}) }));
+
+    expect(report.modelIssues).toStrictEqual(["@入力済み: 不変条件を満たす値がありません (invariant 0 != 0)"]);
+  });
+
+  it("reports invariants on two positions that leave no value even when an expression over them is also ordered", async () => {
+    const 矛盾と式 = behavior("矛盾と式", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() })
+          .refine(v => v.数量.$lte(v.上限))
+          .refine(v => v.上限.$lt(v.数量))
+          .refine(v => v.数量.$plus(v.上限).$lte(0)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("矛盾と式", { examples: examples(矛盾と式, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([
+      "@入力済み.数量 − @入力済み.上限: 不変条件を満たす値がありません (invariant $.数量 <= $.上限, invariant $.上限 < $.数量)",
+    ]);
   });
 
   it("tells apart a key holding a NUL from the nested path it would spell when joined", async () => {

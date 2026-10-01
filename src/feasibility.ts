@@ -980,10 +980,45 @@ export function keepingOrderings(scope: AnySchema, before: unknown, after: unkno
     const bound = -rest * moving.coefficient;
     const current = readAt(kept, moving.path) as number;
     const nearest =
-      operator === ">" ? bound + 1 : operator === "<" ? bound - 1 : operator === "!=" ? current + 1 : bound;
+      operator === "!=" ? current + 1 : nearestKeeping(scope, moving.path, operator, bound);
+    if (nearest === undefined) {
+      return undefined;
+    }
     kept = writeAt(kept, moving.path, nearest);
   }
   return undefined;
+}
+
+// The value nearest `bound` on the side `operator` keeps that the position's
+// own bounds admit: an integer steps by one, and a number, which has no step,
+// takes the middle of what is left when less than one is.
+function nearestKeeping(
+  scope: AnySchema,
+  path: readonly string[],
+  operator: Operator,
+  bound: number,
+): number | undefined {
+  const settled = settle({ path, measure: "value", constraints: [{ operator, bound }] }, scope);
+  if (typeof settled !== "object") {
+    return settled === false ? undefined : bound;
+  }
+  const lower = settled.lower?.value as number | undefined;
+  const upper = settled.upper?.value as number | undefined;
+  if (operator === ">" || operator === ">=") {
+    const from = lower ?? bound;
+    if (settled.carrier === integerCarrier || settled.lower?.inclusive !== false) {
+      return settled.lower?.inclusive === false ? from + 1 : from;
+    }
+    return upper !== undefined && upper - from <= 1 ? (from + upper) / 2 : from + 1;
+  }
+  if (operator === "<" || operator === "<=") {
+    const from = upper ?? bound;
+    if (settled.carrier === integerCarrier || settled.upper?.inclusive !== false) {
+      return settled.upper?.inclusive === false ? from - 1 : from;
+    }
+    return lower !== undefined && from - lower <= 1 ? (from + lower) / 2 : from - 1;
+  }
+  return bound;
 }
 
 // Whether no combination the invariants relating finite positions keep gives

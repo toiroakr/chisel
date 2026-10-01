@@ -20,6 +20,7 @@ import {
   conjuncts,
   describeRule,
   holds,
+  isDecimal,
   isTerm,
   readOperand,
   selfTerm,
@@ -263,13 +264,16 @@ function comparesTwoPositions(drawn: GuardBorder): boolean {
 }
 
 function settledAlone(rule: CompareRule): boolean | undefined {
-  if (![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")) {
+  if (![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number" || isDecimal(operand))) {
     return undefined;
   }
   const form = differenceOf(rule);
-  return form.parts.length === 0 && typeof form.constant === "number"
-    ? holds({ kind: "compare", left: form.constant, operator: rule.operator, right: 0 } as Rule, undefined)
-    : undefined;
+  if (form.parts.length > 0) {
+    return undefined;
+  }
+  // Compared by its sign, so a decimal constant is read as a number is.
+  const sign = typeof form.constant === "number" ? Math.sign(form.constant) : (form.constant as Decimal).comparedTo(0);
+  return holds({ kind: "compare", left: sign, operator: rule.operator, right: 0 } as Rule, undefined);
 }
 
 // Optionals, arrays, records and sum fields are not descended, as the invariants

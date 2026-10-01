@@ -670,7 +670,17 @@ export async function check(
   const effects = coverage(definition.effects.variantTags, coveredEffects);
   const pairGroups = new Map<string, GuardBorder[]>();
   for (const drawn of invariantPairBordersOf(definition)) {
-    const key = JSON.stringify((drawn.reads ?? []).map(segments => JSON.stringify(segments)).sort());
+    // One form however it is written: the same paths in different weights, as
+    // x − y beside x + y, bound different coordinates.
+    const weighed = differenceOf(drawn.comparison).parts;
+    const entries = (drawn.reads ?? [])
+      .map((segments, index) => ({
+        at: JSON.stringify([segments, weighed[index]?.measure]),
+        coefficient: weighed[index]?.coefficient ?? 0,
+      }))
+      .sort((left, right) => (left.at < right.at ? -1 : left.at > right.at ? 1 : 0));
+    const sign = (entries[0]?.coefficient ?? 1) < 0 ? -1 : 1;
+    const key = JSON.stringify(entries.map(entry => [entry.at, sign * entry.coefficient]));
     pairGroups.set(key, [...(pairGroups.get(key) ?? []), drawn]);
   }
   const modelIssues = [
