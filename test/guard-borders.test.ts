@@ -1538,6 +1538,53 @@ describe("a guard comparing an expression of positions", () => {
     ).toStrictEqual(["ON gap", "OFF gap", "IN gap", "OUT gap"]);
   });
 
+  it("owes no row at a point of a guard that an input invariant comparing the same expression with a constant refuses", async () => {
+    const 和 = behavior("和", {
+      input: variants("状態", { 入力済み: object({ 甲: int(), 乙: int() }).refine(v => v.甲.$plus(v.乙).$gte(0)) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 和まで = implement(和, {
+      cases: {
+        入力済み: action("和まで", {
+          guards: 入力 => [入力.甲.$plus(入力.乙).$gte(0).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("和まで", { examples: examples(和, {}), implementation: 和まで }));
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.甲 + $.乙 >= 0")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF no row owed", "IN gap", "OUT no row owed"]);
+  });
+
+  it("leaves a way through an expression of a field that may be left out undecided, as a comparison with it absent holds", async () => {
+    const 省略 = behavior("省略", {
+      input: variants("状態", { 入力済み: object({ 甲: int().optional(), 乙: int() }) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 両方 = implement(省略, {
+      cases: {
+        入力済み: action("両方", {
+          guards: 入力 => [
+            入力.甲.$plus(入力.乙).$gte(1).$else(却下),
+            入力.甲.$plus(入力.乙).$lt(1).$else(却下),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("両方", { examples: examples(省略, {}), implementation: 両方 }));
+
+    expect(
+      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status)[0] : undefined,
+    ).toBe("undecided");
+  });
+
   it("carries a constant of the expression into the border's name", async () => {
     const 余裕 = implement(釣り合わせる, {
       cases: {

@@ -406,7 +406,12 @@ function isPair(form: Form): boolean {
 // An invariant comparing two or more integer or number positions that are never
 // left out, read as one form over paths from the scope's root.
 function numericFormOf(rule: Rule, scope: AnySchema, prefix: readonly string[]): LinearTermData | undefined {
-  if (rule.kind !== "compare" || rule.operator === "==" || rule.operator === "!=" || ![rule.left, rule.right].every(isTerm)) {
+  if (
+    rule.kind !== "compare" ||
+    rule.operator === "==" ||
+    rule.operator === "!=" ||
+    ![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")
+  ) {
     return undefined;
   }
   const form = differenceOf(rule);
@@ -438,7 +443,10 @@ function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | u
   const kinds = form.parts.map(part =>
     part.measure === "length" ? "integer" : schemaAtPath(scope, part.path)?.kind,
   );
-  return typeof form.constant === "number" && kinds.every(kind => kind === "integer" || kind === "number")
+  // A part that may be left out is not one: the comparison holds without it.
+  return typeof form.constant === "number" &&
+    kinds.every(kind => kind === "integer" || kind === "number") &&
+    !form.parts.some(part => leftOutAlong(scope, part.path))
     ? form
     : undefined;
 }
@@ -941,7 +949,7 @@ export function keepingInvariants(
 // that keeps it; undefined when an invariant is left broken.
 export function keepingOrderings(scope: AnySchema, before: unknown, after: unknown): unknown {
   const orderings = scopedInvariants(scope, []).flatMap(({ prefix, rule }) => {
-    if (rule.kind !== "compare" || ![rule.left, rule.right].every(isTerm)) {
+    if (rule.kind !== "compare" || ![rule.left, rule.right].every(operand => isTerm(operand) || typeof operand === "number")) {
       return [];
     }
     const form = differenceOf(rule as CompareRule);
