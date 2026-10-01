@@ -335,7 +335,7 @@ describe("generateExamples for a guard on an array with no invariant", () => {
 describe("guard points generate cannot compose", () => {
   it("names each point it could not compose instead of leaving it out", () => {
     const 比べる = behavior("比べる", {
-      input: variants("状態", { 入力済み: object({ 数量: int(), 上限: int().optional() }) }),
+      input: variants("状態", { 入力済み: object({ 数量: int().optional(), 上限: int().optional() }) }),
       result: variants("結果", { 受付: object({}), 却下: object({}) }),
       effects: variants("種類", {}),
     });
@@ -348,8 +348,8 @@ describe("guard points generate cannot compose", () => {
       },
     });
     const existing = examples(比べる, {
-      "上限なし": {
-        given: { 状態: "入力済み", 数量: 1 },
+      "どちらもなし": {
+        given: { 状態: "入力済み" },
         expect: { result: { 結果: "受付" }, effects: [] },
       },
     });
@@ -360,6 +360,7 @@ describe("guard points generate cannot compose", () => {
       ),
     ).toStrictEqual([
       "@入力済み.数量 − @入力済み.上限 ON (= 0)",
+      "@入力済み.数量 − @入力済み.上限 OFF (= 1)",
       "@入力済み.数量 − @入力済み.上限 IN (< 0)",
       "@入力済み.数量 − @入力済み.上限 OUT (> 1)",
     ]);

@@ -56,7 +56,7 @@ export interface GuardBorder {
     readonly tag: string;
   };
   coordinateOf(reached: ComparisonReached): unknown;
-  compose(given: unknown, coordinate: unknown, deps?: unknown): unknown;
+  compose(given: unknown, coordinate: unknown, deps?: unknown, other?: boolean): unknown;
 }
 
 export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
@@ -626,10 +626,12 @@ function between(
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
     },
-    compose: (given, coordinate, deps) => {
+    compose: (given, coordinate, deps, otherSide) => {
       // Move the side that can take every value of the difference: the finer of
       // a decimal and an integer, and never a stand-in, which a row writes as given.
-      const moveSecond = first.standsIn || (!second.standsIn && second.scale > first.scale);
+      const preferred = first.standsIn || (!second.standsIn && second.scale > first.scale);
+      const swappable = !first.standsIn && !second.standsIn && first.scale === second.scale;
+      const moveSecond = otherSide === true && swappable ? !preferred : preferred;
       const [moving, fixed, sign] = moveSecond ? [second, first, -1] : [first, second, 1];
       const moved = moving.standsIn ? undefined : at(moving.segments);
       const other = fixed.standsIn

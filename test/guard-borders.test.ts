@@ -923,6 +923,29 @@ describe("a border an input invariant draws between two positions", () => {
     expect(report.borders.filter(border => border.rule.startsWith("invariant"))).toStrictEqual([]);
   });
 
+  it("moves the other side of the difference when moving the first would break its own bound", () => {
+    const 下限あり = behavior("下限あり", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int().min(0), 上限: int() }).refine(v => v.数量.$lte(v.上限)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const { rows, notComposed } = generate(examples(下限あり, {}));
+
+    expect({
+      rows: rows
+        .filter(row => row.name.startsWith("下限あり: @入力済み.数量 − @入力済み.上限"))
+        .map(row => ({ name: row.name, given: row.given })),
+      notComposed: notComposed.filter(line => line.startsWith("下限あり: @入力済み.数量 − @入力済み.上限")),
+    }).toStrictEqual({
+      rows: [
+        { name: "下限あり: @入力済み.数量 − @入力済み.上限 IN (< 0)", given: { 状態: "入力済み", 数量: 0, 上限: 1 } },
+      ],
+      notComposed: [],
+    });
+  });
+
   it("names the border after the invariant it was drawn from, as a named invariant on one position does", async () => {
     const 名付ける = behavior("名付ける", {
       input: variants("状態", {
@@ -995,6 +1018,30 @@ describe("a guard comparing an expression of positions", () => {
       failures: [],
       comparisons: { status: "partial", notRead: ["差まで: $.甲 >= $.乙 - $.丙"] },
     });
+  });
+});
+
+describe("a guard point between two positions one of which has a bound of its own", () => {
+  it("moves the other side when moving the first would break the first one's bound", () => {
+    const 比べる = behavior("比べる", {
+      input: variants("状態", { 入力済み: object({ 数量: int().min(0), 上限: int() }) }),
+      result: variants("結果", { 受付: object({}), 却下: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 上限まで = implement(比べる, {
+      cases: {
+        入力済み: action("上限まで", {
+          guards: 入力 => [入力.数量.$lte(入力.上限).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const { rows, notComposed } = generate(examples(比べる, {}), 上限まで);
+
+    expect({
+      given: rows.find(row => row.name === "比べる: @入力済み.数量 − @入力済み.上限 IN (< 0)")?.given,
+      notComposed: notComposed.filter(line => line.includes("@入力済み.数量 − @入力済み.上限")),
+    }).toStrictEqual({ given: { 状態: "入力済み", 数量: 0, 上限: 1 }, notComposed: [] });
   });
 });
 

@@ -1017,7 +1017,10 @@ export function generate(
       const origin =
         origins.find(given => reachedBy(given, withFrom(given).with).length > 0) ??
         definition.input.placeholder();
-      const given = drawn.compose(origin, point.witness, withFrom(origin).with);
+      const candidates = [false, true]
+        .map(other => drawn.compose(origin, point.witness, withFrom(origin).with, other))
+        .filter(candidate => candidate !== undefined);
+      const given = candidates.find(candidate => definition.input.parse(candidate).success) ?? candidates[0];
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
       } else {
@@ -1045,7 +1048,9 @@ export function generate(
       }
       const origin =
         origins.find(under) ?? definition.input.placeholderFor(drawn.segments[0]!.slice(1));
-      const given = drawn.compose(origin, point.witness, withFrom(origin).with);
+      const given = [false, true]
+        .map(other => drawn.compose(origin, point.witness, withFrom(origin).with, other))
+        .find(candidate => candidate !== undefined && definition.input.parse(candidate).success);
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
       } else {
