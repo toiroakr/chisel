@@ -767,6 +767,62 @@ describe("a guard point no row can reach", () => {
   });
 });
 
+describe("a point of a border between two positions no row can reach", () => {
+  const 比べる = behavior("比べる", {
+    input: variants("状態", { 入力済み: object({ 数量: int(), 上限: int() }) }),
+    result: variants("結果", { 受付: object({}), 却下: object({}) }),
+    effects: variants("種類", {}),
+  });
+  const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
+  const 上限ちょうど = implement(比べる, {
+    cases: {
+      入力済み: action("上限ちょうど", {
+        guards: 入力 => [入力.数量.$lte(入力.上限).$else(却下), 入力.数量.$gte(入力.上限).$else(却下)],
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
+    },
+  });
+
+  it("owes no row at a point of a later guard that an earlier guard leaves no value at, as Souther refutes it", async () => {
+    const report = await check(
+      spec("上限ちょうど", { examples: examples(比べる, {}), implementation: 上限ちょうど }),
+    );
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.数量 >= $.上限")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF gap", "IN no row owed", "OUT gap"]);
+  });
+
+  it("owes no row at a point on the far side of a later guard that an earlier guard stops short of", async () => {
+    const 上限未満 = implement(比べる, {
+      cases: {
+        入力済み: action("上限未満", {
+          guards: 入力 => [入力.数量.$lte(入力.上限).$else(却下), 入力.数量.$lt(入力.上限).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("上限未満", { examples: examples(比べる, {}), implementation: 上限未満 }));
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.数量 < $.上限")!
+        .points.filter(point => point.status === "no row owed")
+        .map(point => point.role),
+    ).toStrictEqual(["OUT"]);
+  });
+
+  it("offers no row at a point no row can reach", () => {
+    expect(
+      generate(examples(比べる, {}), 上限ちょうど).rows
+        .map(row => row.name)
+        .filter(name => name.includes("@入力済み.数量 − @入力済み.上限 IN (> 0)")),
+    ).toStrictEqual([]);
+  });
+});
+
 describe("an equality between two positions", () => {
   const 照合する = behavior("照合する", {
     input: variants("状態", { 入力済み: object({ 請求額: int(), 入金額: int() }) }),

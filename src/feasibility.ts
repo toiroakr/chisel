@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Carrier } from "./border.js";
-import { normalize } from "./border.js";
+import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, Operator, Rule, Term } from "./rule.js";
@@ -79,11 +79,26 @@ export function tooManyCombinations(limit: number): string {
   return `不変条件とあわせて調べる値の組が上限の${limit}通りを超える`;
 }
 
-export interface Placement {
-  readonly path: readonly string[];
-  readonly measure: Measure;
-  readonly operator: Operator;
-  readonly bound: unknown;
+export type Placement =
+  | {
+      readonly path: readonly string[];
+      readonly measure: Measure;
+      readonly operator: Operator;
+      readonly bound: unknown;
+    }
+  | {
+      readonly between: readonly [
+        { readonly path: readonly string[]; readonly measure: Measure },
+        { readonly path: readonly string[]; readonly measure: Measure },
+      ];
+      readonly operator: Operator;
+      readonly bound: unknown;
+    };
+
+interface Difference {
+  readonly first: string;
+  readonly second: string;
+  readonly constraints: Constraint[];
 }
 
 export function feasibilityOf(
@@ -104,7 +119,27 @@ export function feasibilityOf(
     return key;
   };
 
-  if (placement !== undefined) {
+  const differences = new Map<string, Difference>();
+  const differ = (left: string, right: string, operator: Operator, bound: number): void => {
+    const [first, second] = left <= right ? [left, right] : [right, left];
+    const key = JSON.stringify([first, second]);
+    if (!differences.has(key)) {
+      differences.set(key, { first, second, constraints: [] });
+    }
+    differences
+      .get(key)!
+      .constraints.push(left <= right ? { operator, bound } : { operator: mirrored[operator], bound: -bound });
+  };
+
+  if (placement !== undefined && "between" in placement) {
+    const [left, right] = placement.between;
+    differ(
+      groupFor(left.path, left.measure),
+      groupFor(right.path, right.measure),
+      placement.operator,
+      placement.bound as number,
+    );
+  } else if (placement !== undefined) {
     groups
       .get(groupFor(placement.path, placement.measure))!
       .constraints.push({ operator: placement.operator, bound: placement.bound });
@@ -138,6 +173,7 @@ export function feasibilityOf(
       opaque.push(termPaths(distinction));
     } else {
       relations.push(relation);
+      differ(relation.left, relation.right, relation.operator, 0);
     }
   }
 
@@ -159,7 +195,21 @@ export function feasibilityOf(
     return { kind: "undecided", reason: tooManyCombinations(combinations) };
   }
 
-  const related = relations.flatMap(relation => [relation.left, relation.right]);
+  for (const difference of differences.values()) {
+    const carrier = differenceCarrierOf(
+      [groups.get(difference.first)!, groups.get(difference.second)!],
+      scope,
+    );
+    if (carrier === undefined) {
+      unsettled ||= difference.constraints.length > 1;
+      continue;
+    }
+    if (ordered(difference.constraints, carrier) === false) {
+      return { kind: "infeasible", reason: contradicts };
+    }
+  }
+
+  const related = [...differences.values()].flatMap(difference => [difference.first, difference.second]);
   for (const relation of relations) {
     const left = intervals.get(relation.left);
     const right = intervals.get(relation.right);
@@ -235,6 +285,19 @@ function relationOf(
     right: groupFor(right.path, right.measure),
     operator,
   };
+}
+
+// Only a difference counted in whole steps or in plain numbers is settled here;
+// two decimals or two instants differ in units their readers convert to, which
+// the steps of a way do not carry.
+function differenceCarrierOf(sides: readonly Group[], scope: AnySchema): Carrier | undefined {
+  const kinds = sides.map(side =>
+    side.measure === "length" ? "integer" : schemaAtPath(scope, side.path)?.kind,
+  );
+  if (kinds.every(kind => kind === "integer")) {
+    return integerCarrier;
+  }
+  return kinds.every(kind => kind === "integer" || kind === "number") ? numberCarrier : undefined;
 }
 
 function sharesValue(left: readonly string[], right: readonly string[]): boolean {

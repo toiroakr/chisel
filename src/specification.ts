@@ -38,7 +38,7 @@ import { emptiedBy, normalize } from "./border.js";
 import { FEASIBILITY_COMBINATION_LIMIT, feasibilityOf, finiteReach, keepingInvariants, refusedJointly, tooManyWays, unreached, witnessesOf } from "./feasibility.js";
 import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
-import type { Feasibility, Reached, Witness } from "./feasibility.js";
+import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
@@ -1480,18 +1480,21 @@ function reachOf(
   wayLimit: number,
 ): readonly Feasibility[] {
   const normalized = normalize(drawn.comparison);
-  if (drawn.origin === undefined || point.region === undefined || normalized === undefined) {
+  const { left, right } = drawn.comparison;
+  if (drawn.origin === undefined || point.region === undefined) {
     return [{ kind: "feasible" }];
   }
   const { decision, scope } = drawn.origin;
-  const term = (
-    isTerm(drawn.comparison.left) ? drawn.comparison.left : drawn.comparison.right
-  ) as Term<unknown>;
-  const placement = {
-    path: termData(term).path,
-    measure: normalized.measure,
-    ...point.region,
-  };
+  let placement: Placement;
+  if (normalized !== undefined) {
+    const term = (isTerm(left) ? left : right) as Term<unknown>;
+    placement = { path: termData(term).path, measure: normalized.measure, ...point.region };
+  } else if (isTerm(left) && isTerm(right)) {
+    const side = (term: Term<unknown>) => ({ path: termData(term).path, measure: termData(term).measure });
+    placement = { between: [side(left as Term<unknown>), side(right as Term<unknown>)], ...point.region };
+  } else {
+    return [{ kind: "feasible" }];
+  }
   const prefixes: (readonly Way["steps"][number][])[] = [];
   let followed = 0;
   for (const way of eachWayOf(decision)) {
