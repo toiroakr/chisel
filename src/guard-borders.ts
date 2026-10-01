@@ -520,7 +520,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
 }
 
 function between(
-  rule: CompareRule,
+  rule: CompareRule & { readonly name?: string },
   left: Term<unknown>,
   right: Term<unknown>,
   frames: Frames,
@@ -553,7 +553,8 @@ function between(
       : first.kind === second.kind
         ? MOMENTS[first.kind ?? ""]
         : undefined;
-  const difference: CompareRule = {
+  const difference: Rule = {
+    ...(rule.name === undefined ? {} : { name: rule.name }),
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),

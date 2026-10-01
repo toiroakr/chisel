@@ -849,6 +849,21 @@ describe("a border an input invariant draws between two positions", () => {
     ]);
   });
 
+  it("names the border after the invariant it was drawn from, as a named invariant on one position does", async () => {
+    const 名付ける = behavior("名付ける", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() }).refine("上限まで", v => v.数量.$lte(v.上限)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("名付ける", { examples: examples(名付ける, {}) }));
+
+    expect(report.borders.filter(border => border.rule.startsWith("invariant")).map(border => border.rule)).toStrictEqual([
+      "invariant 上限まで: $.数量 <= $.上限",
+    ]);
+  });
+
   it("draws the border of an invariant written on the input sum under every case it is passed down to", async () => {
     const 仕分ける = behavior("仕分ける", {
       input: variants("状態", {
