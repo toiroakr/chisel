@@ -165,6 +165,52 @@ describe("borders an ensures clause draws", () => {
   });
 });
 
+describe("borders an ensures clause draws under what a behavior disregards", () => {
+  const 入力 = variants("状態", {
+    照会: object({ 会員番号: int(), 仮登録: int() }),
+    解約済み: object({ 会員番号: int(), 仮登録: int() }),
+  });
+  const 結果 = variants("結果", { 見つかった: object({ 会員番号: int() }), 見つからない: object({}) });
+
+  it("draws no line under an input case the behavior disregards whole, as no invariant border is drawn there", async () => {
+    const 探す = behavior("探す", {
+      input: 入力,
+      result: 結果,
+      effects: variants("種類", {}),
+      disregards: { 解約済み: r => [r] },
+      ensures: clause => [
+        clause.when("見つかる会員は番号が正", ["見つかった"], (照会, 答え) =>
+          照会.会員番号.$gt(0).$and(照会.仮登録.$gt(0)).$and(答え.会員番号.$eq(照会.会員番号)),
+        ),
+      ],
+    });
+    const report = await check(spec("探す", { examples: examples(探す, {}) }));
+
+    expect(report.borders.map(border => border.path)).toStrictEqual(["@照会.会員番号", "@照会.仮登録"]);
+  });
+
+  it("draws no line on a field the behavior disregards under a case it still reads", async () => {
+    const 探す = behavior("探す", {
+      input: 入力,
+      result: 結果,
+      effects: variants("種類", {}),
+      disregards: { 照会: r => [r.仮登録] },
+      ensures: clause => [
+        clause.when("見つかる会員は番号が正", ["見つかった"], (照会, 答え) =>
+          照会.会員番号.$gt(0).$and(照会.仮登録.$gt(0)).$and(答え.会員番号.$eq(照会.会員番号)),
+        ),
+      ],
+    });
+    const report = await check(spec("探す", { examples: examples(探す, {}) }));
+
+    expect(report.borders.map(border => border.path)).toStrictEqual([
+      "@照会.会員番号",
+      "@解約済み.会員番号",
+      "@解約済み.仮登録",
+    ]);
+  });
+});
+
 describe("an ensures clause over every element of the answer", () => {
   const 明細を返す = (rule: (行: TermOf<number>) => Rule) =>
     behavior("明細を返す", {

@@ -712,7 +712,9 @@ export async function check(
     };
   });
   borders.push(...guardBorders);
-  const ensuresBorders = ensuresBordersOf(definition).map((drawn): BorderCoverage => {
+  const ensuresBorders = ensuresBordersOf(definition)
+    .filter(drawn => !isDisregarded(definition, drawn))
+    .map((drawn): BorderCoverage => {
     const coordinates = answeredGivens
       .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
       .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
@@ -1530,7 +1532,7 @@ function coverage(
   };
 }
 
-function isDisregarded(definition: AnyBehavior, position: Position): boolean {
+function isDisregarded(definition: AnyBehavior, position: Pick<Position, "segments">): boolean {
   return Object.entries(definition.disregards).some(([tag, paths]) =>
     paths.some(keys => isUnder(position, [`@${tag}`, ...keys.map(key => `.${key}`)])),
   );
@@ -1544,7 +1546,7 @@ function trailKey(segments: readonly string[]): string {
   return JSON.stringify(segments);
 }
 
-function isUnder(position: Position, prefix: readonly string[]): boolean {
+function isUnder(position: Pick<Position, "segments">, prefix: readonly string[]): boolean {
   const named = namedSegments(position);
   return prefix.every((segment, index) => named[index] === segment);
 }
@@ -1611,7 +1613,7 @@ function guardReadSegmentsOf(implementation: AnyImplementation | undefined): rea
   });
 }
 
-function namedSegments(position: Position): readonly string[] {
+function namedSegments(position: Pick<Position, "segments">): readonly string[] {
   const [inputCase, ...rest] = position.segments;
   return [inputCase!, ...rest.filter(segment => segment !== "?" && !segment.startsWith("@"))];
 }
