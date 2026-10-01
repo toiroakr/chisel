@@ -129,6 +129,30 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
   );
 }
 
+// An invariant comparing one position with a constant draws its border on that
+// position (src/border.ts); this one draws those comparing two positions, which
+// no single position carries.
+export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
+  const input = definition.input;
+  const positions = positionsOf(input);
+  const at = (segments: readonly string[]): Position | undefined =>
+    positions.find(position => isDeepStrictEqual(position.segments, segments));
+  return input.variantTags.flatMap(tag => {
+    const scope = input.variants[tag] as AnySchema;
+    const frames = framesAt(scope, `@${tag}`, "$");
+    return [...input.invariants, ...scope.invariants]
+      .flatMap(conjuncts)
+      .flatMap(rule =>
+        rule.kind === "compare" && isTerm(rule.left) && isTerm(rule.right)
+          ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, {
+              source: "invariant",
+              describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
+            })
+          : [],
+      );
+  });
+}
+
 function unrooted(rule: Rule): Rule | undefined {
   if (rule.kind !== "compare") {
     return undefined;
@@ -442,7 +466,7 @@ function admittedRange(
 }
 
 interface Reading {
-  readonly source: "guard" | "ensures";
+  readonly source: "guard" | "ensures" | "invariant";
   describe(rule: CompareRule, frames: Frames): string;
 }
 

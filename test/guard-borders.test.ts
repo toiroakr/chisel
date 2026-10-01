@@ -823,6 +823,60 @@ describe("a point of a border between two positions no row can reach", () => {
   });
 });
 
+describe("a border an input invariant draws between two positions", () => {
+  const 受け付ける = behavior("受け付ける", {
+    input: variants("状態", {
+      入力済み: object({ 数量: int(), 上限: int() }).refine(v => v.数量.$lte(v.上限)),
+    }),
+    result: variants("結果", { 受付: object({}) }),
+    effects: variants("種類", {}),
+  });
+
+  it("owes the ON and IN points of the difference and excludes the OFF and OUT points no value can be built at, as Souther does", async () => {
+    const report = await check(spec("受け付ける", { examples: examples(受け付ける, {}) }));
+
+    expect(report.borders.filter(border => border.rule.startsWith("invariant"))).toStrictEqual([
+      {
+        path: "@入力済み.数量 − @入力済み.上限",
+        rule: "invariant $.数量 <= $.上限",
+        points: [
+          { role: "ON", relation: "= 0", status: "gap" },
+          { role: "OFF", relation: "= 1", status: "excluded" },
+          { role: "IN", relation: "< 0", status: "gap" },
+          { role: "OUT", relation: "> 1", status: "excluded" },
+        ],
+      },
+    ]);
+  });
+
+  it("draws the border of an invariant written on the input sum under every case it is passed down to", async () => {
+    const 仕分ける = behavior("仕分ける", {
+      input: variants("状態", {
+        通常: object({ 数量: int(), 上限: int() }),
+        至急: object({ 数量: int(), 上限: int() }),
+      }).refine(v => v.数量.$lte(v.上限)),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("仕分ける", { examples: examples(仕分ける, {}) }));
+
+    expect(report.borders.filter(border => border.rule.startsWith("invariant")).map(border => border.path)).toStrictEqual([
+      "@通常.数量 − @通常.上限",
+      "@至急.数量 − @至急.上限",
+    ]);
+  });
+
+  it("offers a row inside the invariant at each point no row stands at", () => {
+    const rows = generate(examples(受け付ける, {})).rows;
+
+    expect(
+      rows
+        .filter(row => row.name.startsWith("受け付ける: @入力済み.数量 − @入力済み.上限"))
+        .map(row => ({ name: row.name, parsed: 受け付ける.input.parse(row.given).success })),
+    ).toStrictEqual([{ name: "受け付ける: @入力済み.数量 − @入力済み.上限 IN (< 0)", parsed: true }]);
+  });
+});
+
 describe("an equality between two positions", () => {
   const 照合する = behavior("照合する", {
     input: variants("状態", { 入力済み: object({ 請求額: int(), 入金額: int() }) }),

@@ -17,6 +17,7 @@ import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import {
   comparisonsNotReadOf,
   ensuresBordersOf,
+  invariantPairBordersOf,
   guardBordersOf,
   guardPartitionsOf,
   feasibilityScope,
@@ -734,6 +735,28 @@ export async function check(
       };
     });
   borders.push(...ensuresBorders);
+  const invariantPairBorders = invariantPairBordersOf(definition)
+    .filter(drawn => !isDisregarded(definition, drawn))
+    .map((drawn): BorderCoverage => {
+      const coordinates = answeredGivens
+        .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
+        .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
+      return {
+        path: drawn.path,
+        rule: drawn.border.rule,
+        points: drawn.border.points.map(point => ({
+          role: point.role,
+          relation: point.relation,
+          status:
+            point.status !== "owed"
+              ? point.status
+              : coordinates.some(value => value !== undefined && point.contains(value))
+                ? "met"
+                : "gap",
+        })),
+      };
+    });
+  borders.push(...invariantPairBorders);
   const adequate =
     fakeIssues.length === 0 &&
     specification.implementation !== undefined &&
@@ -1008,6 +1031,34 @@ export function generate(
       const origin =
         origins.find(given => reachedBy(given, withFrom(given).with).length > 0) ??
         definition.input.placeholder();
+      const given = drawn.compose(origin, point.witness, withFrom(origin).with);
+      if (given === undefined) {
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
+      } else {
+        offer({
+          name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
+          given,
+          reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
+          ...withFrom(origin),
+        });
+      }
+    }
+  }
+
+  for (const drawn of invariantPairBordersOf(definition).filter(drawn => !isDisregarded(definition, drawn))) {
+    const under = (given: unknown) => drawn.segments[0] === `@${tagOf(definition.input, given)}`;
+    for (const point of drawn.border.points) {
+      if (point.status !== "owed" || point.witness === undefined) {
+        continue;
+      }
+      const standsAt = [...rows, ...generated].some(
+        row => under(row.given) && point.contains(drawn.coordinateOf({ rule: drawn.comparison, scope: row.given })),
+      );
+      if (standsAt) {
+        continue;
+      }
+      const origin =
+        origins.find(under) ?? definition.input.placeholderFor(drawn.segments[0]!.slice(1));
       const given = drawn.compose(origin, point.witness, withFrom(origin).with);
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
