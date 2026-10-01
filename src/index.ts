@@ -46,6 +46,7 @@ export type {
 
 export type { Comparable, Condition, InvariantRule, Operand, Operator, Rule, Term, TermOf } from "./rule.js";
 
+export type { Beside } from "./beside.js";
 export { formatTypeScriptValue } from "./codegen.js";
 
 export { dependency, fake, FakeMiss } from "./dependency.js";

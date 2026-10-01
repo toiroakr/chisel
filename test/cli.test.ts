@@ -391,6 +391,14 @@ describe("chisel check with borders", () => {
   });
 });
 
+describe("chisel check with a border no row tells from a line beside it", () => {
+  it("prints the line beside the border that every row falls on the same side of", async () => {
+    const result = await run(["check", fixture("test/fixtures/beside.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/^      隣の線 +! -@入力済み\.x \+ @入力済み\.y = 0 と見分ける行がない$/m);
+  });
+});
+
 describe("chisel check and generate with a rules decision", () => {
   async function output(command: "check" | "generate"): Promise<string> {
     const result = await run([command, fixture("test/fixtures/rules.ts")]);
@@ -507,6 +515,7 @@ describe("chisel check --json", () => {
       "test/fixtures/rules.ts",
       "test/fixtures/classes.ts",
       "test/fixtures/borders.ts",
+      "test/fixtures/beside.ts",
       "test/fixtures/gap-coverage.ts",
       "test/fixtures/infeasible-way.ts",
       "test/fixtures/ensures-readings.ts",

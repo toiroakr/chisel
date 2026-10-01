@@ -33,7 +33,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, differenceOf, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
+import { DEPS, describeRule, describeTerm, differenceOf, holds, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -42,6 +42,8 @@ import { readEnsures } from "./ensures.js";
 import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
+import type { Beside } from "./beside.js";
+import { allOnOneSide, lineTheRowsAllow, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
@@ -245,6 +247,8 @@ export interface BorderCoverage {
     readonly status: "met" | "gap" | "excluded" | "not named" | "no point" | "no row owed" | "undecided";
     readonly reason?: string;
   }[];
+  // Present once every point a guard border over two or more positions owes is met.
+  readonly beside?: Beside;
 }
 
 export type PartitionCoverage =
@@ -699,22 +703,31 @@ export async function check(
   const guardBorders = (
     specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
   ).map((drawn): BorderCoverage => {
-    const coordinates = reached
-      .filter(item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag)
-      .map(item => drawn.coordinateOf(item.comparison));
+    const reachedIt = reached.filter(
+      item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag,
+    );
+    const coordinates = reachedIt.map(item => drawn.coordinateOf(item.comparison));
+    const points = drawn.border.points.map(point => {
+      const base = { role: point.role, relation: point.relation };
+      if (point.status !== "owed") {
+        return { ...base, status: point.status };
+      }
+      if (coordinates.some(value => point.contains(value))) {
+        return { ...base, status: "met" as const };
+      }
+      return { ...base, ...unmetStatus(reachOf(drawn, point, combinations, wayLimit)) };
+    });
+    const owed = drawn.border.points.flatMap((point, index) => (point.status === "owed" ? [points[index]!] : []));
+    const due =
+      drawn.form !== undefined &&
+      owed.some(point => point.status === "met") &&
+      owed.every(point => point.status === "met" || point.status === "no row owed");
+    const beside = due ? besideOf(drawn, reachedIt.map(item => item.comparison.scope)) : undefined;
     return {
       path: drawn.path,
       rule: drawn.border.rule,
-      points: drawn.border.points.map(point => {
-        const base = { role: point.role, relation: point.relation };
-        if (point.status !== "owed") {
-          return { ...base, status: point.status };
-        }
-        if (coordinates.some(value => point.contains(value))) {
-          return { ...base, status: "met" as const };
-        }
-        return { ...base, ...unmetStatus(reachOf(drawn, point, combinations, wayLimit)) };
-      }),
+      points,
+      ...(beside === undefined ? {} : { beside }),
     };
   });
   borders.push(...guardBorders);
@@ -758,7 +771,8 @@ export async function check(
     partitions.every(
       partition => partition.kind !== "divided" || partition.missing.length === 0,
     ) &&
-    borders.every(border => border.points.every(point => point.status !== "gap"));
+    borders.every(border => border.points.every(point => point.status !== "gap")) &&
+    borders.every(border => border.beside?.status !== "not told");
 
   const plans = plansOf(specification.implementation, combinations, wayLimit);
   const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans);
@@ -770,7 +784,9 @@ export async function check(
   const armGap = lines.some(line => line.status === "gap" || line.status === "answer owed");
   const armUndecided =
     lines.some(line => line.status === "undecided") ||
-    borders.some(border => border.points.some(point => point.status === "undecided"));
+    borders.some(
+      border => border.points.some(point => point.status === "undecided") || border.beside?.status === "undecided",
+    );
   const unreadComparisons =
     specification.implementation === undefined
       ? []
@@ -1527,6 +1543,30 @@ function unmetStatus(
     return { status: "undecided", reason: undecided.reason };
   }
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
+}
+
+function besideOf(drawn: GuardBorder, scopes: readonly unknown[]): Beside {
+  const parts = [...drawn.form!.parts].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+  const rows = scopes.flatMap(scope => {
+    const values = parts.map(part => part.valueOf(scope));
+    return values.every(value => value !== undefined) ? [{ values, kept: holds(drawn.comparison, scope) }] : [];
+  });
+  const kept = rows.filter(row => row.kept).map(row => row.values);
+  if (kept.length === 0) {
+    return { status: "undecided", reason: allOnOneSide };
+  }
+  const keptBelow = drawn.comparison.operator === "<" || drawn.comparison.operator === "<=";
+  const line = lineTheRowsAllow(
+    parts.map(part => part.coefficient),
+    keptBelow,
+    kept,
+    rows.filter(row => !row.kept).map(row => row.values),
+  );
+  return line === undefined
+    ? { status: "told" }
+    : { status: "not told", another: spelled(parts.map(part => part.path), line) };
 }
 
 function reachOf(

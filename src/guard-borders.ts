@@ -57,8 +57,20 @@ export interface GuardBorder {
     readonly scope: AnySchema;
     readonly tag: string;
   };
+  readonly form?: BorderForm;
   coordinateOf(reached: ComparisonReached): unknown;
   compose(given: unknown, coordinate: unknown, deps?: unknown, other?: boolean): unknown;
+}
+
+// The weighed positions of a border over two or more integer or number
+// positions, which the lines beside it are drawn from (src/beside.ts).
+export interface BorderForm {
+  readonly parts: readonly {
+    readonly path: string;
+    readonly coefficient: number;
+    valueOf(scope: unknown): number | undefined;
+    write(given: unknown, value: number): unknown;
+  }[];
 }
 
 export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
@@ -693,12 +705,24 @@ function betweenExpression(
     })
     .join(" ");
   const path = constant === 0 ? written : `${written} ${constant < 0 ? "−" : "+"} ${Math.abs(constant)}`;
+  const weighed: BorderForm | undefined =
+    parts.length > 1 && parts.every(part => !part.standsIn)
+      ? {
+          parts: parts.map(part => ({
+            path: part.path,
+            coefficient: part.coefficient,
+            valueOf: scope => valueOf(part, scope),
+            write: (given, value) => at(part.segments)?.write(given, part.measure, value),
+          })),
+        }
+      : undefined;
   return borders.map(border => ({
     path,
     segments: (parts.find(part => !part.standsIn) ?? parts[0]!).segments,
     reads: parts.filter(part => !part.standsIn).map(part => part.segments),
     comparison: rule,
     border,
+    ...(weighed === undefined ? {} : { form: weighed }),
     coordinateOf: reached => {
       let total = constant;
       for (const part of parts) {
@@ -788,12 +812,25 @@ function between(
     }
     return moment === undefined ? (value as number) : moment.read(value, side);
   };
+  const form: BorderForm | undefined = sides.every(
+    side => !side.standsIn && (side.kind === "integer" || side.kind === "number"),
+  )
+    ? {
+        parts: sides.map((side, index) => ({
+          path: side.path,
+          coefficient: index === 0 ? 1 : -1,
+          valueOf: scope => read(side, scope) as number | undefined,
+          write: (given, value) => at(side.segments)?.write(given, side.measure, value),
+        })),
+      }
+    : undefined;
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,
     segments: (first.standsIn ? second : first).segments,
     reads: sides.filter(side => !side.standsIn).map(side => side.segments),
     comparison: rule,
     border,
+    ...(form === undefined ? {} : { form }),
     coordinateOf: reached => {
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);

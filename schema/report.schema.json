@@ -206,6 +206,35 @@
       ],
       "additionalProperties": false
     },
+    "beside": {
+      "type": "object",
+      "properties": {
+        "obligationId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "told",
+            "not told",
+            "undecided"
+          ]
+        },
+        "another": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "obligationId",
+        "status"
+      ],
+      "additionalProperties": false
+    },
     "report": {
       "type": "object",
       "properties": {
@@ -475,6 +504,9 @@
                 "items": {
                   "$ref": "#/$defs/point"
                 }
+              },
+              "beside": {
+                "$ref": "#/$defs/beside"
               }
             },
             "required": [

@@ -41,6 +41,14 @@ function reportJson(report: AdequacyReport, source: string): unknown {
         ),
         ...point,
       })),
+      ...(border.beside === undefined
+        ? {}
+        : {
+            beside: {
+              obligationId: identities.claim(`beside ${border.path} | ${border.rule}`),
+              ...border.beside,
+            },
+          }),
     })),
     measures: {
       arms: armsJson(report.measures.arms, identities),
