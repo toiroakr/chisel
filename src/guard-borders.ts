@@ -134,7 +134,7 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
 // no single position carries.
 export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
   const input = definition.input;
-  const positions = positionsOf(input);
+  const positions = positionsOf(input, { containers: true });
   const at = (segments: readonly string[]): Position | undefined =>
     positions.find(position => isDeepStrictEqual(position.segments, segments));
   return input.variantTags.flatMap(tag => {

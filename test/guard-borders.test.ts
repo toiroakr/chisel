@@ -849,6 +849,27 @@ describe("a border an input invariant draws between two positions", () => {
     ]);
   });
 
+  it("offers a row at a point of a border between the lengths of two arrays, resizing one of them", () => {
+    const 並べる = behavior("並べる", {
+      input: variants("状態", {
+        入力済み: object({ 甲: array(int()), 乙: array(int()) }).refine(v => v.甲.$length().$lte(v.乙.$length())),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const { rows, notComposed } = generate(examples(並べる, {}));
+
+    expect({
+      rows: rows
+        .filter(row => row.name.startsWith("並べる: @入力済み.甲 − @入力済み.乙"))
+        .map(row => ({ name: row.name, parsed: 並べる.input.parse(row.given).success })),
+      notComposed,
+    }).toStrictEqual({
+      rows: [{ name: "並べる: @入力済み.甲 − @入力済み.乙 IN (< 0)", parsed: true }],
+      notComposed: [],
+    });
+  });
+
   it("names the border after the invariant it was drawn from, as a named invariant on one position does", async () => {
     const 名付ける = behavior("名付ける", {
       input: variants("状態", {
