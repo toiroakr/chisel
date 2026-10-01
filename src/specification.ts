@@ -32,7 +32,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
+import { DEPS, describeRule, describeTerm, differenceOf, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -1552,6 +1552,8 @@ function reachOf(
   ) {
     const side = (term: Term<unknown>) => ({ path: positionOf(term).path, measure: positionOf(term).measure });
     placement = { between: [side(left as Term<unknown>), side(right as Term<unknown>)], ...point.region };
+  } else if ([left, right].some(operand => isTerm(operand))) {
+    placement = { form: differenceOf(drawn.comparison), ...point.region };
   } else {
     return [{ kind: "feasible" }];
   }

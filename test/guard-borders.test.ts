@@ -1108,6 +1108,75 @@ describe("a guard comparing an expression of positions", () => {
     }).toStrictEqual({ rows: [["OFF (= -1)", -1], ["IN (> 0)", 1], ["OUT (< -1)", -2]], notComposed: [] });
   });
 
+  const 挟む = implement(釣り合わせる, {
+    cases: {
+      入力済み: action("挟む", {
+        guards: 入力 => [
+          入力.甲.$lte(入力.乙.$minus(入力.丙)).$else(却下),
+          入力.甲.$gte(入力.乙.$minus(入力.丙)).$else(却下),
+        ],
+        run: () => ({ result: { 結果: "受付" }, effects: [] }),
+      }),
+    },
+  });
+
+  it("owes no row at a point of a later guard on an expression that an earlier guard on it leaves no value at", async () => {
+    const report = await check(spec("挟む", { examples: examples(釣り合わせる, {}), implementation: 挟む }));
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.甲 >= $.乙 - $.丙")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF gap", "IN no row owed", "OUT gap"]);
+  });
+
+  it("reads two guards as comparing one expression however each is written, its constant included", async () => {
+    const 余裕ちょうど = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("余裕ちょうど", {
+          guards: 入力 => [
+            入力.甲.$plus(2).$lte(入力.乙).$else(却下),
+            入力.乙.$minus(2).$lte(入力.甲).$else(却下),
+          ],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(
+      spec("余裕ちょうど", { examples: examples(釣り合わせる, {}), implementation: 余裕ちょうど }),
+    );
+
+    expect(
+      report.borders
+        .find(border => border.rule === "guard $.乙 - 2 <= $.甲")!
+        .points.map(point => `${point.role} ${point.status}`),
+    ).toStrictEqual(["ON gap", "OFF gap", "IN no row owed", "OUT gap"]);
+  });
+
+  it("settles the ways through guards on one expression by the values the expression can take", async () => {
+    const report = await check(spec("挟む", { examples: examples(釣り合わせる, {}), implementation: 挟む }));
+
+    expect(
+      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : [],
+    ).toStrictEqual(["gap", "gap", "gap"]);
+  });
+
+  it("leaves a way undecided when a position of the expression is also compared on its own", async () => {
+    const 下限つき = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("下限つき", {
+          guards: 入力 => [入力.甲.$gte(10).$else(却下), 入力.甲.$lte(入力.乙.$minus(入力.丙)).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const report = await check(spec("下限つき", { examples: examples(釣り合わせる, {}), implementation: 下限つき }));
+
+    expect(
+      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : [],
+    ).toStrictEqual(["undecided", "undecided", "gap"]);
+  });
+
   it("names the points of an expression no position of which is counted once, rather than offer a row it cannot write", () => {
     const 倍 = implement(釣り合わせる, {
       cases: {
