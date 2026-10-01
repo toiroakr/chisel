@@ -34,7 +34,7 @@ describe("every broken invariant of a value is an issue", () => {
 describe("an invariant given a name", () => {
   it("names the invariant it breaks in the issue, beside one written without a name", () => {
     const 組 = object({ 甲: enumOf(["w", "x", "y"]), 乙: enumOf(["w", "p"]) })
-      .refine(v => v.乙.$eq("w").$or(v.甲.$eq("x")), { name: "乙は甲に従う" })
+      .refine("乙は甲に従う", v => v.乙.$eq("w").$or(v.甲.$eq("x")))
       .refine(v => v.甲.$eq("x"));
 
     expect(組.parse({ 甲: "y", 乙: "p" })).toStrictEqual({
@@ -51,16 +51,16 @@ describe("an invariant given a name", () => {
   });
 
   it("names an invariant a shorthand writes", () => {
-    expect(int().min(1, { name: "一つ以上" }).parse(0)).toStrictEqual({
+    expect(int().min("一つ以上", 1).parse(0)).toStrictEqual({
       success: false,
       issues: [{ path: "$", message: "Invariant 一つ以上 violated: $ >= 1", invariant: "一つ以上" }],
     });
   });
 
   it("refuses a name one schema gives two of its invariants", () => {
-    const 組 = object({ 甲: enumOf(["w", "x"]) }).refine(v => v.甲.$ne("w"), { name: "甲を選ぶ" });
+    const 組 = object({ 甲: enumOf(["w", "x"]) }).refine("甲を選ぶ", v => v.甲.$ne("w"));
 
-    expect(() => 組.refine(v => v.甲.$eq("x"), { name: "甲を選ぶ" })).toThrow(
+    expect(() => 組.refine("甲を選ぶ", v => v.甲.$eq("x"))).toThrow(
       "Invariant 甲を選ぶ is declared more than once",
     );
   });
@@ -71,12 +71,12 @@ describe("the analysis names an invariant given a name", () => {
     const 数える = behavior("数える", {
       input: variants("状態", {
         入力済み: object({
-          数: int().min(10, { name: "十以上" }).max(5),
+          数: int().min("十以上", 10).max(5),
           量: int(),
           幅: int(),
         })
-          .refine(v => v.量.$gte(0), { name: "量は負でない" })
-          .refine(v => v.幅.$gte(1).$and(v.幅.$lte(9)), { name: "幅は一桁" }),
+          .refine("量は負でない", v => v.量.$gte(0))
+          .refine("幅は一桁", v => v.幅.$gte(1).$and(v.幅.$lte(9))),
       }),
       result: object({}),
       effects: variants("種類", {}),
