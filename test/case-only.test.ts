@@ -107,6 +107,13 @@ describe("a row that expects only the case of the result, as Souther's bare case
     expect(report.failures).toStrictEqual([{ name: "保留する", message: "Expected result is invalid" }]);
   });
 
+  it("takes only what caseOf makes, as a plain object spelling it is not recognised", () => {
+    examples(受け付ける, {
+      // @ts-expect-error a plain object does not carry what caseOf marks
+      手書き: { given: 一件, expect: { result: { kind: "case", case: "確定" }, effects: [通知] } },
+    });
+  });
+
   it("is held to the case only by test, against production code", async () => {
     const outcome = await test(
       examples(受け付ける, {

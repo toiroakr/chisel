@@ -233,9 +233,13 @@ export function todo(reason = "まだ決めていません"): Todo {
 
 // What a row writes for an answer it states only the case of, as Souther's bare
 // case name `-> Submitted` asserts the arm and none of its fields.
+declare const caseOnlyBrand: unique symbol;
+
 export interface CaseOnly<Tag extends string = string> {
   readonly kind: "case";
   readonly case: Tag;
+  // Not structural: only caseOf writes the mark isCaseOnly reads at run time.
+  readonly [caseOnlyBrand]: true;
 }
 
 const caseOnlyMark = Symbol.for("chisel.caseOf");
