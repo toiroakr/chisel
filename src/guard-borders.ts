@@ -145,14 +145,15 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
     positions.find(position => isDeepStrictEqual(position.segments, segments));
   return input.variantTags.flatMap(tag => {
     const scope = input.variants[tag] as AnySchema;
-    const frames = framesAt(scope, `@${tag}`, "$");
-    const drawn = [...input.invariants, ...scope.invariants]
+    const drawn = objectFramesIn({ scope, path: `@${tag}`, segments: [`@${tag}`], label: "$" }).flatMap(frame =>
+      [...(frame.scope === scope ? input.invariants : []), ...frame.scope.invariants]
       .flatMap(conjuncts)
       .flatMap(rule => {
         const reading: Reading = {
           source: "invariant",
           describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
         };
+        const frames: Frames = { root: frame, elements: {} };
         if (rule.kind !== "compare") {
           return [];
         }
@@ -162,9 +163,25 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
         return isTerm(rule.left) && isTerm(rule.right)
           ? between(rule, rule.left as Term<unknown>, rule.right as Term<unknown>, frames, at, reading)
           : [];
-      });
+      }),
+    );
     return drawn.map(border => withoutPairRefusedPoints(border, drawn));
   });
+}
+
+// Optionals, arrays, records and sum fields are not descended, as the invariants
+// relating finite positions are not (src/feasibility.ts).
+function objectFramesIn(frame: Frame): readonly Frame[] {
+  if (frame.scope.kind !== "object") {
+    return [];
+  }
+  const shape = (frame.scope as ObjectSchema<ObjectShape>).shape;
+  return [
+    frame,
+    ...Object.entries(shape).flatMap(([key, field]) =>
+      objectFramesIn({ scope: field, path: pathOf(frame, [key]), segments: segmentsOf(frame, [key]), label: "$" }),
+    ),
+  ];
 }
 
 // Not left to bordersOf, which excludes a point another bound on the same
@@ -185,9 +202,8 @@ function withoutPairRefusedPoints(border: GuardBorder, all: readonly GuardBorder
   });
   const refuses = (witness: unknown): boolean =>
     others.some(({ other, sign }) => {
-      const value = sign === 1 ? witness : typeof witness === "bigint" ? -witness : -(witness as number);
-      const zero = typeof value === "bigint" ? 0n : 0;
-      return !holds({ ...other.comparison, left: value, right: zero } as Rule, undefined);
+      const value = sign * (typeof witness === "bigint" ? Number(witness > 0n) - Number(witness < 0n) : (witness as number));
+      return !holds({ ...other.comparison, left: value, right: 0 } as Rule, undefined);
     });
   return {
     ...border,

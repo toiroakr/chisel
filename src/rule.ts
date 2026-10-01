@@ -394,9 +394,12 @@ export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
 }
 
 function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | undefined): unknown {
-  const [term, other, operator] = isTerm(rule.left)
-    ? [rule.left, rule.right, rule.operator]
-    : [rule.right, rule.left, mirrored[rule.operator]];
+  const [term, other, operator] =
+    isTerm(rule.left) && positionData(rule.left) !== undefined
+      ? [rule.left, rule.right, rule.operator]
+      : isTerm(rule.right) && positionData(rule.right) !== undefined
+        ? [rule.right, rule.left, mirrored[rule.operator]]
+        : [rule.left, rule.right, rule.operator];
   if (!isTerm(term)) {
     return value;
   }
@@ -746,7 +749,7 @@ function describeLinear(data: LinearTermData, describePart: (part: LinearPart) =
     const size = isDecimal(constant) ? constant.abs().toString() : String(Math.abs(constant as number));
     pieces.push(pieces.length === 0 ? String(constant) : `${negative ? "-" : "+"} ${size}`);
   }
-  return pieces.join(" ");
+  return pieces.length === 0 ? "0" : pieces.join(" ");
 }
 
 export function readOperand(operand: unknown, value: unknown): unknown {

@@ -6,6 +6,7 @@ import {
   behavior,
   spec,
   check,
+  decimal,
   example,
   examples,
   implement,
@@ -890,6 +891,49 @@ describe("a border an input invariant draws between two positions", () => {
       "invariant $.数量 <= $.上限: ON gap, OFF excluded, IN excluded, OUT excluded",
       "invariant $.上限 <= $.数量: ON gap, OFF excluded, IN excluded, OUT excluded",
     ]);
+  });
+
+  it("excludes a refused point of a border between two decimals, whose difference is counted in units", async () => {
+    const 一致させる = behavior("一致させる", {
+      input: variants("状態", {
+        入力済み: object({ 数量: decimal(2), 上限: decimal(2) })
+          .refine(v => v.数量.$lte(v.上限))
+          .refine(v => v.上限.$lte(v.数量)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("一致させる", { examples: examples(一致させる, {}) }));
+
+    expect({
+      borders: report.borders
+        .filter(border => border.rule.startsWith("invariant"))
+        .map(border => `${border.rule}: ${border.points.map(point => `${point.role} ${point.status}`).join(", ")}`),
+      modelIssues: report.modelIssues,
+    }).toStrictEqual({
+      borders: [
+        "invariant $.数量 <= $.上限: ON gap, OFF excluded, IN excluded, OUT excluded",
+        "invariant $.上限 <= $.数量: ON gap, OFF excluded, IN excluded, OUT excluded",
+      ],
+      modelIssues: [],
+    });
+  });
+
+  it("draws the border of an invariant an object a field holds declares, under the field's path", async () => {
+    const 範囲 = behavior("範囲", {
+      input: variants("状態", {
+        入力済み: object({ 範囲: object({ 下限: int(), 上限: int() }).refine(v => v.下限.$lte(v.上限)) }),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("範囲", { examples: examples(範囲, {}) }));
+
+    expect(
+      report.borders
+        .filter(border => border.rule.startsWith("invariant"))
+        .map(border => `${border.path}: ${border.points.map(point => `${point.role} ${point.status}`).join(", ")}`),
+    ).toStrictEqual(["@入力済み.範囲.下限 − @入力済み.範囲.上限: ON gap, OFF excluded, IN gap, OUT excluded"]);
   });
 
   it("reports invariants on two positions that leave no value as a model error, as it does for one position", async () => {

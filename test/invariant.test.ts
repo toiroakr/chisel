@@ -45,6 +45,19 @@ describe("arithmetic on numeric terms", () => {
     ]);
   });
 
+  it("stands in with a value that keeps an invariant comparing an expression with a position, by moving the position", () => {
+    const 余裕あり = object({ 甲: int(), 乙: int() }).refine(v => v.甲.$plus(2).$lte(v.乙));
+
+    expect(余裕あり.parse(余裕あり.placeholder()).success).toBe(true);
+  });
+
+  it("writes 0 for an expression whose positions cancel", () => {
+    const 打ち消す = object({ 甲: int() }).refine(v => v.甲.$minus(v.甲).$ne(0));
+    const parsed = 打ち消す.parse({ 甲: 1 });
+
+    expect(parsed.success ? [] : parsed.issues.map(issue => issue.message)).toStrictEqual(["Invariant violated: 0 != 0"]);
+  });
+
   it("holds an expression one of whose positions is left out, as a comparison with an absent operand holds", () => {
     const 任意 = object({ 甲: int(), 乙: int(), 丙: int().optional() }).refine(v => v.甲.$gte(v.乙.$minus(v.丙)));
 
