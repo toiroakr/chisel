@@ -1100,7 +1100,7 @@ export function generate(
           given,
           reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
           ...withFrom(origin),
-        });
+        }, origin);
       }
     }
     if (drawn.form === undefined) {

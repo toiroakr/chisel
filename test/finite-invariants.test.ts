@@ -390,4 +390,21 @@ describe("a row moved across an invariant ordering two numbers", () => {
 
     expect(row !== undefined && row.正 === 1 && row.記録 > 1 && row.記録 <= 1.5).toBe(true);
   });
+
+  it("moves the other number an invariant orders against when a row stands at a point of a guard", () => {
+    const 順序 = behavior("順序", {
+      input: variants("向き", { 減: object({ 正: int(), 記録: int() }).refine(v => v.正.$lt(v.記録)) }),
+      result: 結果,
+      effects: variants("種類", {}),
+    });
+    const 五以上 = implement(順序, {
+      cases: { 減: action("五以上", { guards: 入力 => [入力.正.$gte(5).$else(却下)], run: 受付 }) },
+    });
+    const { rows, notComposed } = generate(examples(順序, {}), 五以上);
+
+    expect({
+      row: rows.find(offered => offered.name === "順序: @減.正 OFF (= 4)")?.given,
+      notComposed,
+    }).toStrictEqual({ row: { 向き: "減", 正: 4, 記録: 5 }, notComposed: [] });
+  });
 });
