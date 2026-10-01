@@ -1086,7 +1086,7 @@ export function generate(
         name: `${definition.name}: ${label}`,
         given: found.given,
         reason: `${drawn.path}を${found.beside.another}と見分ける行の期待結果を人間が決める必要があります`,
-        ...withFrom(found.given),
+        ...withFrom(found.origin),
       });
     }
   }
@@ -1590,7 +1590,7 @@ function besideOf(
   implementation: Implementation<AnyBehavior>,
   drawn: GuardBorder,
   reachedIt: readonly { readonly comparison: ComparisonReached; readonly given: unknown; readonly deps: unknown }[],
-): { readonly beside: Beside; readonly given?: unknown } {
+): { readonly beside: Beside; readonly given?: unknown; readonly origin?: unknown } {
   const parts = [...drawn.form!.parts].sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
   );
@@ -1651,6 +1651,7 @@ function besideOf(
           input: parts.map((part, index) => `${part.path} = ${shown.parting.values[index]}`).join(", "),
         },
         given: shown.given,
+        origin: rows[shown.parting.from]!.given,
       };
 }
 

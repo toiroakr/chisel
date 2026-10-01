@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { action, behavior, check, examples, generate, implement, int, object, spec, variants } from "../src/index.js";
+import { action, behavior, check, dependency, examples, generate, implement, int, object, spec, variants } from "../src/index.js";
 
 // Souther's fixture for E1938: three guards, each of whose borders every row
 // stands at the points of, and none of which a row tells from a line beside it.
@@ -118,6 +118,40 @@ describe("telling a border from the lines beside it", () => {
       { 状態: "入力済み", x: 1, y: 3 },
       { 状態: "入力済み", x: 1, y: 0 },
       { 状態: "入力済み", x: 14, y: 23 },
+    ]);
+  });
+
+  it("writes the stand-ins of the row it stepped from on the row it offers, so the row still reaches the border", () => {
+    const 上限つき = behavior("上限つき", {
+      input: variants("状態", { 入力済み: object({ x: int(), y: int() }) }),
+      result: variants("結果", { 真: object({}), 偽: object({}) }),
+      effects: variants("種類", {}),
+      requires: { 上限: dependency(int()) },
+    });
+    const 上限までの線 = implement(上限つき, {
+      cases: {
+        入力済み: action("上限までの線", {
+          guards: (入力, deps) => [
+            入力.x.$lte(deps.上限).$else(偽),
+            入力.y.$lte(入力.x.$plus(入力.x)).$else(偽),
+          ],
+          run: () => ({ result: { 結果: "真" }, effects: [] }),
+        }),
+      },
+    });
+    const at = (x: number, y: number, answer: "真" | "偽") => ({ ...row(x, y, answer), with: { 上限: 100 } });
+    const { rows } = generate(
+      examples(上限つき, {
+        "(10, 20)": at(10, 20, "真"),
+        "(10, 21)": at(10, 21, "偽"),
+        "(10, 19)": at(10, 19, "真"),
+        "(10, 23)": at(10, 23, "偽"),
+      }),
+      上限までの線,
+    );
+
+    expect(rows.filter(offered => offered.name.includes("隣の線")).map(offered => offered.with)).toStrictEqual([
+      { 上限: 100 },
     ]);
   });
 });
