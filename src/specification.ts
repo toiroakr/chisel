@@ -715,24 +715,24 @@ export async function check(
   const ensuresBorders = ensuresBordersOf(definition)
     .filter(drawn => !isDisregarded(definition, drawn))
     .map((drawn): BorderCoverage => {
-    const coordinates = answeredGivens
-      .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
-      .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
-    return {
-      path: drawn.path,
-      rule: drawn.border.rule,
-      points: drawn.border.points.map(point => ({
-        role: point.role,
-        relation: point.relation,
-        status:
-          point.status !== "owed"
-            ? point.status
-            : coordinates.some(value => value !== undefined && point.contains(value))
-              ? "met"
-              : "gap",
-      })),
-    };
-  });
+      const coordinates = answeredGivens
+        .filter(given => drawn.segments[0] === `@${tagOf(definition.input, given)}`)
+        .map(given => drawn.coordinateOf({ rule: drawn.comparison, scope: given }));
+      return {
+        path: drawn.path,
+        rule: drawn.border.rule,
+        points: drawn.border.points.map(point => ({
+          role: point.role,
+          relation: point.relation,
+          status:
+            point.status !== "owed"
+              ? point.status
+              : coordinates.some(value => value !== undefined && point.contains(value))
+                ? "met"
+                : "gap",
+        })),
+      };
+    });
   borders.push(...ensuresBorders);
   const adequate =
     fakeIssues.length === 0 &&
