@@ -407,4 +407,25 @@ describe("a row moved across an invariant ordering two numbers", () => {
       notComposed,
     }).toStrictEqual({ row: { 向き: "減", 正: 4, 記録: 5 }, notComposed: [] });
   });
+
+  it("moves each number of a chain of orderings once, so the chain is kept together", () => {
+    const 鎖 = behavior("鎖", {
+      input: variants("向き", {
+        減: object({ 甲: int(), 乙: int(), 丙: int() })
+          .refine(v => v.甲.$lt(v.乙))
+          .refine(v => v.乙.$lt(v.丙)),
+      }),
+      result: 結果,
+      effects: variants("種類", {}),
+    });
+    const 十以上 = implement(鎖, {
+      cases: { 減: action("十以上", { guards: 入力 => [入力.甲.$gte(10).$else(却下)], run: 受付 }) },
+    });
+    const { rows, notComposed } = generate(examples(鎖, {}), 十以上);
+
+    expect({
+      row: rows.find(offered => offered.name === "鎖: @減.甲 OFF (= 9)")?.given,
+      notComposed,
+    }).toStrictEqual({ row: { 向き: "減", 甲: 9, 乙: 10, 丙: 11 }, notComposed: [] });
+  });
 });

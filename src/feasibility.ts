@@ -962,6 +962,9 @@ export function keepingOrderings(scope: AnySchema, before: unknown, after: unkno
       : [];
   });
   let kept = after;
+  // A part moved once stays: moving it again to keep a later ordering would
+  // break the one it was moved for, so a chain is kept by moving its next part.
+  const moved = new Set<string>();
   for (let round = 0; round <= orderings.length; round++) {
     const broken = orderings.find(({ rule, parts, constant }) => {
       const values = parts.map(part => readAt(kept, part.path));
@@ -974,7 +977,10 @@ export function keepingOrderings(scope: AnySchema, before: unknown, after: unkno
       return kept;
     }
     const moving = broken.parts.find(
-      part => Math.abs(part.coefficient) === 1 && isDeepStrictEqual(readAt(before, part.path), readAt(after, part.path)),
+      part =>
+        Math.abs(part.coefficient) === 1 &&
+        !moved.has(JSON.stringify(part.path)) &&
+        isDeepStrictEqual(readAt(before, part.path), readAt(after, part.path)),
     );
     if (moving === undefined) {
       return undefined;
@@ -993,6 +999,7 @@ export function keepingOrderings(scope: AnySchema, before: unknown, after: unkno
       return undefined;
     }
     kept = writeAt(kept, moving.path, nearest);
+    moved.add(JSON.stringify(moving.path));
   }
   return undefined;
 }

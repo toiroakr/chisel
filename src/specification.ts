@@ -1148,9 +1148,10 @@ export function generate(
       }
       const origin =
         origins.find(under) ?? definition.input.placeholderFor(drawn.segments[0]!.slice(1));
-      const given = sidesOf(drawn)
+      const candidates = sidesOf(drawn)
         .map(side => drawn.compose(origin, point.witness, withFrom(origin).with, side))
-        .find(candidate => candidate !== undefined && definition.input.parse(candidate).success);
+        .filter(candidate => candidate !== undefined);
+      const given = candidates.find(candidate => definition.input.parse(candidate).success) ?? candidates[0];
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
       } else {
@@ -1159,7 +1160,7 @@ export function generate(
           given,
           reason: `${drawn.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
           ...withFrom(origin),
-        });
+        }, origin);
       }
     }
   }
