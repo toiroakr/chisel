@@ -867,9 +867,17 @@ export function generate(
 
   const answeredRows = rows.filter(row => !isTodo(row.expect));
   const origins = answeredRows.map(row => row.given);
+  const standIns = Object.fromEntries(
+    Object.entries(definition.requires)
+      .filter(([, declared]) => declared.takes === "nothing")
+      .map(([name, declared]) => [name, declared.output.placeholder()]),
+  );
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
-    const written = answeredRows.find(row => row.given === origin)?.with;
-    return written === undefined ? {} : { with: written };
+    const written = answeredRows.find(row => row.given === origin)?.with as
+      | Readonly<Record<string, unknown>>
+      | undefined;
+    const standing = { ...standIns, ...written };
+    return Object.keys(standing).length === 0 && written === undefined ? {} : { with: standing };
   };
   const originFor = (position: Position): unknown =>
     origins.find(given => position.valuesIn(given).length > 0) ??
@@ -907,7 +915,10 @@ export function generate(
     tag => !existing.has(tag) && !refused.includes(tag),
   )) {
     const given = definition.input.placeholderFor(tag);
-    offer({ name: `${definition.name}: ${tag}`, given, reason: `${tag}の期待結果を人間が決める必要があります` }, given);
+    offer(
+      { name: `${definition.name}: ${tag}`, given, reason: `${tag}の期待結果を人間が決める必要があります`, ...withFrom(given) },
+      given,
+    );
   }
 
   for (const position of measuredPositionsOf(definition, guardDivided, guardRead, combinations)) {

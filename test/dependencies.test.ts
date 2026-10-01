@@ -18,6 +18,7 @@ import {
   instant,
   object,
   string,
+  todo,
   variants,
 } from "../src/index.js";
 
@@ -230,6 +231,45 @@ describe("a function dependency", () => {
 });
 
 describe("generated rows and dependencies", () => {
+  it("writes a placeholder stand-in for every value dependency on a row no answered row carries one to, as Souther writes with from the first generate", () => {
+    expect(generate(examples(受付する, {})).rows.map(row => row.with)).toStrictEqual([
+      { 現在時刻: instant().placeholder() },
+    ]);
+  });
+
+  it("writes no stand-in for a function dependency, which a fake stands in for", () => {
+    const 採番して受付する = behavior("採番して受付する", {
+      input: variants("状態", { 申込済み: object({ 申込ID: string() }) }),
+      result: object({ 受付日時: instant() }),
+      effects: variants("種類", {}),
+      requires: { 現在時刻: dependency(instant()), 採番: dependency(string(), string()) },
+    });
+
+    expect(generate(examples(採番して受付する, {})).rows.map(row => row.with)).toStrictEqual([
+      { 現在時刻: instant().placeholder() },
+    ]);
+  });
+
+  it("lets a generated row run as it is, so check finds no row lacking a stand-in", async () => {
+    const 受付で答える = implement(受付する, {
+      cases: {
+        申込済み: action("受付で答える", { run: (_, 依存) => ({ result: { 受付日時: 依存.現在時刻 }, effects: [] }) }),
+      },
+    });
+    const generated = generate(examples(受付する, {}), 受付で答える).rows;
+    const report = await check(
+      spec("受付", {
+        examples: examples(
+          受付する,
+          Object.fromEntries(generated.map(row => [row.name, { given: row.given, with: row.with, expect: todo(row.reason) }])) as never,
+        ),
+        implementation: 受付で答える,
+      }),
+    );
+
+    expect(report.failures).toStrictEqual([]);
+  });
+
   it("carries the values the answered row it was composed from stands in with", () => {
     const 受付する2 = behavior("受付する2", {
       input: variants("状態", { 申込済み: object({ 紹介コード: string().optional() }) }),
