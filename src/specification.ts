@@ -624,15 +624,19 @@ export async function check(
     ? coverage(definition.result.variantTags, coveredResults)
     : coverage([], new Set());
   const effects = coverage(definition.effects.variantTags, coveredEffects);
-  const modelIssues = positionsOf(definition.input).flatMap(position => {
-    const emptied = emptiedBy(position.borders);
+  const pairGroups = new Map<string, GuardBorder[]>();
+  for (const drawn of invariantPairBordersOf(definition)) {
+    const key = JSON.stringify((drawn.reads ?? []).map(segments => JSON.stringify(segments)).sort());
+    pairGroups.set(key, [...(pairGroups.get(key) ?? []), drawn]);
+  }
+  const modelIssues = [
+    ...positionsOf(definition.input).map(position => ({ path: position.path, borders: position.borders })),
+    ...[...pairGroups.values()].map(group => ({ path: group[0]!.path, borders: group.map(drawn => drawn.border) })),
+  ].flatMap(({ path, borders }) => {
+    const emptied = emptiedBy(borders);
     return emptied === undefined
       ? []
-      : [
-          `${position.path}: 不変条件を満たす値がありません (${emptied
-            .map(border => border.rule)
-            .join(", ")})`,
-        ];
+      : [`${path}: 不変条件を満たす値がありません (${emptied.map(border => border.rule).join(", ")})`];
   });
   const partitions = positions.map((position, index): PartitionCoverage => {
     const drawn = guardPartitions.find(partition =>

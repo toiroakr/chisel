@@ -892,6 +892,23 @@ describe("a border an input invariant draws between two positions", () => {
     ]);
   });
 
+  it("reports invariants on two positions that leave no value as a model error, as it does for one position", async () => {
+    const 矛盾する = behavior("矛盾する", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() })
+          .refine(v => v.数量.$lte(v.上限))
+          .refine(v => v.上限.$lt(v.数量)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("矛盾する", { examples: examples(矛盾する, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([
+      "@入力済み.数量 − @入力済み.上限: 不変条件を満たす値がありません (invariant $.数量 <= $.上限, invariant $.上限 < $.数量)",
+    ]);
+  });
+
   it("draws no border when the behavior disregards either of the two positions", async () => {
     const 無視する = behavior("無視する", {
       input: variants("状態", {
