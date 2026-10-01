@@ -406,6 +406,26 @@ describe("chisel generate with a way it could not compose", () => {
   });
 });
 
+describe("chisel generate --ways", () => {
+  const way = '$.甲 == "x" holds, $.乙 == true holds → otherwise';
+
+  it("names a way no single move reaches as a comment by default", async () => {
+    const result = await run(["generate", fixture("test/fixtures/finite-ways.ts")]);
+
+    expect(stdoutOf(result)).toContain(`// 組み立てられなかった道筋: 両方そろえば: ${way}`);
+  });
+
+  it("writes a row for that way when asked to compose ways", async () => {
+    const result = await run(["generate", fixture("test/fixtures/finite-ways.ts"), "--ways"]);
+    const text = stdoutOf(result);
+
+    expect([text.includes(`${JSON.stringify(`判定する: 両方そろえば ${way}`)}: {`), text.includes("組み立てられなかった道筋")]).toStrictEqual([
+      true,
+      false,
+    ]);
+  });
+});
+
 describe("chisel check --json", () => {
   it("writes the reports as one JSON document with a schema version", async () => {
     const result = await run(["check", fixture("test/fixtures/rules.ts"), "--json"]);

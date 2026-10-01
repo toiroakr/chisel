@@ -85,13 +85,19 @@ const checkCommand = defineCommand({
 const generateCommand = defineCommand({
   name: "generate",
   description: "未網羅の入力variantに対するexampleの雛形を出力する",
-  args: z.object({ file: fileArg }),
+  args: z.object({
+    file: fileArg,
+    ways: arg(z.boolean().default(false), {
+      description: "1か所を動かすだけでは通れない道筋も、有限の値をまとめて書き込んで行を出力する",
+    }),
+  }),
   run: async args => {
     const targets = await loadTargets(args.file);
     const printed = targets.map(target => {
       const { rows: generated, notComposed } = generate(
         target.specification.examples,
         target.specification.implementation,
+        { ways: args.ways },
       );
       return [
         formatGeneratedExamples(target, generated),

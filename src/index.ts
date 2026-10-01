@@ -133,6 +133,7 @@ export type {
   ExampleSet,
   GeneratedExample,
   Incompleteness,
+  GenerationOptions,
   GenerationReport,
   InputCaseEvidence,
   Measure,
