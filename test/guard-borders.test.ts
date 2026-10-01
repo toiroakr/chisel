@@ -1108,6 +1108,23 @@ describe("a guard comparing an expression of positions", () => {
     }).toStrictEqual({ rows: [["OFF (= -1)", -1], ["IN (> 0)", 1], ["OUT (< -1)", -2]], notComposed: [] });
   });
 
+  it("names the points of an expression no position of which is counted once, rather than offer a row it cannot write", () => {
+    const 倍 = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("倍", {
+          guards: 入力 => [入力.甲.$plus(入力.甲).$gte(入力.乙.$plus(入力.乙)).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const { rows, notComposed } = generate(examples(釣り合わせる, {}), 倍);
+
+    expect({
+      rows: rows.filter(row => row.name.includes("2 * @入力済み.甲")).map(row => row.name),
+      notComposed: notComposed.filter(line => line.includes("2 * @入力済み.甲")).length,
+    }).toStrictEqual({ rows: [], notComposed: 3 });
+  });
+
   it("carries a constant of the expression into the border's name", async () => {
     const 余裕 = implement(釣り合わせる, {
       cases: {
