@@ -1049,6 +1049,21 @@ describe("a border an input invariant draws between two positions", () => {
     ]);
   });
 
+  it("reports no model error for orderings of one difference that a band of values keeps", async () => {
+    const 帯 = behavior("帯", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() })
+          .refine(v => v.数量.$gt(v.上限))
+          .refine(v => v.数量.$lt(v.上限.$plus(10))),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("帯", { examples: examples(帯, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([]);
+  });
+
   it("tells apart a key holding a NUL from the nested path it would spell when joined", async () => {
     const 紛らわしい = behavior("紛らわしい", {
       input: variants("状態", {
@@ -1583,6 +1598,23 @@ describe("a guard comparing an expression of positions", () => {
     expect(
       report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status)[0] : undefined,
     ).toBe("undecided");
+  });
+
+  it("writes a point of an expression by moving a part that still reaches the guard, past an earlier guard on another", () => {
+    const 先に = implement(釣り合わせる, {
+      cases: {
+        入力済み: action("先に", {
+          guards: 入力 => [入力.甲.$lte(0).$else(却下), 入力.甲.$plus(入力.乙).$gte(10).$else(却下)],
+          run: () => ({ result: { 結果: "受付" }, effects: [] }),
+        }),
+      },
+    });
+    const { rows } = generate(examples(釣り合わせる, {}), 先に);
+    const on = rows.find(row => row.name === "釣り合わせる: @入力済み.甲 + @入力済み.乙 − 10 ON (= 0)")?.given as
+      | { 甲: number; 乙: number }
+      | undefined;
+
+    expect(on !== undefined && on.甲 <= 0 && on.甲 + on.乙 === 10).toBe(true);
   });
 
   it("carries a constant of the expression into the border's name", async () => {

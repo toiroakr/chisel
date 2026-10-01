@@ -1091,7 +1091,14 @@ export function generate(
       const candidates = sidesOf(drawn)
         .map(side => drawn.compose(origin, point.witness, withFrom(origin).with, side))
         .filter(candidate => candidate !== undefined);
-      const given = candidates.find(candidate => definition.input.parse(candidate).success) ?? candidates[0];
+      // A row the input takes stands at the point only once the guards before
+      // the comparison let it through, which moving another part may not.
+      const reaches = (candidate: unknown) =>
+        reachedBy(candidate, withFrom(origin).with).some(item => point.contains(drawn.coordinateOf(item)));
+      const given =
+        candidates.find(candidate => definition.input.parse(candidate).success && reaches(candidate)) ??
+        candidates.find(candidate => !definition.input.parse(candidate).success) ??
+        candidates.find(candidate => definition.input.parse(candidate).success);
       if (given === undefined) {
         notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
       } else {
