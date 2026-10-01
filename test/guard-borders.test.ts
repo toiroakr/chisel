@@ -1002,6 +1002,21 @@ describe("a border an input invariant draws between two positions", () => {
     expect(report.modelIssues).toStrictEqual([]);
   });
 
+  it("reports no model error for a self-cancelling invariant on a field one case of a sum field may leave out", async () => {
+    const 選べる = behavior("選べる", {
+      input: variants("状態", {
+        入力済み: object({
+          選択: variants("種類", { 甲: object({ 数量: int() }), 乙: object({ 数量: int().optional() }) }),
+        }).refine(v => v.選択.数量.$lt(v.選択.数量)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("選べる", { examples: examples(選べる, {}) }));
+
+    expect(report.modelIssues).toStrictEqual([]);
+  });
+
   it("tells apart a key holding a NUL from the nested path it would spell when joined", async () => {
     const 紛らわしい = behavior("紛らわしい", {
       input: variants("状態", {

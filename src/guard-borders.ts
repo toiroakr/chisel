@@ -36,7 +36,7 @@ import {
   decimalOfUnits,
   decimalUnits,
 } from "./rule.js";
-import { enumOf, holdsNoDecimal, int, object, offGridEquality, schemaAtPath } from "./schema.js";
+import { enumOf, holdsNoDecimal, int, isVariantsSchema, object, offGridEquality, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -215,17 +215,29 @@ function readPathsOf(rule: CompareRule): readonly (readonly string[])[] {
 // ["@case", ".key"], is or lies under a field that may be left out.
 export function mayBeLeftOut(definition: AnyBehavior, segments: readonly string[]): boolean {
   const [caseSegment, ...keys] = segments;
-  let schema = definition.input.variants[caseSegment!.slice(1)] as AnySchema | undefined;
-  for (const key of keys) {
-    if (schema === undefined || schema.kind === "optional") {
-      return schema !== undefined;
-    }
-    if (schema.kind !== "object" || !key.startsWith(".")) {
-      return false;
-    }
-    schema = (schema as ObjectSchema<ObjectShape>).shape[key.slice(1)];
+  return leavesOut(definition.input.variants[caseSegment!.slice(1)] as AnySchema | undefined, keys);
+}
+
+// A sum field leaves a path out when any of its cases does: the path names a
+// field its cases share, and a value may be of the case that omits it.
+function leavesOut(schema: AnySchema | undefined, keys: readonly string[]): boolean {
+  if (schema === undefined) {
+    return false;
   }
-  return schema?.kind === "optional";
+  if (schema.kind === "optional") {
+    return true;
+  }
+  if (isVariantsSchema(schema)) {
+    const [key, ...rest] = keys;
+    return key?.startsWith("@") === true
+      ? leavesOut(schema.variants[key.slice(1)] as AnySchema | undefined, rest)
+      : schema.variantTags.some(tag => leavesOut(schema.variants[tag] as AnySchema, keys));
+  }
+  const [key, ...rest] = keys;
+  if (key === undefined || schema.kind !== "object" || !key.startsWith(".")) {
+    return false;
+  }
+  return leavesOut((schema as ObjectSchema<ObjectShape>).shape[key.slice(1)], rest);
 }
 
 function pairInvariantsOf(
