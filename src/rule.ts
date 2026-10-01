@@ -15,6 +15,7 @@ export type Comparable = number | string | Moment | Decimal;
 const TERM = Symbol.for("chisel.term");
 
 export interface TermData {
+  readonly kind: "position";
   readonly path: readonly string[];
   readonly measure: "value" | "length";
 }
@@ -546,7 +547,7 @@ const OPERATORS: Readonly<Record<string, Operator>> = {
 };
 
 function termAt(path: readonly string[], measure: TermData["measure"]): Term<unknown> {
-  const data: TermData = { path, measure };
+  const data: TermData = { kind: "position", path, measure };
   const self: Term<unknown> = new Proxy({} as Term<unknown>, {
     get: (_target, key) => {
       if (key === TERM) {
