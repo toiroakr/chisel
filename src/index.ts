@@ -135,6 +135,7 @@ export type {
   ExampleFailure,
   ExampleRow,
   ExampleSet,
+  Expected,
   GeneratedExample,
   Incompleteness,
   GenerationOptions,
