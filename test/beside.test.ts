@@ -96,4 +96,18 @@ describe("telling a border from the lines beside it", () => {
       verdict: "not_satisfied",
     });
   });
+
+  it("suggests an input the two lines answer differently at, one step along the border from a row, as Souther's hint does", async () => {
+    const report = await check(
+      spec("三つの線", { examples: examples(判定する, southersRows), implementation: 三つの線 }),
+    );
+
+    expect(
+      report.borders.map(border => (border.beside?.status === "not told" ? border.beside.input : undefined)),
+    ).toStrictEqual([
+      "@入力済み.x = 1, @入力済み.y = 3",
+      "@入力済み.x = 1, @入力済み.y = 0",
+      "@入力済み.x = 14, @入力済み.y = 23",
+    ]);
+  });
 });

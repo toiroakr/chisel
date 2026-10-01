@@ -392,10 +392,12 @@ describe("chisel check with borders", () => {
 });
 
 describe("chisel check with a border no row tells from a line beside it", () => {
-  it("prints the line beside the border that every row falls on the same side of", async () => {
+  it("prints the line beside the border that every row falls on the same side of, and where to write a row", async () => {
     const result = await run(["check", fixture("test/fixtures/beside.ts")]);
 
-    expect(stdoutOf(result)).toMatch(/^      隣の線 +! -@入力済み\.x \+ @入力済み\.y = 0 と見分ける行がない$/m);
+    expect(stdoutOf(result)).toMatch(
+      /^      隣の線 +! -@入力済み\.x \+ @入力済み\.y = 0 と見分ける行がない: @入力済み\.x = 1, @入力済み\.y = 2 に行を書く$/m,
+    );
   });
 });
 

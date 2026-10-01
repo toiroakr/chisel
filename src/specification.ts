@@ -33,7 +33,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, differenceOf, holds, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
+import { DEPS, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -43,7 +43,8 @@ import type { EnsuresReport } from "./ensures.js";
 import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js";
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Beside } from "./beside.js";
-import { allOnOneSide, lineTheRowsAllow, spelled } from "./beside.js";
+import type { Parting } from "./beside.js";
+import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
 import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
@@ -382,7 +383,12 @@ export async function check(
   const answeredGivens: unknown[] = [];
   const armsMet: ArmTaken[] = [];
   const armsOwed: ArmTaken[] = [];
-  const reached: { readonly tag: string | undefined; readonly comparison: ComparisonReached }[] = [];
+  const reached: {
+    readonly tag: string | undefined;
+    readonly comparison: ComparisonReached;
+    readonly given: unknown;
+    readonly deps: unknown;
+  }[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
   const fakeIssues = fakeIssuesOf(definition.requires, definition.name, specification.fakes);
@@ -557,7 +563,12 @@ export async function check(
           const traced = await runTraced(implementation, input, standIns(row) as never);
           armsMet.push(...traced.arms);
           reached.push(
-            ...traced.comparisons.map(comparison => ({ tag: tagOf(definition.input, input), comparison })),
+            ...traced.comparisons.map(comparison => ({
+              tag: tagOf(definition.input, input),
+              comparison,
+              given: input,
+              deps: standIns(row),
+            })),
           );
           if (traced.way !== undefined) {
             waysMet.push(traced.way);
@@ -722,7 +733,7 @@ export async function check(
       drawn.form !== undefined &&
       owed.some(point => point.status === "met") &&
       owed.every(point => point.status === "met" || point.status === "no row owed");
-    const beside = due ? besideOf(drawn, reachedIt.map(item => item.comparison.scope)) : undefined;
+    const beside = due ? besideOf(definition, specification.implementation!, drawn, reachedIt) : undefined;
     return {
       path: drawn.path,
       rule: drawn.border.rule,
@@ -1545,13 +1556,20 @@ function unmetStatus(
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
 }
 
-function besideOf(drawn: GuardBorder, scopes: readonly unknown[]): Beside {
+function besideOf(
+  definition: AnyBehavior,
+  implementation: Implementation<AnyBehavior>,
+  drawn: GuardBorder,
+  reachedIt: readonly { readonly comparison: ComparisonReached; readonly given: unknown; readonly deps: unknown }[],
+): Beside {
   const parts = [...drawn.form!.parts].sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
   );
-  const rows = scopes.flatMap(scope => {
-    const values = parts.map(part => part.valueOf(scope));
-    return values.every(value => value !== undefined) ? [{ values, kept: holds(drawn.comparison, scope) }] : [];
+  const rows = reachedIt.flatMap(item => {
+    const values = parts.map(part => part.valueOf(item.comparison.scope));
+    return values.every(value => value !== undefined)
+      ? [{ values, kept: holds(drawn.comparison, item.comparison.scope), given: item.given, deps: item.deps }]
+      : [];
   });
   const kept = rows.filter(row => row.kept).map(row => row.values);
   if (kept.length === 0) {
@@ -1564,9 +1582,61 @@ function besideOf(drawn: GuardBorder, scopes: readonly unknown[]): Beside {
     kept,
     rows.filter(row => !row.kept).map(row => row.values),
   );
-  return line === undefined
-    ? { status: "told" }
-    : { status: "not told", another: spelled(parts.map(part => part.path), line) };
+  if (line === undefined) {
+    return { status: "told" };
+  }
+  const others = (drawn.origin?.decision.guards ?? []).filter(guard => !mentions(guard.condition, drawn.comparison));
+  const shown = partingsOf(parts.map(part => part.coefficient), line, keptBelow, rows)
+    .flatMap(parting => {
+      const given = parts.reduce<unknown>(
+        (written, part, index) => (written === undefined ? undefined : part.write(written, parting.values[index]!)),
+        rows[parting.from]!.given,
+      );
+      const deps = rows[parting.from]!.deps;
+      const reaches =
+        given !== undefined &&
+        definition.input.parse(given).success &&
+        comparisonsReached(implementation, given, deps).some(item => item.rule === drawn.comparison);
+      if (!reaches) {
+        return [];
+      }
+      const visible = others.every(guard => holds(guard.condition, withDeps(given, deps)));
+      return [{ parting, rank: [visible ? 0 : 1, Math.abs(parting.steps)] as const }];
+    })
+    .reduce<{ parting: Parting; rank: readonly [number, number] } | undefined>(
+      (best, candidate) =>
+        best === undefined ||
+        candidate.rank[0] < best.rank[0] ||
+        (candidate.rank[0] === best.rank[0] && candidate.rank[1] < best.rank[1])
+          ? candidate
+          : best,
+      undefined,
+    );
+  return {
+    status: "not told",
+    another: spelled(parts.map(part => part.path), line),
+    ...(shown === undefined
+      ? {}
+      : { input: parts.map((part, index) => `${part.path} = ${shown.parting.values[index]}`).join(", ") }),
+  };
+}
+
+function mentions(rule: Rule, target: Rule): boolean {
+  if (rule === target) {
+    return true;
+  }
+  switch (rule.kind) {
+    case "and":
+    case "or":
+      return rule.rules.some(part => mentions(part, target));
+    case "not":
+      return mentions(rule.rule, target);
+    case "all":
+    case "any":
+      return mentions(rule.each, target);
+    default:
+      return false;
+  }
 }
 
 function reachOf(
