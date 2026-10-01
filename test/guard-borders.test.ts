@@ -870,6 +870,28 @@ describe("a border an input invariant draws between two positions", () => {
     });
   });
 
+  it("excludes a point of one invariant that another invariant on the same difference refuses, as it does on one position", async () => {
+    const 一致させる = behavior("一致させる", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() })
+          .refine(v => v.数量.$lte(v.上限))
+          .refine(v => v.上限.$lte(v.数量)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const report = await check(spec("一致させる", { examples: examples(一致させる, {}) }));
+
+    expect(
+      report.borders
+        .filter(border => border.rule.startsWith("invariant"))
+        .map(border => `${border.rule}: ${border.points.map(point => `${point.role} ${point.status}`).join(", ")}`),
+    ).toStrictEqual([
+      "invariant $.数量 <= $.上限: ON gap, OFF excluded, IN excluded, OUT excluded",
+      "invariant $.上限 <= $.数量: ON gap, OFF excluded, IN excluded, OUT excluded",
+    ]);
+  });
+
   it("draws no border when the behavior disregards either of the two positions", async () => {
     const 無視する = behavior("無視する", {
       input: variants("状態", {

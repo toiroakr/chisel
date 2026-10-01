@@ -141,7 +141,7 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
   return input.variantTags.flatMap(tag => {
     const scope = input.variants[tag] as AnySchema;
     const frames = framesAt(scope, `@${tag}`, "$");
-    return [...input.invariants, ...scope.invariants]
+    const drawn = [...input.invariants, ...scope.invariants]
       .flatMap(conjuncts)
       .flatMap(rule =>
         rule.kind === "compare" && isTerm(rule.left) && isTerm(rule.right)
@@ -151,7 +151,43 @@ export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardB
             })
           : [],
       );
+    return drawn.map(border => withoutPairRefusedPoints(border, drawn));
   });
+}
+
+// Not left to bordersOf, which excludes a point another bound on the same
+// measure refuses: each comparison of two positions is drawn on a difference of
+// its own, so the bounds on one difference never meet there.
+function withoutPairRefusedPoints(border: GuardBorder, all: readonly GuardBorder[]): GuardBorder {
+  const [first, second] = (border.reads ?? []).map(segments => JSON.stringify(segments));
+  const others = all.flatMap(other => {
+    const [otherFirst, otherSecond] = (other.reads ?? []).map(segments => JSON.stringify(segments));
+    if (other === border || first === undefined) {
+      return [];
+    }
+    return otherFirst === first && otherSecond === second
+      ? [{ other, sign: 1 }]
+      : otherFirst === second && otherSecond === first
+        ? [{ other, sign: -1 }]
+        : [];
+  });
+  const refuses = (witness: unknown): boolean =>
+    others.some(({ other, sign }) => {
+      const value = sign === 1 ? witness : typeof witness === "bigint" ? -witness : -(witness as number);
+      const zero = typeof value === "bigint" ? 0n : 0;
+      return !holds({ ...other.comparison, left: value, right: zero } as Rule, undefined);
+    });
+  return {
+    ...border,
+    border: {
+      ...border.border,
+      points: border.border.points.map(point =>
+        point.status === "owed" && point.witness !== undefined && refuses(point.witness)
+          ? { ...point, status: "excluded" }
+          : point,
+      ),
+    },
+  };
 }
 
 function unrooted(rule: Rule): Rule | undefined {
