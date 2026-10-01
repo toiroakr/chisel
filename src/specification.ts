@@ -736,7 +736,7 @@ export async function check(
   };
   borders.push(
     ...[...ensuresBordersOf(definition), ...invariantPairBordersOf(definition)]
-      .filter(drawn => !isDisregarded(definition, drawn))
+      .filter(drawn => !disregardsBorder(definition, drawn))
       .map(writtenCoverage),
   );
   const adequate =
@@ -1027,7 +1027,7 @@ export function generate(
     }
   }
 
-  for (const drawn of invariantPairBordersOf(definition).filter(drawn => !isDisregarded(definition, drawn))) {
+  for (const drawn of invariantPairBordersOf(definition).filter(drawn => !disregardsBorder(definition, drawn))) {
     const under = (given: unknown) => drawn.segments[0] === `@${tagOf(definition.input, given)}`;
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
@@ -1574,6 +1574,10 @@ function coverage(
     excluded: all.filter(value => excluded.includes(value)),
     total: counted.length,
   };
+}
+
+function disregardsBorder(definition: AnyBehavior, drawn: GuardBorder): boolean {
+  return [drawn.segments, ...(drawn.reads ?? [])].some(segments => isDisregarded(definition, { segments }));
 }
 
 function isDisregarded(definition: AnyBehavior, position: Pick<Position, "segments">): boolean {

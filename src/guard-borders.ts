@@ -44,6 +44,7 @@ import type {
 export interface GuardBorder {
   readonly path: string;
   readonly segments: readonly string[];
+  readonly reads?: readonly (readonly string[])[];
   readonly comparison: CompareRule;
   readonly border: Border;
   readonly origin?: {
@@ -575,6 +576,7 @@ function between(
   return borders.map(border => ({
     path: `${first.path} − ${second.path}`,
     segments: (first.standsIn ? second : first).segments,
+    reads: sides.filter(side => !side.standsIn).map(side => side.segments),
     comparison: rule,
     border,
     coordinateOf: reached => {

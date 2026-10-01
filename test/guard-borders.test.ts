@@ -870,6 +870,20 @@ describe("a border an input invariant draws between two positions", () => {
     });
   });
 
+  it("draws no border when the behavior disregards either of the two positions", async () => {
+    const 無視する = behavior("無視する", {
+      input: variants("状態", {
+        入力済み: object({ 数量: int(), 上限: int() }).refine(v => v.数量.$lte(v.上限)),
+      }),
+      result: variants("結果", { 受付: object({}) }),
+      effects: variants("種類", {}),
+      disregards: { 入力済み: r => [r.上限] },
+    });
+    const report = await check(spec("無視する", { examples: examples(無視する, {}) }));
+
+    expect(report.borders.filter(border => border.rule.startsWith("invariant"))).toStrictEqual([]);
+  });
+
   it("names the border after the invariant it was drawn from, as a named invariant on one position does", async () => {
     const 名付ける = behavior("名付ける", {
       input: variants("状態", {
