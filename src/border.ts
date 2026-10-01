@@ -380,7 +380,7 @@ function borderOf(
     border: {
       source: drawing.source,
       measure,
-      rule: `${drawing.source} ${drawing.describe(rule)}`,
+      rule: `${drawing.source} ${rule.name === undefined ? "" : `${rule.name}: `}${drawing.describe(rule)}`,
       closed,
       points: points.map((point, index) =>
         reaching[index] === true ? noPointBelow(point.role, carrier) : point,
@@ -478,7 +478,7 @@ function namedValueBorder(
     border: {
       source: drawing.source,
       measure,
-      rule: `${drawing.source} ${drawing.describe(rule)}`,
+      rule: `${drawing.source} ${rule.name === undefined ? "" : `${rule.name}: `}${drawing.describe(rule)}`,
       closed: keeps,
       points,
     },

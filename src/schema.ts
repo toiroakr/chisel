@@ -16,7 +16,10 @@ import {
 export interface ValidationIssue {
   readonly path: string;
   readonly message: string;
+  // The name of the invariant the value breaks, where it was given one.
+  readonly invariant?: string;
 }
+
 
 export type ValidationResult<T> =
   | { readonly success: true; readonly value: T }
@@ -30,6 +33,8 @@ export interface Schema<T> {
   parse(value: unknown, path?: string): ValidationResult<T>;
   placeholder(name?: string): unknown;
   refine(rule: InvariantRule<T>): this;
+  // A named invariant takes its name first, as every named construct does.
+  refine(name: string, rule: InvariantRule<T>): this;
   describe(text: string): this;
   // Typed through `this` rather than T: naming T here would make Schema<T>
   // invariant in T, and StringSchema would stop being an AnySchema.
@@ -40,15 +45,22 @@ export interface Schema<T> {
 // same rule refine() would take, so the analysis reads them alike.
 interface ValueBounds<T> {
   min(bound: T): this;
+  min(name: string, bound: T): this;
   max(bound: T): this;
+  max(name: string, bound: T): this;
   gt(bound: T): this;
+  gt(name: string, bound: T): this;
   lt(bound: T): this;
+  lt(name: string, bound: T): this;
 }
 
 interface LengthBounds {
   min(length: number): this;
+  min(name: string, length: number): this;
   max(length: number): this;
+  max(name: string, length: number): this;
   length(length: number): this;
+  length(name: string, length: number): this;
 }
 
 export type AnySchema = Schema<unknown>;
@@ -211,10 +223,21 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       if (!result.success) {
         return result;
       }
-      const broken = invariants.find(rule => !holds(rule, result.value));
-      return broken === undefined
+      const broken = invariants.filter(rule => !holds(rule, result.value));
+      return broken.length === 0
         ? result
-        : invalid(path, `Invariant violated: ${describeRule(broken, path)}`);
+        : {
+            success: false as const,
+            issues: broken.map(rule =>
+              rule.name === undefined
+                ? { path, message: `Invariant violated: ${describeRule(rule, path)}` }
+                : {
+                    path,
+                    message: `Invariant ${rule.name} violated: ${describeRule(rule, path)}`,
+                    invariant: rule.name,
+                  },
+            ),
+          };
     },
     placeholder(name?: string) {
       // An enum has no value to step to, so a rule on one, its own or one an
@@ -232,8 +255,12 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         .flatMap(conjuncts)
         .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
     },
-    refine(rule: (self: TermOf<unknown>) => Rule) {
-      const refined = rule(selfTerm());
+    refine(...args: readonly [(self: TermOf<unknown>) => Rule] | readonly [string, (self: TermOf<unknown>) => Rule]) {
+      const [name, rule] = args.length === 2 ? args : [undefined, args[0]];
+      if (name !== undefined && invariants.some(invariant => invariant.name === name)) {
+        throw new Error(`Invariant ${name} is declared more than once`);
+      }
+      const refined: Rule = name === undefined ? rule(selfTerm()) : { ...rule(selfTerm()), name };
       const offGrid = offGridEquality(refined, keys => fieldOf(schema as unknown as AnySchema, keys), "$");
       if (offGrid !== undefined) {
         throw new Error(`refine ${offGrid}`);
@@ -247,20 +274,28 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       return optional(schema as unknown as S);
     },
   };
-  const refine = (rule: (self: any) => Rule): S => schema.refine(rule);
+  // A bound is never a string, so a leading string is the invariant's name.
+  const bounded =
+    (write: (self: any, bound: any) => Rule) =>
+    (...args: readonly unknown[]): S => {
+      const bound = args[args.length - 1];
+      return typeof args[0] === "string" && args.length === 2
+        ? schema.refine(args[0], self => write(self, bound))
+        : schema.refine(self => write(self, bound));
+    };
   if (ORDERED_KINDS.has(core.kind)) {
     Object.assign(schema, {
-      min: (bound: unknown) => refine(v => v.$gte(bound)),
-      max: (bound: unknown) => refine(v => v.$lte(bound)),
-      gt: (bound: unknown) => refine(v => v.$gt(bound)),
-      lt: (bound: unknown) => refine(v => v.$lt(bound)),
+      min: bounded((v, bound) => v.$gte(bound)),
+      max: bounded((v, bound) => v.$lte(bound)),
+      gt: bounded((v, bound) => v.$gt(bound)),
+      lt: bounded((v, bound) => v.$lt(bound)),
     });
   }
   if (core.kind === "string" || core.kind === "array" || core.kind === "record") {
     Object.assign(schema, {
-      min: (length: number) => refine(v => v.$length().$gte(length)),
-      max: (length: number) => refine(v => v.$length().$lte(length)),
-      length: (length: number) => refine(v => v.$length().$eq(length)),
+      min: bounded((v, length) => v.$length().$gte(length)),
+      max: bounded((v, length) => v.$length().$lte(length)),
+      length: bounded((v, length) => v.$length().$eq(length)),
     });
   }
   return schema as unknown as S;
