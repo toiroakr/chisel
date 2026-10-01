@@ -36,7 +36,7 @@ import {
   decimalOfUnits,
   decimalUnits,
 } from "./rule.js";
-import { enumOf, holdsNoDecimal, int, object, schemaAtPath } from "./schema.js";
+import { enumOf, holdsNoDecimal, int, object, offGridEquality, schemaAtPath } from "./schema.js";
 import type {
   AnySchema,
   ArraySchema,
@@ -353,7 +353,10 @@ export function offGridEqualityIn(
       return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
     }
   }
-  return undefined;
+  const scope = guardScope(definition, tag);
+  return decision.guards
+    .map(candidate => offGridEquality(candidate.condition, path => schemaAtPath(scope, path), "$"))
+    .find(found => found !== undefined);
 }
 
 interface Frame {

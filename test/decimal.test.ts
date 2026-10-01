@@ -167,6 +167,23 @@ describe("a guard comparing a decimal with a value off its grid", () => {
       new SpecificationError("guard in 半端な額 compares $.合計 with 0.005, which no decimal(2) holds: $.合計 != 0.005"),
     );
   });
+
+  it("is refused by implement for an expression of decimals none of which holds the bound", () => {
+    expect(() =>
+      implement(支払う, {
+        cases: {
+          カード: action("半端な額", {
+            guards: r => [r.合計.$plus(r.合計).$eq(d("0.005")).$else(() => 請求した)],
+            run: () => 請求した,
+          }),
+        },
+      }),
+    ).toThrow(
+      new SpecificationError(
+        "guard in 半端な額 compares 2 * $.合計 with 0.005, which no decimal(2) holds: 2 * $.合計 == 0.005",
+      ),
+    );
+  });
 });
 
 describe("a comparison of a decimal with a value off its grid outside the guards", () => {
@@ -182,6 +199,24 @@ describe("a comparison of a decimal with a value off its grid outside the guards
     expect(() => object({ 合計: decimal(2) }).refine(v => v.合計.$ne(半端))).toThrow(
       new Error("refine compares $.合計 with 0.005, which no decimal(2) holds: $.合計 != 0.005"),
     );
+  });
+
+  it("is refused for an expression of decimals, whose values lie on the grid of the finest of them", () => {
+    expect(() => object({ 甲: decimal(2), 乙: decimal(2) }).refine(v => v.甲.$plus(v.乙).$eq(半端))).toThrow(
+      new Error("refine compares $.甲 + $.乙 with 0.005, which no decimal(2) holds: $.甲 + $.乙 == 0.005"),
+    );
+  });
+
+  it("is refused for an expression whose constant leaves the bound off its grid", () => {
+    expect(() => object({ 甲: decimal(2) }).refine(v => v.甲.$plus(半端).$eq(d("0.01")))).toThrow(
+      new Error("refine compares $.甲 + 0.005 with 0.01, which no decimal(2) holds: $.甲 + 0.005 == 0.01"),
+    );
+  });
+
+  it("is kept for an expression one of whose decimals is fine enough to hold the bound", () => {
+    expect(() =>
+      object({ 甲: decimal(2), 乙: decimal(3) }).refine(v => v.甲.$plus(v.乙).$eq(半端)),
+    ).not.toThrow();
   });
 
   it("is refused on each element of an array", () => {
