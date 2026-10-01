@@ -188,7 +188,7 @@ describe("an enum in the rules", () => {
     ]);
   });
 
-  it("owes no row to a way asking for two of its values at once", async () => {
+  it("lists no way asking for two of its values at once", async () => {
     const 両方 = implement(申請する, {
       cases: {
         下書き: action("交通費かつ宿泊費", {
@@ -209,7 +209,7 @@ describe("an enum in the rules", () => {
     );
 
     const rules = report.measures.rules.status === "complete" ? report.measures.rules.rules : [];
-    expect(rules.find(rule => rule.way.endsWith("→ otherwise"))?.status).toBe("no row owed");
+    expect(rules.find(rule => rule.way.endsWith("→ otherwise"))).toBe(undefined);
   });
 });
 

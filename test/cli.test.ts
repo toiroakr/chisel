@@ -177,6 +177,35 @@ describe("chisel check with the limits of the disregards check", () => {
   });
 });
 
+describe("chisel check with the limit of the combinations feasibility tries", () => {
+  it("takes the limit from an option and leaves a way past it undecided", async () => {
+    const result = await run([
+      "check",
+      fixture("test/fixtures/finite-invariants.ts"),
+      "--feasibility-combinations",
+      "1",
+    ]);
+
+    expect(stdoutOf(result)).toMatch(
+      /^    未決 \(undecided\): 不変条件とあわせて調べる値の組が上限の1通りを超える — 1件$/m,
+    );
+  });
+});
+
+describe("chisel check and generate with the limit of the ways listed", () => {
+  it("leaves a decision with more ways than the limit unmeasured in check", async () => {
+    const result = await run(["check", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "3"]);
+
+    expect(stdoutOf(result)).toMatch(/^  道筋 +計測不能 \(not measured\); 読めないdecision: 多い$/m);
+  });
+
+  it("names such a decision instead of composing its ways in generate", async () => {
+    const result = await run(["generate", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "3"]);
+
+    expect(stdoutOf(result)).toMatch(/^\/\/ 組み立てられなかった道筋: 多い: 道筋が上限の3本を超えるため組み立てない$/m);
+  });
+});
+
 describe("chisel check with an external implementation", () => {
   it("prints each row it could not run and why", async () => {
     const result = await run(["check", fixture("test/fixtures/external.ts")]);
@@ -423,6 +452,19 @@ describe("chisel generate --ways", () => {
       true,
       false,
     ]);
+  });
+});
+
+describe("chisel generate with the limit of the combinations feasibility tries", () => {
+  it("takes the limit from an option, past which a class it cannot rule out is named", async () => {
+    const result = await run([
+      "generate",
+      fixture("test/fixtures/finite-exclusion.ts"),
+      "--feasibility-combinations",
+      "1",
+    ]);
+
+    expect(stdoutOf(result)).toMatch(/^\/\/ 組み立てられなかった道筋: 決まる: @入力済み\.乙 = v: /m);
   });
 });
 

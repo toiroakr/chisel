@@ -58,6 +58,12 @@ const checkCommand = defineCommand({
     disregardCandidates: arg(z.coerce.number().int().positive().optional(), {
       description: "disregardsの確認で数える候補の上限（既定は4096）",
     }),
+    feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
+      description: "不変条件とあわせて道筋や境界点を確かめるときに試す値の組の上限（既定は4096）",
+    }),
+    feasibilityWays: arg(z.coerce.number().int().positive().optional(), {
+      description: "decisionごとにたどる道筋の上限。超えたdecisionは計測しない（既定は10000）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
@@ -66,7 +72,12 @@ const checkCommand = defineCommand({
       ...(args.disregardCandidates === undefined ? {} : { candidates: args.disregardCandidates }),
     };
     const reports = await Promise.all(
-      targets.map(target => check(target.specification, { disregards })),
+      targets.map(target =>
+        check(target.specification, {
+          disregards,
+          feasibility: feasibilityOptions(args),
+        }),
+      ),
     );
     if (args.json) {
       const document = reportDocument(reports, { id: resolve(args.file), name: args.file });
@@ -90,6 +101,12 @@ const generateCommand = defineCommand({
     ways: arg(z.boolean().default(false), {
       description: "1か所を動かすだけでは通れない道筋も、有限の値をまとめて書き込んで行を出力する",
     }),
+    feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
+      description: "不変条件とあわせて行を組み立てるときに試す値の組の上限（既定は4096）",
+    }),
+    feasibilityWays: arg(z.coerce.number().int().positive().optional(), {
+      description: "decisionごとにたどる道筋の上限。超えたdecisionの道筋は組み立てない（既定は10000）",
+    }),
   }),
   run: async args => {
     const targets = await loadTargets(args.file);
@@ -97,7 +114,10 @@ const generateCommand = defineCommand({
       const { rows: generated, notComposed } = generate(
         target.specification.examples,
         target.specification.implementation,
-        { ways: args.ways },
+        {
+          ways: args.ways,
+          feasibility: feasibilityOptions(args),
+        },
       );
       return [
         formatGeneratedExamples(target, generated),
@@ -496,4 +516,14 @@ function isRunAsScript(): boolean {
 
 if (isRunAsScript()) {
   await runMain(cli);
+}
+
+function feasibilityOptions(args: {
+  readonly feasibilityCombinations?: number | undefined;
+  readonly feasibilityWays?: number | undefined;
+}): { readonly combinations?: number; readonly ways?: number } {
+  return {
+    ...(args.feasibilityCombinations === undefined ? {} : { combinations: args.feasibilityCombinations }),
+    ...(args.feasibilityWays === undefined ? {} : { ways: args.feasibilityWays }),
+  };
 }
