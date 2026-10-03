@@ -21,11 +21,12 @@ export function reportDocument(
   reports: readonly AdequacyReport[],
   source: ReportSource,
 ): unknown {
-  return {
+  const document = {
     schemaVersion: reportSchemaVersion,
     sources: [source],
     reports: reports.map(report => reportJson(report, source.id)),
   };
+  return JSON.parse(JSON.stringify(document, (_key, value) => typeof value === "bigint" ? String(value) : value));
 }
 
 function reportJson(report: AdequacyReport, source: string): unknown {
@@ -51,9 +52,11 @@ function reportJson(report: AdequacyReport, source: string): unknown {
           }),
     })),
     measures: {
+      constructions: report.measures.constructions,
       arms: armsJson(report.measures.arms, identities),
       rules: rulesJson(report.measures.rules, identities),
       comparisons: comparisonsJson(report.measures.comparisons),
+      pairs: { ...report.measures.pairs, obligations: report.measures.pairs.obligations.map(pair => ({ ...pair, obligationId: identities.claim(`pair ${pair.positions.join(" | ")} | ${pair.classes.join(" | ")}`) })) },
     },
   };
 }

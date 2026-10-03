@@ -895,12 +895,128 @@
                   "additionalProperties": false
                 }
               ]
+            },
+            "pairs": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "enum": [
+                    "complete",
+                    "partial"
+                  ]
+                },
+                "notRead": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "obligations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "positions": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                      },
+                      "classes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                      },
+                      "status": {
+                        "enum": [
+                          "met",
+                          "gap",
+                          "answer owed",
+                          "no row owed",
+                          "undecided"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "obligationId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "positions",
+                      "classes",
+                      "status",
+                      "obligationId"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "notRead",
+                "obligations"
+              ],
+              "additionalProperties": false
+            },
+            "constructions": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "enum": [
+                    "verified",
+                    "refuted",
+                    "undetermined"
+                  ]
+                },
+                "decisions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "decision": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "verified",
+                          "refuted",
+                          "undetermined"
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "counterexample": {}
+                    },
+                    "required": [
+                      "decision",
+                      "status",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "status",
+                "decisions"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
             "arms",
             "rules",
-            "comparisons"
+            "comparisons",
+            "pairs",
+            "constructions"
           ],
           "additionalProperties": false
         },

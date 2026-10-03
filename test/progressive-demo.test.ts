@@ -14,7 +14,7 @@ import {
 } from "../examples/progressive-demo/stage-04-complete.spec.js";
 
 describe("progressive specification demo", () => {
-  it("moves from explicit gaps to an accepted specification", async () => {
+  it("moves from explicit gaps to passing examples with unproved callbacks", async () => {
     const 段階1のスケッチ = spec("段階1", {
       examples: examples(段階1の振る舞い, {}),
     });
@@ -49,7 +49,7 @@ describe("progressive specification demo", () => {
     expect(段階3.input.missing).toStrictEqual(["予約確定"]);
     expect(段階3.implementation).toBe("missing");
 
-    expect(段階4.adequate).toBe(true);
+    expect(段階4.adequate).toBe(false);
     expect(段階4.verdict).toBe("undetermined");
   });
 

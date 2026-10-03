@@ -1,3 +1,8 @@
+import { verify } from "./proof.js";
+import type { ProofReport } from "./proof.js";
+import { constantsOf, domainOf } from "./domain.js";
+import { pairCoverage, PAIR_LIMIT } from "./pairs.js";
+import type { PairMeasure } from "./pairs.js";
 import { isDeepStrictEqual } from "node:util";
 import type {
   AnyBehavior,
@@ -74,7 +79,7 @@ async function runAndCompare<B extends AnyBehavior>(
         ? undefined
         : {
             name,
-            message: `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+            message: `Expected ${JSON.stringify(expected, (_, value) => typeof value === "bigint" ? `${value}n` : value)}, received ${JSON.stringify(actual, (_, value) => typeof value === "bigint" ? `${value}n` : value)}`,
           },
     };
   } catch (error) {
@@ -87,15 +92,19 @@ async function runAndCompare<B extends AnyBehavior>(
 }
 
 function answers(definition: AnyBehavior, expected: Expected<AnyBehavior>, actual: unknown): boolean {
-  if (!isCaseOnly(expected.result)) {
-    return isDeepStrictEqual(actual, expected);
+  const canonicalEffects = (effects: readonly unknown[]) => effects.map(effect => {
+    const parsed = definition.effects.parse(effect);
+    return parsed.success ? parsed.value : effect;
+  });
+  const received = actual as Execution<unknown, unknown>;
+  if (isCaseOnly(expected.result)) {
+    return isVariantsSchema(definition.result) && tagOf(definition.result, received.result) === expected.result.case &&
+      isDeepStrictEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
   }
-  const { result, effects } = actual as Execution<unknown, unknown>;
-  return (
-    isVariantsSchema(definition.result) &&
-    tagOf(definition.result, result) === expected.result.case &&
-    isDeepStrictEqual(effects, expected.effects)
-  );
+  const result = definition.result.parse(received.result);
+  const answer = definition.result.parse(expected.result);
+  return result.success && answer.success && isDeepStrictEqual(result.value, answer.value) &&
+    isDeepStrictEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
 }
 
 export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
@@ -173,6 +182,8 @@ export interface AdequacyReport {
     readonly arms: Measure;
     readonly rules: RulesMeasure;
     readonly comparisons: ComparisonsMeasure;
+    readonly pairs: PairMeasure;
+    readonly constructions: ProofReport;
   };
   readonly adequate: boolean;
   readonly verdict: Verdict;
@@ -351,6 +362,7 @@ export function isSpecification(value: unknown): value is Specification {
 }
 
 export interface CheckOptions {
+  readonly pairs?: { readonly obligations?: number; readonly candidates?: number };
   // How far the disregards check goes, a policy of the caller rather than of
   // the check: past either limit a row is not tried and is reported as such.
   readonly disregards?: {
@@ -808,7 +820,13 @@ export async function check(
       .filter(drawn => !disregardsBorder(definition, drawn))
       .map(writtenCoverage),
   );
+  const pairAnalysis = pairCoverage(definition, specification.implementation, positions, guardPartitions, specification.examples.rows, {
+    obligations: positiveLimit("pairs.obligations", options.pairs?.obligations, PAIR_LIMIT),
+    candidates: positiveLimit("pairs.candidates", options.pairs?.candidates, combinations),
+  });
+  const pairGap = pairAnalysis.measure.obligations.some(pair => pair.status === "gap" || pair.status === "answer owed");
   const adequate =
+    !pairGap &&
     fakeIssues.length === 0 &&
     specification.implementation !== undefined &&
     failures.length === 0 &&
@@ -846,10 +864,12 @@ export async function check(
     unreadComparisons.length === 0
       ? { status: "complete" }
       : { status: "partial", notRead: unreadComparisons };
+  const constructions: ProofReport = specification.implementation === undefined ? { status: "undetermined", decisions: [] } : verify(specification.implementation, { candidates: combinations, ways: wayLimit });
   const verdict: Verdict =
-    !adequate || armGap
+    !adequate || armGap || constructions.status === "refuted"
       ? "not_satisfied"
-      : comparisons.status === "partial" ||
+      : constructions.status !== "verified" || comparisons.status === "partial" ||
+          pairAnalysis.measure.status === "partial" ||
           armUndecided ||
           externals.length > 0 ||
           incompleteness.some(item => item.kind === "disregards not checked")
@@ -901,8 +921,8 @@ export async function check(
         verified: verifiedEffects.has(tag),
       })),
     },
-    measures: { arms, rules: rulesMeasure, comparisons },
-    adequate: adequate && !armGap,
+    measures: { arms, rules: rulesMeasure, comparisons, pairs: pairAnalysis.measure, constructions },
+    adequate: verdict === "satisfied",
     verdict,
   };
 }
@@ -913,6 +933,7 @@ export interface GenerationReport {
 }
 
 export interface GenerationOptions {
+  readonly pairs?: { readonly obligations?: number; readonly candidates?: number };
   readonly ways?: boolean;
   // How many combinations of finite values are tried against the invariants
   // relating them, and how many ways are listed, as in CheckOptions.
@@ -1271,7 +1292,7 @@ export function generate(
       for (const origin of origins_) {
         const witnesses = witnessesOf(way, scopeOf(implementation!, tag), { discriminant, tag }, combinations);
         if (witnesses === undefined) {
-          return undefined;
+          break;
         }
         for (const witnessed of witnesses) {
           const given = placed(origin, witnessed);
@@ -1279,6 +1300,10 @@ export function generate(
             return { given, origin };
           }
         }
+      }
+      const searched = domainOf(definition.input, combinations, constantsOf(decision.kind === "rules" ? decision.guards.map(guard => guard.condition) : []));
+      for (const given of searched.values) {
+        if (takes(given, withFrom(given).with, way)) return { given, origin: given };
       }
       return undefined;
     }
@@ -1307,12 +1332,109 @@ export function generate(
     }
   }
 
+  const pairs = pairCoverage(definition, implementation,
+    measuredPositionsOf(definition, guardDivided, guardRead, combinations),
+    implementation === undefined ? [] : guardPartitionsOf(implementation),
+    [...rows, ...generated.map(row => ({ ...row, kind: "example" as const, expect: { kind: "todo" as const, reason: row.reason } }))] as readonly Example<AnyBehavior>[],
+    { obligations: positiveLimit("pairs.obligations", options.pairs?.obligations, PAIR_LIMIT), candidates: positiveLimit("pairs.candidates", options.pairs?.candidates, combinations) });
+  for (const { obligation, given } of pairs.witnesses) {
+    if (generated.some(row => isDeepStrictEqual(row.given, given))) continue;
+    offer({ name: `${definition.name}: ${obligation.positions[0]} = ${obligation.classes[0]} × ${obligation.positions[1]} = ${obligation.classes[1]}`, given,
+      reason: "組み合わせの期待結果を人間が決める必要があります", ...withFrom(given) });
+  }
+  notComposed.push(...pairs.measure.notRead, ...pairs.measure.obligations.filter(pair => pair.status === "undecided").map(pair => `${pair.positions.join(" × ")}: ${pair.classes.join(" × ")} (${pair.reason})`));
   return { rows: generated, notComposed };
 }
 
 export interface TestOutcome {
   readonly failures: readonly ExampleFailure[];
   readonly skipped: readonly { readonly name: string; readonly reason: string }[];
+}
+
+export type RowEvaluation<B extends AnyBehavior> =
+  | { readonly name: string; readonly status: "passed"; readonly actual: Execution<BehaviorResult<B>, BehaviorEffect<B>> }
+  | { readonly name: string; readonly status: "failed"; readonly message: string; readonly actual?: unknown }
+  | { readonly name: string; readonly status: "skipped"; readonly reason: string };
+
+export async function evaluate<B extends AnyBehavior>(
+  exampleSet: ExampleSet<B>,
+  name: string,
+  subject: NoInfer<ConformanceSubject<B>>,
+): Promise<RowEvaluation<B>> {
+  const row = exampleSet.rows.find(row => row.name === name);
+  if (row === undefined) {
+    throw new SpecificationError(`No example named ${name} in ${exampleSet.behavior.name}`);
+  }
+  return evaluateRow(exampleSet.behavior, row, subject);
+}
+
+async function evaluateRow<B extends AnyBehavior>(
+  definition: B,
+  row: Example<B>,
+  subject: ConformanceSubject<B>,
+): Promise<RowEvaluation<B>> {
+  const name = row.name;
+  if (isTodo(row.expect)) {
+    return { name, status: "skipped", reason: row.expect.reason };
+  }
+  let actual: unknown;
+  try {
+    const input = definition.input.parse(row.given);
+    if (!input.success) {
+      throw new SpecificationError(`Example input is invalid: ${input.issues[0]!.message}`);
+    }
+    const expected = row.expect;
+    assertExecution(definition, expected, true);
+    if (!isCaseOnly(expected.result)) {
+      assertEnsures(definition, row.given, expected.result, "Example");
+    }
+    const outcome = await runAndCompare(definition, name, input.value as BehaviorInput<B>, expected, async given => {
+      actual = await subject(given);
+      assertExecution(definition, actual, false);
+      assertEnsures(definition, row.given, actual.result, "Answer");
+      return actual as Execution<BehaviorResult<B>, BehaviorEffect<B>>;
+    });
+    if (outcome.failure !== undefined) {
+      return { name, status: "failed", message: outcome.failure.message, ...(actual === undefined ? {} : { actual }) };
+    }
+    return { name, status: "passed", actual: actual as Execution<BehaviorResult<B>, BehaviorEffect<B>> };
+  } catch (error) {
+    return { name, status: "failed", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function assertExecution(
+  definition: AnyBehavior,
+  execution: unknown,
+  expected: boolean,
+): asserts execution is Execution<unknown, unknown> {
+  if (typeof execution !== "object" || execution === null ||
+      !("result" in execution) || !("effects" in execution) || !Array.isArray(execution.effects)) {
+    throw new SpecificationError(`${expected ? "Expected execution" : "Execution"} is invalid: expected result and an effects array`);
+  }
+  if (expected && isCaseOnly(execution.result)) {
+    if (!isVariantsSchema(definition.result) || !definition.result.variantTags.includes(execution.result.case)) {
+      throw new SpecificationError("Expected result is invalid: unknown case");
+    }
+  } else {
+    const result = definition.result.parse(execution.result);
+    if (!result.success) {
+      throw new SpecificationError(`${expected ? "Expected result" : "Result"} is invalid: ${result.issues[0]!.message}`);
+    }
+  }
+  for (const [index, effect] of execution.effects.entries()) {
+    const parsed = definition.effects.parse(effect, `$.effects[${index}]`);
+    if (!parsed.success) {
+      throw new SpecificationError(`${expected ? "Expected effect" : `Effect ${index}`} is invalid: ${parsed.issues[0]!.message}`);
+    }
+  }
+}
+
+function assertEnsures(definition: AnyBehavior, input: unknown, result: unknown, source: string): void {
+  const broken = brokenEnsures(definition, input, result);
+  if (broken !== undefined) {
+    throw new SpecificationError(`${source} breaks ensures ${broken.name}: ${describeRule(broken.rule, "")}`);
+  }
 }
 
 export async function test<B extends AnyBehavior>(
@@ -1322,28 +1444,11 @@ export async function test<B extends AnyBehavior>(
   const failures: ExampleFailure[] = [];
   const skipped: { name: string; reason: string }[] = [];
   for (const row of exampleSet.rows) {
-    if (isTodo(row.expect)) {
-      skipped.push({ name: row.name, reason: row.expect.reason });
-      continue;
-    }
-    const { actual, failure } = await runAndCompare(exampleSet.behavior, row.name, row.given, row.expect, subject);
-    const broken =
-      actual === undefined
-        ? undefined
-        : brokenEnsures(
-            exampleSet.behavior,
-            row.given,
-            (actual as Execution<unknown, unknown>).result,
-          );
-    if (broken !== undefined) {
-      failures.push({
-        name: row.name,
-        message: `Answer breaks ensures ${broken.name}: ${describeRule(broken.rule, "")}`,
-      });
-      continue;
-    }
-    if (failure !== undefined) {
-      failures.push(failure);
+    const outcome = await evaluateRow(exampleSet.behavior, row, subject);
+    if (outcome.status === "failed") {
+      failures.push({ name: outcome.name, message: outcome.message });
+    } else if (outcome.status === "skipped") {
+      skipped.push({ name: outcome.name, reason: outcome.reason });
     }
   }
   return { failures, skipped };
@@ -1521,7 +1626,9 @@ function measureArms(
           );
     const through = (index: number, arm: string) =>
       ways.filter(({ way }) =>
-        index === decision.guards.length
+        decision.expression !== undefined
+          ? way.choices?.some(choice => choice.condition === decision.guards[index]?.condition && choice.outcome === (arm === "holds"))
+          : index === decision.guards.length
           ? way.exit === "case" && way.steps[way.steps.length - 1]?.outcome === arm
           : arm === "else"
             ? way.exit === index
@@ -2135,7 +2242,7 @@ function plansOf(
     }
     const reaches = tags.map(tag => ({
       tag,
-      reached: finiteReach(decision, scopeOf(implementation!, tag), combinations, [[implementation!.behavior.input.discriminant]]),
+      reached: decision.expression !== undefined ? undefined : finiteReach(decision, scopeOf(implementation!, tag), combinations, [[implementation!.behavior.input.discriminant]]),
     }));
     if (reaches.every(item => item.reached !== undefined)) {
       const reached = new Map<string, Reached & { readonly tag: string }>();

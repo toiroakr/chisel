@@ -1,3 +1,4 @@
+import { isRational } from "./exact.js";
 import { isDecimal } from "./rule.js";
 
 export function formatTypeScriptValue(value: unknown): string {
@@ -5,6 +6,8 @@ export function formatTypeScriptValue(value: unknown): string {
 }
 
 function format(value: unknown, level: number): string {
+  if (typeof value === "bigint") return `${value}n`;
+  if (isRational(value)) return `new c.Rational(${JSON.stringify(String(value))})`;
   if (value === undefined) {
     return "undefined";
   }

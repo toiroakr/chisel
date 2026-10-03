@@ -1,3 +1,4 @@
+import { modelPaths } from "./model.js";
 import type { Branch, RulesDecision } from "./behavior.js";
 import type { Rule } from "./rule.js";
 import { describeRule, describeTerm } from "./rule.js";
@@ -8,6 +9,7 @@ export interface Step {
 }
 
 export interface Way {
+  readonly choices?: readonly { readonly condition: Rule; readonly outcome: boolean }[];
   readonly steps: readonly Step[];
   readonly exit: number | "otherwise" | "case";
 }
@@ -28,6 +30,10 @@ export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): read
 // The ways through the guards one at a time, in the order waysOf lists them,
 // so a caller can stop before building them all.
 export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): Generator<Way> {
+  if (decision.expression !== undefined) {
+    for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
+    return;
+  }
   function* from(index: number, before: readonly Step[]): Generator<Way> {
     const candidate = decision.guards[index];
     if (candidate === undefined) {
@@ -78,7 +84,7 @@ export function describeWay(way: Way): string {
   return steps === "" ? exit : `${steps} → ${exit}`;
 }
 
-function* outcomesOf(rule: Rule): Generator<Outcome> {
+export function* outcomesOf(rule: Rule): Generator<Outcome> {
   switch (rule.kind) {
     case "compare":
     case "all":

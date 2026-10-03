@@ -18,7 +18,7 @@
     "schema"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node dist/cli.js verify examples/verified.spec.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm test",
@@ -27,7 +27,8 @@
     "demo:type-break": "tsc -p examples/progressive-demo/type-break/tsconfig.json --pretty false",
     "example:check": "tsx src/cli.ts check examples/order-cancellation.spec.ts",
     "example:strict": "tsx src/cli.ts check examples/order-cancellation.spec.ts --strict",
-    "example:generate": "tsx src/cli.ts generate examples/order-cancellation.spec.ts"
+    "example:generate": "tsx src/cli.ts generate examples/order-cancellation.spec.ts",
+    "example:verified": "tsx src/cli.ts check examples/verified.spec.ts --strict"
   },
   "engines": {
     "node": ">=26"

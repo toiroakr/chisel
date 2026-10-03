@@ -116,6 +116,7 @@ export {
   check,
   example,
   examples,
+  evaluate,
   generate,
   isSpecification,
   test,
@@ -150,6 +151,7 @@ export type {
   RulesMeasure,
   Specification,
   TestOutcome,
+  RowEvaluation,
   UnansweredExample,
   Verdict,
 } from "./specification.js";
@@ -160,3 +162,25 @@ export { reportDocument, reportSchemaVersion } from "./report-json.js";
 export type { ReportSource, Weakening } from "./report-json.js";
 export { compose, isComposition } from "./composition.js";
 export type { Composition } from "./composition.js";
+
+export { decode, encode } from "./codec.js";
+export type { JsonValue } from "./codec.js";
+
+export { PAIR_LIMIT } from "./pairs.js";
+export type { PairObligation, PairMeasure } from "./pairs.js";
+
+export { model, choose, construct, concat, arithmetic, quotient } from "./model.js";
+export type { Expression, Template } from "./model.js";
+
+export { verify } from "./proof.js";
+export type { ConstructionProof, ProofReport } from "./proof.js";
+
+export { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
+export { int64, rational } from "./schema.js";
+export type { Int64Schema, RationalSchema } from "./schema.js";
+
+export { runIsolated } from "./isolated.js";
+export type { IsolatedResult } from "./isolated.js";
+
+export { data } from "./data.js";
+export type { DataSchema, Named } from "./data.js";

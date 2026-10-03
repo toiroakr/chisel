@@ -572,3 +572,112 @@ describe("chisel check --json", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe("selecting one behavior", () => {
+  it("checks only the behavior with the declared name", async () => {
+    const result = await run(["check", fixture("test/fixtures/gap-coverage.ts"), "--behavior", "unreferenced", "--json"]);
+    expect(result.exitCode).toBe(0);
+    const document = JSON.parse(stdoutOf(result));
+    expect(document.reports.map((report: { behavior: string }) => report.behavior)).toStrictEqual(["unreferenced"]);
+  });
+
+  it("generates only the selected behavior", async () => {
+    const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts"), "--behavior", "unreferenced"]);
+    expect(result.exitCode).toBe(0);
+    expect(stdoutOf(result)).toContain("c.examples(unreferencedBehavior,");
+    expect(stdoutOf(result)).not.toContain("inlineCheck");
+  });
+
+  it.each(["check", "generate"])("%s refuses an unknown name and lists available names", async command => {
+    const result = await run([command, fixture("test/fixtures/gap-coverage.ts"), "--behavior", "unreferencedBehavior"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.error?.message).toContain("unreferencedBehavior");
+    expect(result.error?.message).toContain("inline check, unreferenced");
+    expect(stdoutOf(result)).toBe("");
+  });
+});
+
+describe("chisel run", () => {
+  it("decodes JSON and prints encoded results and effects for the sole implementation", async () => {
+    const result = await run(["run", fixture("test/fixtures/run.ts"), "--input", JSON.stringify({ type: "request", amount: "9007199254740993.25", date: "2026-10-03" })]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toStrictEqual({
+      result: { type: "invoice", amount: "9007199254740993.25", date: "2026-10-03" },
+      effects: [{ type: "issued", date: "2026-10-03" }],
+    });
+  });
+
+  it("runs a composition and passes through a departing case", async () => {
+    const result = await run(["run", fixture("test/fixtures/composition.ts"), "--behavior", "見積もる", "--input", JSON.stringify({ 状態: "申込", 数量: 0 })]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toStrictEqual({ result: { 結果: "無効", 理由: "数量なし" }, effects: [] });
+  });
+
+  it("refuses a selected declaration with no implementation", async () => {
+    const result = await run(["run", fixture("test/fixtures/run.ts"), "--behavior", "unimplemented", "--input", "{}"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.error?.message).toContain("implementationがありません");
+  });
+
+  it.each([
+    ["{", "有効なJSON"],
+    [JSON.stringify({ type: "request", amount: 10, date: "2026-10-03" }), "$.amount"],
+    [JSON.stringify({ type: "request", amount: "1", date: "wrong" }), "$.date"],
+    [JSON.stringify({ type: "request", amount: "1", date: "2026-10-03", extra: true }), "$.extra"],
+  ])("refuses invalid input: %s", async (input, message) => {
+    const result = await run(["run", fixture("test/fixtures/run.ts"), "--input", input]);
+    expect(result.exitCode).toBe(1);
+    expect(result.error?.message).toContain(message);
+    expect(stdoutOf(result)).toBe("");
+  });
+
+  it("requires input JSON", async () => {
+    const result = await run(["run", fixture("test/fixtures/run.ts")]);
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("refuses external implementations with their reason", async () => {
+    const result = await run(["run", fixture("test/fixtures/external.ts"), "--input", JSON.stringify({ 種別: "商品", 商品ID: "A" })]);
+    expect(result.exitCode).toBe(1);
+    expect(result.error?.message).toContain("outside Chisel");
+  });
+});
+
+it("runs an exported implementation even when its behavior is not exported separately", async () => {
+  const result = await run(["run", fixture("test/fixtures/run-implementation-only.ts"), "--input", JSON.stringify({ type: "request", amount: "1.25", date: "2026-10-03" })]);
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(stdoutOf(result)).result.amount).toBe("1.25");
+});
+
+it("refuses ambiguous execution and selects it by behavior name", async () => {
+  const args = ["run", fixture("test/fixtures/run-ambiguous.ts"), "--input", JSON.stringify({ type: "request", amount: "1.25", date: "2026-10-03" })];
+  const ambiguous = await run(args);
+  expect(ambiguous.exitCode).toBe(1);
+  expect(ambiguous.error?.message).toContain("一意に選べません");
+  expect((await run([...args, "--behavior", "invoice"])).exitCode).toBe(0);
+});
+
+it("refuses a CLI run that needs injected dependencies", async () => {
+  const result = await run(["run", fixture("test/fixtures/run-dependency.ts"), "--input", '{"type":"query"}']);
+  expect(result.exitCode).toBe(1);
+  expect(result.error?.message).toContain("依存関係があります");
+  expect(stdoutOf(result)).toBe("");
+});
+
+describe("static guarantees", () => {
+  it("accepts a fully inspected implementation in strict mode", async () => {
+    const result = await run(["check", fixture("examples/verified.spec.ts"), "--strict"]);
+    expect(result.exitCode).toBe(0);
+    expect(stdoutOf(result)).toContain("構築の保証           verified");
+  });
+  it("provides a build gate for universal construction proofs", async () => {
+    const result = await run(["verify", fixture("examples/verified.spec.ts"), "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))[0].status).toBe("verified");
+  });
+  it("rejects an opaque implementation with an editor-readable diagnostic", async () => {
+    const result = await run(["verify", fixture("test/fixtures/run-implementation-only.ts")]);
+    expect(result.exitCode).toBe(1);
+    expect(stdoutOf(result)).toContain(": error CHISEL001:");
+  });
+});

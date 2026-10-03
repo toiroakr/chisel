@@ -1,13 +1,17 @@
 #!/usr/bin/env node
+import { isMainThread, parentPort, workerData } from "node:worker_threads";
+import { runIsolated } from "./isolated.js";
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { arg, defineCommand, runMain } from "@politty/zod";
+import { arg, defineCommand, runCommand as executeCommand } from "@politty/zod";
 import { tsImport } from "tsx/esm/api";
 import { z } from "zod";
-import { isBehavior } from "./behavior.js";
-import type { AnyBehavior } from "./behavior.js";
+import { isBehavior, perform } from "./behavior.js";
+import type { AnyBehavior, AnyImplementation } from "./behavior.js";
+import { decode, encode } from "./codec.js";
+import { array, object } from "./schema.js";
 import type { Beside } from "./beside.js";
 import { formatKey, formatTypeScriptValue } from "./codegen.js";
 import {
@@ -18,6 +22,7 @@ import {
   isSpecification,
 } from "./specification.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
+import { verify } from "./proof.js";
 import { reportDocument } from "./report-json.js";
 import type {
   AdequacyReport,
@@ -35,6 +40,7 @@ interface LoadedTarget {
   readonly behaviorBinding: string;
   readonly specification: Specification;
   readonly synthesized: boolean;
+  readonly implementations?: readonly AnyImplementation[];
 }
 
 const fileArg = arg(z.string({ error: "Missing required argument <file>" }), {
@@ -42,11 +48,25 @@ const fileArg = arg(z.string({ error: "Missing required argument <file>" }), {
   description: "behaviorまたはspecificationをexportしたspecファイル",
 });
 
+const pairArgs = {
+  pairObligations: arg(z.coerce.number().int().positive().optional(), { description: "検査する組み合わせ義務の上限（既定20000）" }),
+  pairCandidates: arg(z.coerce.number().int().positive().optional(), { description: "組み合わせを構築する候補の上限（既定4096）" }),
+};
+function pairOptions(args: { pairObligations?: number | undefined; pairCandidates?: number | undefined }) {
+  return { ...(args.pairObligations === undefined ? {} : { obligations: args.pairObligations }), ...(args.pairCandidates === undefined ? {} : { candidates: args.pairCandidates }) };
+}
+
+const behaviorArg = arg(z.string().optional(), {
+  description: "宣言したbehavior名に一致するspecificationだけを対象にする",
+});
+
 const checkCommand = defineCommand({
   name: "check",
   description: "specificationの充足度を報告する",
   args: z.object({
     file: fileArg,
+    behavior: behaviorArg,
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込を含む実行上限（ミリ秒）" }),
     strict: arg(z.boolean().default(false), {
       description: "充足度が不完全なら終了コード1で失敗する",
     }),
@@ -59,6 +79,7 @@ const checkCommand = defineCommand({
     disregardCandidates: arg(z.coerce.number().int().positive().optional(), {
       description: "disregardsの確認で数える候補の上限（既定は4096）",
     }),
+    ...pairArgs,
     feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
       description: "不変条件とあわせて道筋や境界点を確かめるときに試す値の組の上限（既定は4096）",
     }),
@@ -67,7 +88,7 @@ const checkCommand = defineCommand({
     }),
   }),
   run: async args => {
-    const targets = await loadTargets(args.file);
+    const targets = await loadTargets(args.file, args.behavior);
     const disregards = {
       ...(args.disregardCombinations === undefined ? {} : { combinations: args.disregardCombinations }),
       ...(args.disregardCandidates === undefined ? {} : { candidates: args.disregardCandidates }),
@@ -77,6 +98,7 @@ const checkCommand = defineCommand({
         check(target.specification, {
           disregards,
           feasibility: feasibilityOptions(args),
+          pairs: pairOptions(args),
         }),
       ),
     );
@@ -88,7 +110,7 @@ const checkCommand = defineCommand({
         console.log(formatReport(report));
       }
     }
-    if (args.strict && reports.some(report => !report.adequate)) {
+    if (args.strict && reports.some(report => report.verdict !== "satisfied")) {
       throw new Error("充足度が不完全なspecificationがあります");
     }
   },
@@ -99,9 +121,12 @@ const generateCommand = defineCommand({
   description: "未網羅の入力variantに対するexampleの雛形を出力する",
   args: z.object({
     file: fileArg,
+    behavior: behaviorArg,
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込を含む実行上限（ミリ秒）" }),
     ways: arg(z.boolean().default(false), {
       description: "1か所を動かすだけでは通れない道筋も、有限の値をまとめて書き込んで行を出力する",
     }),
+    ...pairArgs,
     feasibilityCombinations: arg(z.coerce.number().int().positive().optional(), {
       description: "不変条件とあわせて行を組み立てるときに試す値の組の上限（既定は4096）",
     }),
@@ -110,7 +135,7 @@ const generateCommand = defineCommand({
     }),
   }),
   run: async args => {
-    const targets = await loadTargets(args.file);
+    const targets = await loadTargets(args.file, args.behavior);
     const printed = targets.map(target => {
       const { rows: generated, notComposed } = generate(
         target.specification.examples,
@@ -118,6 +143,7 @@ const generateCommand = defineCommand({
         {
           ways: args.ways,
           feasibility: feasibilityOptions(args),
+          pairs: pairOptions(args),
         },
       );
       return [
@@ -136,24 +162,106 @@ const generateCommand = defineCommand({
   },
 });
 
+const runCommand = defineCommand({
+  name: "run",
+  description: "JSON入力で実装を1回実行し、結果と副作用をJSONで出力する",
+  args: z.object({
+    file: fileArg,
+    behavior: behaviorArg,
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込を含む実行上限（ミリ秒）" }),
+    input: arg(z.string({ error: "Missing required option --input" }), {
+      description: "入力のJSON。DecimalとTemporalは文字列で指定する",
+    }),
+  }),
+  run: async args => {
+    const targets = await loadTargets(args.file, args.behavior, true);
+    const implementations = [...new Set(targets.flatMap(target => target.implementations ?? []))];
+    if (implementations.length !== 1) {
+      throw new Error(implementations.length === 0
+        ? "実行できるimplementationがありません。specに実装を指定するかimplementationをexportしてください"
+        : "implementationを一意に選べません。--behaviorで実装が1つのbehaviorを指定してください");
+    }
+    const implementation = implementations[0]!;
+    const definition = implementation.behavior;
+    if (Object.keys(definition.requires).length > 0) {
+      throw new Error(`${definition.name}には依存関係があります。performで依存関係を渡して実行してください`);
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(args.input);
+    } catch {
+      throw new Error("--inputは有効なJSONで指定してください");
+    }
+    const input = decode(definition.input, json);
+    if (!input.success) {
+      throw new Error(input.issues.map(issue => `${issue.path}: ${issue.message}`).join("\n"));
+    }
+    const execution = await perform(implementation, input.value);
+    const output = encode(object({ result: definition.result, effects: array(definition.effects) }), execution);
+    if (!output.success) {
+      throw new Error(output.issues.map(issue => `${issue.path}: ${issue.message}`).join("\n"));
+    }
+    console.log(JSON.stringify(output.value, undefined, 2));
+  },
+});
+
+const verifyCommand = defineCommand({
+  name: "verify",
+  description: "全入力で構築と事後条件を証明できるか検査する（未判定も失敗）",
+  args: z.object({
+    file: fileArg, behavior: behaviorArg,
+    json: arg(z.boolean().default(false), { description: "証明結果をJSONで出力する" }),
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込を含む実行上限（ミリ秒）" }),
+    candidates: arg(z.coerce.number().int().positive().default(4096), { description: "全入力の列挙上限" }),
+    ways: arg(z.coerce.number().int().positive().default(10000), { description: "構築経路の列挙上限" }),
+  }),
+  run: async args => {
+    const targets = await loadTargets(args.file, args.behavior, true);
+    const implementations = [...new Set(targets.flatMap(target => target.implementations ?? []))];
+    if (!implementations.length) throw new Error("検証するimplementationがありません");
+    const proofs = implementations.map(implementation => ({ behavior: implementation.behavior.name, ...verify(implementation, { candidates: args.candidates, ways: args.ways }) }));
+    if (args.json) console.log(JSON.stringify(proofs, jsonReplacer, 2));
+    else for (const proof of proofs) for (const decision of proof.decisions) {
+      console.log(decision.status === "verified" ? `${proof.behavior}/${decision.decision}: verified` : `${resolve(args.file)}: error CHISEL001: ${proof.behavior}/${decision.decision}: ${decision.status}: ${decision.reason}`);
+    }
+    if (proofs.some(proof => proof.status !== "verified")) throw new Error("構築の保証を証明できないimplementationがあります");
+  },
+});
+
+function jsonReplacer(_key: string, value: unknown): unknown { return typeof value === "bigint" ? String(value) : value; }
+
 export const cli = defineCommand({
   name: "chisel",
   description: "実行可能な業務仕様を段階的に育てるツールキット",
   subCommands: {
     check: checkCommand,
     generate: generateCommand,
+    run: runCommand,
+    verify: verifyCommand,
   },
 });
 
-async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
+async function loadTargets(file: string, behavior?: string, includeImplementations = false): Promise<readonly LoadedTarget[]> {
   const url = pathToFileURL(resolve(file)).href;
   const module = (await tsImport(url, import.meta.url)) as Readonly<
     Record<string, unknown>
   >;
+  const exportedImplementations = Object.values(module).filter((value): value is AnyImplementation =>
+    typeof value === "object" && value !== null && "kind" in value && value.kind === "implementation" &&
+    "behavior" in value && isBehavior(value.behavior),
+  );
   const exportedBehaviors = new Map<AnyBehavior, string>();
   for (const [name, value] of Object.entries(module)) {
     if (isBehavior(value)) {
       exportedBehaviors.set(value, name);
+    }
+  }
+
+  if (includeImplementations) {
+    for (const implementation of exportedImplementations) {
+      if (!exportedBehaviors.has(implementation.behavior)) {
+        exportedBehaviors.set(implementation.behavior, toIdentifier(implementation.behavior.name));
+      }
     }
   }
 
@@ -189,7 +297,22 @@ async function loadTargets(file: string): Promise<readonly LoadedTarget[]> {
   if (targets.length === 0) {
     throw new Error(`${file}にexportされたbehaviorまたはspecificationがありません`);
   }
-  return targets;
+  const loaded = targets.map(target => ({
+    ...target,
+    implementations: [...new Set([
+      ...(target.specification.implementation === undefined ? [] : [target.specification.implementation]),
+      ...exportedImplementations.filter(implementation => implementation.behavior === target.specification.examples.behavior),
+    ])],
+  }));
+  if (behavior !== undefined) {
+    const selected = loaded.filter(target => target.specification.examples.behavior.name === behavior);
+    if (selected.length === 0) {
+      const names = [...new Set(targets.map(target => target.specification.examples.behavior.name))];
+      throw new Error(`behavior ${behavior}がありません。選択できるbehavior: ${names.join(", ")}`);
+    }
+    return selected;
+  }
+  return loaded;
 }
 
 function formatReport(report: AdequacyReport): string {
@@ -202,6 +325,8 @@ function formatReport(report: AdequacyReport): string {
     ...formatPartitions(report.partitions),
     ...formatBorders(report.borders),
     ...formatPairs(report.pairs),
+    ...report.measures.pairs.obligations.filter(pair => pair.status !== "met").map(pair => `    ${pair.status === "gap" || pair.status === "answer owed" ? "!" : "?"} ${pair.positions.join(" × ")}: ${pair.classes.join(" × ")} (${pair.status})${pair.reason === undefined ? "" : ` — ${pair.reason}`}`),
+    ...report.measures.pairs.notRead.map(reason => `    ? 組み合わせ未計測: ${reason}`),
     ...formatEvidence("証拠（入力）", report.evidence.input, ["specified", "executed", "verified"]),
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
     ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
@@ -216,6 +341,8 @@ function formatReport(report: AdequacyReport): string {
         : `一部のみ (partial); 読めない比較: ${report.measures.comparisons.notRead.join(", ")}`
     }`,
     ...formatEnsures(report.ensures),
+    `  構築の保証           ${report.measures.constructions.status}`,
+    ...report.measures.constructions.decisions.map(proof => `    ${proof.decision}: ${proof.status} — ${proof.reason}`),
   ];
 
   for (const row of report.unanswered) {
@@ -527,8 +654,18 @@ function isRunAsScript(): boolean {
   }
 }
 
-if (isRunAsScript()) {
-  await runMain(cli);
+if (!isMainThread && workerData?.chisel === true) {
+  const result = await executeCommand(cli, workerData.argv, { captureLogs: true });
+  parentPort!.postMessage({ exitCode: result.exitCode, logs: result.logs.entries.map(entry => ({ stream: entry.stream, message: entry.message })), ...(result.error ? { error: result.error.message } : {}) });
+} else if (isRunAsScript()) {
+  const argv = process.argv.slice(2);
+  const at = argv.indexOf("--timeout");
+  const assigned = argv.find(arg => arg.startsWith("--timeout="));
+  const timeout = Number(assigned?.slice("--timeout=".length) ?? (at >= 0 ? argv[at + 1] : 30000));
+  const result = await runIsolated(argv, Number.isSafeInteger(timeout) && timeout > 0 ? timeout : 30000);
+  for (const entry of result.logs) (entry.stream === "stderr" ? console.error : console.log)(entry.message);
+  if (result.error) console.error(`Error: ${result.error}`);
+  process.exitCode = result.exitCode;
 }
 
 function feasibilityOptions(args: {

@@ -726,7 +726,7 @@ describe("the adequacy of a composition", () => {
       result: { covered: ["無効", "見積"], missing: [], excluded: [], total: 2 },
       arms: { status: "unavailable", reason: "not applicable" },
       rules: { status: "unavailable", reason: "not applicable" },
-      verdict: "satisfied",
+      verdict: "undetermined",
     });
   });
 

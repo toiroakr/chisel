@@ -123,7 +123,7 @@ describe("chisel", () => {
     });
   });
 
-  it("accepts a model that satisfies all human-approved examples", async () => {
+  it("runs all approved examples but does not certify an opaque model", async () => {
     const definition = publishingBehavior();
     const implementation = publishingImplementation(definition);
     const rows = examples(definition, {
@@ -152,7 +152,7 @@ describe("chisel", () => {
       perform(implementation, input),
     );
 
-    expect(report.adequate).toBe(true);
+    expect(report.adequate).toBe(false);
     expect(failures).toStrictEqual([]);
   });
 });
@@ -753,7 +753,7 @@ describe("coverage-driven adequacy vetoes", () => {
     const report = await check(specification);
 
     expect(report.result).toStrictEqual({ covered: [], missing: [], excluded: [], total: 0 });
-    expect(report.adequate).toBe(true);
+    expect(report.adequate).toBe(false);
   });
 
   it("vetoes adequacy when an example never covers one of the result variants", async () => {
