@@ -125,26 +125,22 @@ Changing the data or behavior model makes stale examples fail to compile. Runnin
 
 ## 4. Implement the model
 
-Once expectations are known, `implement()` supplies the executable model: one `action(name, { guards?, run })` per input case. `run` computes the answer; `guards` (below) lists the conditions checked before it, each with the answer to give when it fails. The name is how reports refer to the action.
+Once expectations are known, `implement()` supplies one inspectable `model(name, input => expression)` per input case. The builder runs once at declaration; execution interprets its expression tree. Use `choose(condition, yes, no)` for branching and `construct(schema, value)` for intermediate constructions. The name is how reports refer to the model.
 
 ```ts
 const implementation = c.implement(cancelOrder, {
   cases: {
-    unpaid: c.action("cancel-unpaid", {
-      run: order => ({
+    unpaid: c.model("cancel-unpaid", order => ({
         result: { type: "accepted", orderId: order.orderId },
         effects: [{ type: "restock", orderId: order.orderId }],
-      }),
-    }),
-    paid: c.action("cancel-paid", {
-      run: order => ({
+    })),
+    paid: c.model("cancel-paid", order => ({
         result: { type: "accepted", orderId: order.orderId },
         effects: [
           { type: "refund", paymentId: order.paymentId },
           { type: "restock", orderId: order.orderId },
         ],
-      }),
-    }),
+    })),
   },
   controls: {
     refund: {
@@ -166,6 +162,31 @@ export const cancellation = c.spec("order cancellation", {
 });
 ```
 
+## Guarantees and migration
+
+`model()` replaces callback bodies when a specification must pass strict checking. Existing `action()` and `Decision.run` remain executable for progressive migration, but their bodies are not certified. See [the complete example](examples/verified.spec.ts), which passes `check --strict`.
+
+- `verify(implementation)` checks intermediate constructions, results, effects, and postconditions. It exhausts finite domains, or proves supported constraints from input invariants and path conditions. Exact interval arithmetic also proves bounded numeric expressions without enumerating every input. It returns `verified`, `refuted` with a counterexample, or `undetermined`; sampled successes never count as proof.
+- `choose` decisions remain visible even when multiple branches feed one computation. `check` measures their complete paths and feasible class pairs. `generate(..., { ways: true })` searches missing paths and pairs without supplying expected answers. Impossible pairs require exhaustive evidence; exhausted searches remain undecided.
+- `data("Price", object(...))` creates a nominal object type. `Price.create(...)` validates and freezes a value. In a model, use `construct(Price, {...})` and list `constructs: [Price]` in `implement`. The ordinary schema parser remains an explicit validation boundary. This is a TypeScript type guarantee, not protection from `any` or malicious host modules.
+- `int64()` stores signed 64-bit `bigint` values; `rational()` stores reduced `Rational` values. `arithmetic` supports exact bigint, Rational, and Decimal operations; `quotient` returns an exact Rational, including for integer division. `int()` retains safe JavaScript integers and `number()` retains finite JavaScript numbers. Decimal arithmetic in the model and linear rules does not inherit decimal.js's process precision setting. JSON uses strings for int64, Rational, Decimal, and Temporal values.
+- `string()` now normalizes to NFC, rejects unpaired surrogates, and measures and orders Unicode scalar values. Enum and literal declarations must already be NFC; parsed text is normalized. This changes results for supplementary characters and decomposed text.
+
+`check` reports `measures.constructions` and `measures.pairs` in schema version 2. Configure pair budgets with `pairs: { obligations, candidates }` or CLI `--pair-obligations` / `--pair-candidates`. Bounds apply to proofs and generation; an unresolved obligation fails strict checking.
+
+```sh
+chisel verify ./model.spec.ts
+chisel verify ./model.spec.ts --json --candidates 4096 --ways 10000
+chisel check ./model.spec.ts --strict --timeout 30000
+npm run example:verified
+```
+
+`verify` exits 1 for either a counterexample or an unproved implementation. Text diagnostics use `file: error CHISEL001: description`, suitable for an editor task's problem matcher. TypeScript provides type errors and completion; [an example VS Code task](docs/editor-task.json) runs semantic verification. This repository's `build` runs the verifier on its complete expression example after TypeScript compilation.
+
+The executable CLI runs all commands in a worker with a default 30-second deadline (including module loading), a 256 MiB old-generation heap limit, and a 1 MiB streamed-output limit. The deadline terminates synchronous loops too. `runIsolated(argv, timeoutMs)` offers this boundary to hosts. Direct in-process `check` / `perform` calls cannot preempt arbitrary JavaScript callbacks; expression evaluation has its own step budget. The worker is a resource boundary, not an I/O sandbox for imported modules.
+
+The proof system deliberately refuses unsupported universal proofs, including general quantified constructions and function dependencies. Use finite domains, express a supported invariant, or keep the report unresolved. Full Souther language compatibility is not implied by a passing report; the guarantee applies to the selected model and the reported obligations.
+
 ## Commands
 
 Chisel requires Node.js 26 or later and uses its built-in Temporal API.
@@ -184,7 +205,7 @@ node dist/cli.js check ./cancel-order.spec.ts
 node dist/cli.js check ./cancel-order.spec.ts --strict
 ```
 
-`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants, classes or border points are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example. It never fails because a measure could not be made: that is reported as an `undetermined` verdict instead.
+`check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants, classes or border points are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example. It also fails for `undetermined`: missing measurements, unproved constructions, exhausted budgets, and opaque callback bodies must not certify a build. `adequate` is now exactly `verdict === "satisfied"`.
 
 ## Progressive demo
 
@@ -242,7 +263,7 @@ const implementation = c.implement(checkout, {
 
   Every guard has a `holds` and an `else` arm, and every case of a `match` is an arm (a `match` that leaves out a case of the `variants` or value of the `enum` it matches on, or names one it does not have, fails to compile, and one on a sum that may be left out, or is held by something that may be, is refused by `implement`, since no case would take its absence: write the absence as a case of the sum); each way through the guards is a rule. Where every value the guards and the `match` read is a boolean, an `enum` or a `variants` case and their combinations are few enough (`feasibility.combinations`), Chisel tries each combination the invariants on those values keep and lists only the ways some combination takes, since the ways `$and`/`$or` spell grow exponentially with the conditions while the combinations stay few; otherwise it lists at most `feasibility.ways` ways (10000 by default, `chisel check --feasibility-ways <n>`) and leaves a decision with more unmeasured instead. A way or an arm no row took is a gap only when some row could take it: where the conditions it passes contradict each other or the invariants of the values they read (`$.x >= 10` holds and `$.x >= 5` fails), no row is owed, and that includes an invariant relating several booleans, enums or `variants` cases by `==`/`!=` (with each other or with a value) and `$and`/`$or`/`$not`, whose combinations Chisel tries up to a limit (`c.check(specification, { feasibility: { combinations } })`, `chisel check --feasibility-combinations <n>`, 4096 by default; past it the way is undecided); where a condition Chisel cannot read (`all`/`any`) shares a value with another, it is undecided, which leaves the verdict `undetermined` rather than `not_satisfied`. Both are counted under their reason instead of listed. A guard border point is settled the same way, from the conditions a row has passed before it reaches the comparison. That holds for a comparison of two positions too, read on their difference: behind a guard `x <= y`, the `IN (> 0)` point of a later `x >= y` is one no row can reach, so no row is owed there, as Souther refutes a point the rules leave no value at. `generate` offers a row for each way no row takes but some row could: where the way ends in a `match`, it moves the matched field of a row that reaches it, and, with `chisel generate --ways` (`c.generate(examples, implementation, { ways: true })`), where every condition on the way compares a boolean, an `enum` or a `variants` case with a value (`==`/`!=`), it writes all of them at once, so a way that needs several values chosen together (`$.甲 == "x"` and `$.乙 == "y"`) gets a row too. Without it such a way is only named, since every way through `$and`/`$or` is its own row and their number grows quickly with the conditions. Wherever a row `generate` writes would break an invariant relating several booleans, enums or `variants` cases, the other values those invariants reach are chosen again so the row keeps them, and a way row is tried from every answered row of the case before its placeholder. A way with an ordering, a length, `all`/`any` or a field inside a `variants` field it cannot compose is named in its output instead. A guard comparing a position with a constant divides it into classes and owes all four border points; one comparing two positions with an order draws its border on their difference, while an equality between two positions draws none, since its `holds` and `else` arms already ask for a row on each side of the line. A guard point is met only by a row that reached the comparison.
 
-A free-form `run` closure may contain branches Chisel cannot read, so its arms are reported as `not measured` and a specification with no gap is `undetermined` rather than `satisfied`. The same holds for a comparison inside `rules` that Chisel cannot draw a line from.
+Any free-form `run` closure, including `action({ run })` and match handlers, may contain hidden branches and constructions. Declared guards still have coverage measurements, but `measures.constructions` is `undetermined`, so the specification cannot be certified. The same holds for a comparison inside `rules` that Chisel cannot draw a line from.
 
 ## Postconditions and dependencies
 
@@ -262,7 +283,7 @@ const findMember = c.behavior("find-member", {
 
 Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }` (`generate` writes one on every row it offers, the placeholder of the dependency's type under what the row it moved from writes, so a generated row runs as it is pasted), and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [deps.now.$lt(request.at).$else(...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
 
-`check` also counts the pairs of classes the rows reach (an observation, never an obligation), over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). Every measure carries `status`, `reason` exactly where it is `unavailable`, and `weakening` exactly where something weakened it; every border point, arm and way carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
+`check` now enforces feasible pairs of classes as obligations (`measures.pairs`), and retains the older reached counts in `pairs` for display, over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). The arms, rules, and comparisons measures retain their availability and weakening metadata; pairs record each obligation and constructions record each proof; every border point, arm, way, and pair carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
 ## One model, several behaviors
 
@@ -319,3 +340,48 @@ it("the order API answers as the examples say", async () => {
   });
 });
 ```
+
+Before calling the subject, `test` validates the row's input, expected result and expected effects, including their invariants and any applicable `ensures` clause. The answer must also satisfy the result/effect schemas and `ensures`, even when the row expects only `caseOf(...)`. Invalid values and exceptions are reported as failures of that row. An unanswered row is skipped without calling the subject.
+
+When each row needs its own database setup or transaction, the caller can own the loop:
+
+```ts
+for (const row of cancelOrderExamples.rows) {
+  await arrangeDatabase(row.name);
+  const outcome = await c.evaluate(cancelOrderExamples, row.name, callOrderApi);
+  expect(outcome.status).toBe("passed");
+}
+```
+
+`evaluate` returns `{ name, status: "passed", actual }`, `{ name, status: "failed", message, actual? }`, or `{ name, status: "skipped", reason }`. A failed row includes the answer when the subject returned one. A missing row name throws `SpecificationError` instead of silently skipping the test. `test` uses the same evaluation and keeps its existing `{ failures, skipped }` return shape. Neither function runs `with` or `fakes` against production code; the subject and the caller provide that environment.
+
+## JSON boundaries and running a model
+
+`decode(schema, jsonValue)` converts parsed JSON into domain values and validates them. `encode(schema, domainValue)` validates domain values and returns JSON-compatible data. Both return the same `{ success, value }` / `{ success: false, issues }` shape as `schema.parse`; neither parses or prints JSON text itself. `schema.parse` continues to accept domain values only.
+
+```ts
+const Amount = c.decimal(2);
+const decoded = c.decode(Amount, "9007199254740993.25");
+if (decoded.success) {
+  const encoded = c.encode(Amount, decoded.value);
+}
+```
+
+Decimals cross as strings, never JSON numbers, so large amounts retain their digits. Temporal values cross as strings accepted by their corresponding Temporal `from` method and are encoded with `toString()`. Objects, variants, arrays, records and optional fields are converted recursively. Unknown object keys remain errors. A missing optional object field stays missing, and `null` remains a value rather than meaning absence. An absent array element, absent record value or absent root cannot be encoded: silently replacing it with `null` or dropping a record entry would change the value. Non-finite numeric literals cannot be encoded either.
+
+To run a model, export its implementation directly, or export a `spec` that contains it:
+
+```sh
+chisel run ./cancel-order.spec.ts --behavior cancel-order \
+  --input '{"state":"paid","orderId":"o-1","paymentId":"p-1"}'
+chisel check ./cancel-order.spec.ts --behavior cancel-order --json
+chisel generate ./cancel-order.spec.ts --behavior cancel-order
+```
+
+`run` decodes the input using the behavior's schema, calls `perform` and prints `{ result, effects }` as JSON. Effects are returned as data. It requires `--input` and exactly one implementation; `--behavior` may be omitted when the loaded file exposes only one implementation. Aliases of the same implementation do not make it ambiguous. Dependencies must be supplied using `perform` from TypeScript, and external implementations cannot be run by this command. Invalid JSON, invalid input/output, an unknown behavior, a missing implementation or ambiguous implementations exit with status 1.
+
+For all three commands, `--behavior` matches the name passed to `behavior(...)`, not the exported variable name. `check` and `generate` include every specification for that behavior. The file is still loaded as a TypeScript module before selection.
+
+Composition verification also checks forwarded results against the next stage's input contract. If that inclusion cannot be proved, the pipeline remains undetermined even when each stage verifies independently. `reportDocument` returns JSON-compatible values, including string representations of int64 witnesses and counterexamples.
+
+The [Souther comparison and design decisions](docs/souther-comparison.html) records the source revisions, changes and remaining differences.

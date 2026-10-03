@@ -148,7 +148,7 @@ describe("verdict over a rules decision", () => {
     expect(report.verdict).toBe("not_satisfied");
   });
 
-  it("is satisfied when every measure was made and none found a gap", async () => {
+  it("keeps opaque bodies undetermined after every example obligation is met", async () => {
     const report = await check(
       spec("注文確定", {
         examples: examples(注文を確定する, {
@@ -175,7 +175,7 @@ describe("verdict over a rules decision", () => {
       }),
     );
 
-    expect(report.verdict).toBe("satisfied");
+    expect(report.verdict).toBe("undetermined");
   });
 
   it("measures the arms partially when another case is decided by a closure", async () => {

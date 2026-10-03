@@ -1,3 +1,4 @@
+import { int64Carrier, rationalCarrier } from "./border.js";
 import type {
   AnySchema,
   AnyVariantsSchema,
@@ -46,6 +47,7 @@ export interface DividedPosition {
 // and each entry of a record is its own, so one can be moved without the others.
 export interface PositionInstance {
   readonly path: string;
+  readonly segments: readonly string[];
   valuesIn(given: unknown): readonly unknown[];
   write(given: unknown, measure: Border["measure"], coordinate: unknown): unknown;
 }
@@ -362,6 +364,7 @@ function positionAt(
       instancesIn: given =>
         focus.instances(given).map(({ focus: located, trail }) => ({
           path: trail.join(""),
+          segments: trail,
           valuesIn: located.reach,
           write: writer(located),
         })),
@@ -391,6 +394,7 @@ function withOwnBorders(
       instancesIn: given =>
         focus.instances(given).map(({ focus: located, trail }) => ({
           path: trail.join(""),
+          segments: trail,
           valuesIn: located.reach,
           write: writer(located, empty),
         })),
@@ -413,6 +417,8 @@ export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrie
     return schema.kind === "enum" ? undefined : lengthCarrier;
   }
   switch (schema.kind) {
+    case "int64": return int64Carrier;
+    case "rational": return rationalCarrier;
     case "integer":
       return integerCarrier;
     case "number":
@@ -465,6 +471,7 @@ function divided(
     instancesIn: given =>
       focus.instances(given).map(({ focus: located, trail }) => ({
         path: trail.join(""),
+          segments: trail,
         valuesIn: located.reach,
         write: writer(located),
         classify: inner =>

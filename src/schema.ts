@@ -1,3 +1,4 @@
+import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { ElementLabels, InvariantRule, Operator, Rule, Term, TermOf } from "./rule.js";
@@ -77,6 +78,9 @@ export interface NumberSchema extends Schema<number>, ValueBounds<number> {
 export interface IntSchema extends Schema<number>, ValueBounds<number> {
   readonly kind: "integer";
 }
+
+export interface Int64Schema extends Schema<bigint>, ValueBounds<bigint> { readonly kind: "int64"; }
+export interface RationalSchema extends Schema<Rational>, ValueBounds<Rational> { readonly kind: "rational"; }
 
 export interface DecimalSchema extends Schema<Decimal>, ValueBounds<Decimal> {
   readonly kind: "decimal";
@@ -212,7 +216,7 @@ type SchemaCore<S extends AnySchema> = Omit<
   "invariants" | "refine" | "describe" | "optional" | "min" | "max" | "gt" | "lt" | "length"
 >;
 
-const ORDERED_KINDS = new Set(["number", "integer", "decimal", "instant", "date", "time", "datetime"]);
+const ORDERED_KINDS = new Set(["int64", "rational", "number", "integer", "decimal", "instant", "date", "time", "datetime"]);
 
 function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonly Rule[] = []): S {
   const schema = {
@@ -249,7 +253,9 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         if (at?.kind === "enum") {
           return { among: (at as EnumSchema<string>).values.filter(value => at.invariants.every(rule => holds(rule, value))) };
         }
-        return at?.kind === "decimal" ? decimalStep((at as DecimalSchema).scale) : undefined;
+        return at?.kind === "decimal" ? decimalStep((at as DecimalSchema).scale)
+          : at?.kind === "int64" ? (value: unknown, direction: 1 | -1) => (value as bigint) + BigInt(direction)
+          : at?.kind === "rational" ? (value: unknown, direction: 1 | -1) => (value as Rational).plus(new Rational(BigInt(direction))) : undefined;
       };
       return invariants
         .flatMap(conjuncts)
@@ -309,10 +315,21 @@ export function string(): StringSchema {
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<string> {
-    return typeof value === "string"
-      ? valid(value)
-      : invalid(path, "Expected a string");
+    return typeof value === "string" && value.isWellFormed()
+      ? valid(value.normalize("NFC"))
+      : invalid(path, typeof value === "string" ? "Expected a well-formed Unicode string" : "Expected a string");
   }
+}
+
+export function int64(): Int64Schema {
+  return refinable<Int64Schema>({ kind: "int64", placeholder: () => 0n,
+    parse: (value, path = "$") => typeof value === "bigint" && value >= INT64_MIN && value <= INT64_MAX ? valid(value) : invalid(path, "Expected a signed 64-bit bigint"),
+  });
+}
+export function rational(): RationalSchema {
+  return refinable<RationalSchema>({ kind: "rational", placeholder: () => new Rational(0n),
+    parse: (value, path = "$") => isRational(value) && value.denominator > 0n ? valid(new Rational(value.numerator, value.denominator)) : invalid(path, "Expected a Rational"),
+  });
 }
 
 export function number(): NumberSchema {
@@ -432,6 +449,7 @@ export function enumOf<const T extends string>(
   values: readonly [T, ...T[]],
   options: { readonly labels?: { readonly [Value in T]?: string } } = {},
 ): EnumSchema<T> {
+  if (values.some(value => !value.isWellFormed() || value !== value.normalize("NFC"))) throw new Error("Enum declarations must use NFC Unicode text");
   if (values.length === 0) {
     throw new Error("enum names no value");
   }
@@ -453,6 +471,7 @@ export function enumOf<const T extends string>(
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<T> {
+    if (typeof value === "string") value = value.normalize("NFC");
     return typeof value === "string" && (values as readonly string[]).includes(value)
       ? valid(value as T)
       : invalid(path, `Expected one of ${values.map(value => JSON.stringify(value)).join(", ")}`);
@@ -462,6 +481,7 @@ export function enumOf<const T extends string>(
 export function literal<const T extends string | number | boolean | null>(
   expected: T,
 ): LiteralSchema<T> {
+  if (typeof expected === "string" && (!expected.isWellFormed() || expected !== expected.normalize("NFC"))) throw new Error("Literal declarations must use NFC Unicode text");
   return refinable<LiteralSchema<T>>({
     kind: "literal",
     value: expected,
@@ -470,6 +490,7 @@ export function literal<const T extends string | number | boolean | null>(
   });
 
   function parse(value: unknown, path = "$"): ValidationResult<T> {
+    if (typeof value === "string") value = value.normalize("NFC");
     return value === expected
       ? valid(expected)
       : invalid(path, `Expected ${JSON.stringify(expected)}`);
@@ -557,7 +578,7 @@ export function array<T>(element: Schema<T>): ArraySchema<T> {
   }
 }
 
-function optional<T>(schema: Schema<T>): OptionalSchema<T> {
+export function optional<T>(schema: Schema<T>): OptionalSchema<T> {
   return refinable<OptionalSchema<T>>({
     kind: "optional",
     schema,

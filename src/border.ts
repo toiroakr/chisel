@@ -1,3 +1,5 @@
+import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { compareText } from "./text.js";
 import type { Operator, Rule, Term } from "./rule.js";
 import type { Decimal } from "decimal.js";
 import { decimalStep, describeRule, isDecimal, isTerm, termData, positionData } from "./rule.js";
@@ -39,6 +41,16 @@ export const integerCarrier: Carrier = {
   compare: (left, right) => (left as number) - (right as number),
   step: (value, direction) => (value as number) + direction,
   format: String,
+};
+
+export const int64Carrier: Carrier = {
+  compare: (left, right) => (left as bigint) < (right as bigint) ? -1 : (left as bigint) > (right as bigint) ? 1 : 0,
+  step: (value, direction) => { const next = (value as bigint) + BigInt(direction); return next < INT64_MIN || next > INT64_MAX ? undefined : next; },
+  floor: { value: INT64_MIN, reason: "signed 64-bit minimum" }, ceiling: { value: INT64_MAX, reason: "signed 64-bit maximum" }, format: String,
+};
+export const rationalCarrier: Carrier = {
+  compare: (left, right) => (left as Rational).comparedTo(right as Rational),
+  past: (value, direction) => (value as Rational).plus(new Rational(BigInt(direction))), format: String,
 };
 
 export const lengthCarrier: Carrier = {
@@ -162,12 +174,12 @@ export const nanosecondCarrier: Carrier = {
 
 export const stringCarrier: Carrier = {
   compare: (left, right) =>
-    (left as string) < (right as string) ? -1 : (left as string) > (right as string) ? 1 : 0,
+    compareText(left as string, right as string),
   past: (value, direction) =>
     direction === 1
       ? `${value as string}a`
       : (value as string).length > 0
-        ? (value as string).slice(0, -1)
+        ? [...(value as string).normalize("NFC")].slice(0, -1).join("")
         : undefined,
   format: value => JSON.stringify(value),
 };

@@ -448,7 +448,7 @@ describe("generateExamples for ways through finite values", () => {
     ).toStrictEqual([{ 状態: "入力済み", 支払: { 方法: "現金", 釣銭: false }, 丙: true }]);
   });
 
-  it("names a way that compares a field the cases of a sum field share instead of composing it", () => {
+  it("composes a way that compares a field shared by the cases of a sum", () => {
     const 確かめる = behavior("確かめる", {
       input: variants("状態", {
         入力済み: object({
@@ -474,9 +474,9 @@ describe("generateExamples for ways through finite values", () => {
       },
     });
 
-    expect(generate(確かめる, 確認済みの現金なら受け付ける, { ways: true }).notComposed).toStrictEqual([
-      '確認済みの現金なら受け付ける: $.支払.確認 == true holds, $.支払.方法 == "現金" holds, $.丙 == true holds → otherwise',
-    ]);
+    const generated = generate(確かめる, 確認済みの現金なら受け付ける, { ways: true });
+    expect(generated.notComposed).toStrictEqual([]);
+    expect(generated.rows.map(row => row.given)).toContainEqual({ 状態: "入力済み", 支払: { 方法: "現金", 確認: true }, 丙: true });
   });
 
   it("writes a value a way compares into a field that may be left out, not into whether it is left out", () => {

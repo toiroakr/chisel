@@ -1,3 +1,5 @@
+import { Rational, isRational, fractionOf, decimalOf } from "./exact.js";
+import { compareText } from "./text.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
@@ -9,7 +11,7 @@ type Moment =
   | TemporalTypes.PlainTime
   | TemporalTypes.PlainDateTime;
 
-export type Comparable = number | string | Moment | Decimal;
+export type Comparable = number | bigint | Rational | string | Moment | Decimal;
 
 // Symbol.for, not Symbol(): the CLI loads spec files through tsImport in a
 // separate module graph, and a per-module symbol would not recognise their terms.
@@ -106,6 +108,8 @@ export type TermOf<T> = Term<T> &
     ? Equatable<T>
     : [T] extends [number | Decimal]
       ? Ordered<T> & Arithmetic<T>
+      : [T] extends [bigint | Rational]
+      ? Ordered<T>
       : [T] extends [Moment]
       ? Ordered<T>
       : [T] extends [string]
@@ -536,14 +540,15 @@ function writeAt(
 }
 
 export function sizeOf(value: unknown): number {
-  return typeof value === "string" || Array.isArray(value)
+  return typeof value === "string" ? [...value.normalize("NFC")].length : Array.isArray(value)
     ? value.length
     : Object.keys(value as object).length;
 }
 
 export function resize(current: unknown, size: number, empty?: () => unknown): unknown {
   if (typeof current === "string") {
-    return current.length >= size ? current.slice(0, size) : current.padEnd(size, "_");
+    const points = [...current.normalize("NFC")];
+    return points.length >= size ? points.slice(0, size).join("") : current.normalize("NFC") + "_".repeat(size - points.length);
   }
   if (Array.isArray(current)) {
     const filler = current.length > 0 ? current[current.length - 1] : empty?.();
@@ -676,6 +681,7 @@ function combined(data: TermData, other: unknown, sign: 1 | -1): LinearTermData 
       parts[index] = { ...parts[index]!, coefficient: parts[index]!.coefficient + coefficient };
     }
   }
+  if (parts.some(part => !Number.isSafeInteger(part.coefficient))) throw new Error("Linear coefficient exceeds the exact integer range; use Rational expressions");
   return {
     kind: "linear",
     parts: parts.filter(part => part.coefficient !== 0),
@@ -711,27 +717,31 @@ function linearTerm(data: LinearTermData): Term<unknown> {
 }
 
 function readLinear(data: LinearTermData, value: unknown): unknown {
-  let total: unknown = data.constant;
+  let total = fractionOf(data.constant);
+  let decimal = isDecimal(data.constant);
   for (const part of data.parts) {
     const found = read(termAt(part.path, part.measure), value);
-    if (found === undefined) {
-      return undefined;
-    }
-    total = sum(total, scaled(found, part.coefficient));
+    if (found === undefined) return undefined;
+    decimal ||= isDecimal(found);
+    total = total.plus(fractionOf(found as number | Decimal).times(fractionOf(part.coefficient)));
   }
-  return total;
+  if (decimal) return decimalOf(total);
+  if (total.denominator === 1n && (total.numerator < BigInt(Number.MIN_SAFE_INTEGER) || total.numerator > BigInt(Number.MAX_SAFE_INTEGER))) {
+    throw new Error("Exact integer arithmetic exceeds the safe range; use int64 or Rational expressions");
+  }
+  return decimalOf(total).toNumber();
 }
 
 function scaled(value: unknown, coefficient: number): unknown {
-  return isDecimal(value) ? value.times(coefficient) : (value as number) * coefficient;
+  return isDecimal(value) ? decimalOf(fractionOf(value).times(fractionOf(coefficient))) : (value as number) * coefficient;
 }
 
 function sum(left: unknown, right: unknown): unknown {
   if (isDecimal(left)) {
-    return left.plus(right as Decimal | number);
+    return decimalOf(fractionOf(left).plus(fractionOf(right as Decimal | number)));
   }
   if (isDecimal(right)) {
-    return right.plus(left as number);
+    return decimalOf(fractionOf(right).plus(fractionOf(left as number)));
   }
   return (left as number) + (right as number);
 }
@@ -780,11 +790,13 @@ function read(operand: unknown, value: unknown): unknown {
 }
 
 function ordering(left: unknown, right: unknown): number {
+  if (typeof left === "bigint" && typeof right === "bigint") return left < right ? -1 : left > right ? 1 : 0;
+  if (isRational(left) && isRational(right)) return left.comparedTo(right);
   if (typeof left === "number" && typeof right === "number") {
     return left - right;
   }
   if (typeof left === "string" && typeof right === "string") {
-    return left < right ? -1 : left > right ? 1 : 0;
+    return compareText(left, right);
   }
   if (typeof left === "boolean" && typeof right === "boolean") {
     return left === right ? 0 : Number.NaN;

@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Chisel: verify current model",
+      "type": "process",
+      "command": "npx",
+      "args": ["chisel", "verify", "${file}"],
+      "group": "build",
+      "problemMatcher": {
+        "owner": "chisel",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^(.*): error (CHISEL[0-9]+): (.*)$",
+          "file": 1,
+          "code": 2,
+          "message": 3,
+          "kind": "file"
+        }
+      }
+    }
+  ]
+}

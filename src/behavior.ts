@@ -1,3 +1,5 @@
+import { DATA } from "./data.js";
+import { interpret, childrenOf, nodeOf } from "./model.js";
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
@@ -70,6 +72,7 @@ export type Otherwise<Input, Result, Effect, Deps = unknown> =
   | Match<Input, Result, Effect, Deps>;
 
 export interface RulesDecision<Input, Result, Effect, Deps = unknown> {
+  readonly expression?: unknown;
   readonly kind: "rules";
   readonly id: string;
   readonly guards: readonly Guard<Input, Result, Effect, Deps>[];
@@ -392,12 +395,22 @@ export function implement<B extends AnyBehavior>(
   options: NoInfer<{
     readonly cases: CasesWithDefault<B>;
     readonly controls?: ControlTable<B["effects"]>;
+    readonly constructs?: readonly Schema<unknown>[];
   }>,
 ): Implementation<NoInfer<B>> {
   const cases = casesWithoutDefault(definition, options.cases);
   const tagsOf = new Map<unknown, string[]>();
   for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
     tagsOf.set(decision, [...(tagsOf.get(decision) ?? []), tag]);
+  }
+  for (const decision of Object.values(cases) as ImplementationCases<AnyBehavior>[string][]) {
+    if (decision.kind !== "rules" || decision.expression === undefined) continue;
+    const inspect = (value: unknown): void => {
+      const node = nodeOf(value);
+      if (node?.kind === "construct" && DATA in node.schema && !options.constructs?.includes(node.schema)) throw new SpecificationError(`Construction of ${(node.schema as unknown as { name: string }).name} requires an explicit constructs declaration`);
+      childrenOf(value).forEach(inspect);
+    };
+    inspect(decision.expression);
   }
   for (const [decision, tags] of tagsOf) {
     checkMatch(definition, tags, decision as ImplementationCases<AnyBehavior>[string]);
@@ -639,6 +652,7 @@ export async function runTraced<B extends AnyBehavior>(
           arms,
           (rule, scope) => comparisons.push({ rule, scope }),
           (distinction, outcome) => steps.push({ distinction, outcome }),
+          definition,
         )
       : await selected.run(parsedInput.value as never, deps as never);
   return {
@@ -719,6 +733,7 @@ export function traceSync(
       [],
       (rule, scope) => comparisons.push({ rule, scope }),
       (distinction, outcome) => steps.push({ distinction, outcome }),
+      implementation.behavior,
     );
   } catch {
     // Not undefined: the way is settled before a handler runs, so a handler
@@ -743,8 +758,25 @@ function decide<Result, Effect>(
   arms: ArmTaken[],
   observe: ComparisonObserver,
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
+  definition: AnyBehavior,
 ): Execution<Result, Effect> {
-  const scope = withDeps(input, deps);
+  let resolved = deps;
+  if (decision.expression !== undefined && Object.keys(definition.requires).length > 0) {
+    const values = typeof deps === "object" && deps !== null ? { ...deps } as Record<string, unknown> : {};
+    for (const [name, dependency] of Object.entries(definition.requires)) {
+      if (dependency.takes !== "nothing") continue;
+      const parsed = dependency.output.parse(values[name]);
+      if (!parsed.success) throw new SpecificationError(formatIssues(`Invalid dependency ${name}`, parsed.issues));
+      values[name] = parsed.value;
+    }
+    resolved = values;
+  }
+  const scope = withDeps(input, resolved);
+  if (decision.expression !== undefined) {
+    return interpret(decision.expression, scope, { observe, distinguish,
+      arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
+    }) as Execution<Result, Effect>;
+  }
   for (const [index, candidate] of decision.guards.entries()) {
     if (!holds(candidate.condition, scope, observe, distinguish)) {
       arms.push({ decision: decision.id, guard: index, arm: "else" });

@@ -127,7 +127,7 @@ describe("an enum in the rules", () => {
     );
 
     expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
-    expect(report.verdict).toBe("satisfied");
+    expect(report.verdict).toBe("undetermined");
   });
 
   it("does not read a guard ordering it against a value", async () => {
@@ -256,7 +256,7 @@ describe("a match on an enum field", () => {
 
     const arms = report.measures.arms.status === "complete" ? report.measures.arms.arms : [];
     expect(arms.find(arm => arm.arm === "EUR")?.status).toBe("no row owed");
-    expect(report.verdict).toBe("satisfied");
+    expect(report.verdict).toBe("undetermined");
   });
 
   it("refuses at run time a match naming a value the enum does not", () => {
@@ -422,6 +422,6 @@ describe("a value an invariant refuses, beyond enums", () => {
 
     const arms = report.measures.arms.status === "complete" ? report.measures.arms.arms : [];
     expect(arms.find(arm => arm.arm === "小切手")?.status).toBe("no row owed");
-    expect(report.verdict).toBe("satisfied");
+    expect(report.verdict).toBe("undetermined");
   });
 });
