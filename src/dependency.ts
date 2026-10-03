@@ -1,3 +1,4 @@
+import { snapshotValue } from "./data.js";
 import { isDeepStrictEqual } from "node:util";
 import { isCaseOnly } from "./behavior.js";
 import type { Rule } from "./rule.js";
@@ -268,4 +269,16 @@ export function fakeWarningsOf(requires: Requirements, tables: readonly FakeTabl
         ),
     );
   });
+}
+
+export function invokeDependency(name: string, declared: AnyDependency | undefined, supplied: unknown, value: unknown): unknown {
+  if (declared?.takes !== "input" || typeof supplied !== "function") throw new Error(`Missing function dependency ${name}`);
+  const input = declared.input.parse(value);
+  if (!input.success) throw new Error(`Invalid dependency ${name} input: ${input.issues[0]!.message}`);
+  const argument = snapshotValue(input.value);
+  const output = declared.output.parse(supplied(argument));
+  if (!output.success) throw new Error(`Invalid dependency ${name} result: ${output.issues[0]!.message}`);
+  const broken = declared.injected && brokenBy(declared.injected.behavior, argument, output.value);
+  if (broken) throw new Error(`Dependency ${name} breaks ensures ${broken}`);
+  return snapshotValue(output.value);
 }

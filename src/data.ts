@@ -1,3 +1,6 @@
+import { Decimal } from "decimal.js";
+import type { Temporal as TemporalTypes } from "temporal-spec";
+import { Rational, isRational } from "./exact.js";
 import { optional } from "./schema.js";
 import type { Infer, ObjectSchema, ObjectShape, Schema, ValidationResult } from "./schema.js";
 
@@ -13,7 +16,7 @@ export interface DataSchema<Name extends string, Shape extends ObjectShape> exte
 }
 export function data<const Name extends string, const Shape extends ObjectShape>(name: Name, base: ObjectSchema<Shape>): DataSchema<Name, Shape> {
   type Value = Named<Name, Infer<ObjectSchema<Shape>>>;
-  const finish = (result: ValidationResult<Infer<ObjectSchema<Shape>>>): ValidationResult<Value> => result.success ? { success: true, value: freeze(result.value) as Value } : result;
+  const finish = (result: ValidationResult<Infer<ObjectSchema<Shape>>>): ValidationResult<Value> => result.success ? { success: true, value: snapshotValue(result.value) as Value } : result;
   const schema = {
     ...base, name, [DATA]: base,
     parse: (value: unknown, path?: string) => finish(base.parse(value, path)),
@@ -28,10 +31,26 @@ export function data<const Name extends string, const Shape extends ObjectShape>
   };
   return schema as unknown as DataSchema<Name, Shape>;
 }
-function freeze<T>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    Object.values(value).forEach(freeze);
-    Object.freeze(value);
+export function snapshotValue<T>(value: T): T {
+  if (Decimal.isDecimal(value)) {
+    const copy = new Decimal(value);
+    Object.freeze(copy.d);
+    return Object.freeze(copy) as T;
   }
+  if (Array.isArray(value)) return Object.freeze(value.map(snapshotValue)) as T;
+  if (value !== null && typeof value === "object" && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, child]) => [key, snapshotValue(child)]))) as T;
+  }
+  if (value !== null && typeof value === "object") {
+    if (isRational(value)) return new Rational(value.numerator, value.denominator) as T;
+    const temporal = (globalThis as unknown as { Temporal?: typeof TemporalTypes }).Temporal;
+    if (temporal) {
+      for (const Type of [temporal.Instant, temporal.PlainDate, temporal.PlainTime, temporal.PlainDateTime]) {
+        if (value instanceof Type) return Object.freeze(Type.from(value as never)) as T;
+      }
+    }
+    throw new Error("Cannot snapshot an unsupported host object");
+  }
+  if (typeof value === "function") throw new Error("Cannot snapshot an unsupported host object");
   return value;
 }
