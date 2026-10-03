@@ -143,7 +143,7 @@ function pipelineBoundary(first: AnyImplementation, second: AnyImplementation, l
 }
 function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
   const variant = sum.variants[tag] as ObjectSchema<ObjectShape>;
-  const declared = variant.shape[sum.discriminant];
+  const declared = Object.hasOwn(variant.shape, sum.discriminant) ? variant.shape[sum.discriminant] : undefined;
   const discriminant = declared ? declared.refine(value => ({ kind: "compare", left: value, operator: "==", right: tag })) : literal(tag);
   const schema = object({ ...variant.shape, [sum.discriminant]: discriminant });
   return [...variant.invariants, ...sum.invariants].reduce((current, rule) => current.refine(() => rule), schema);

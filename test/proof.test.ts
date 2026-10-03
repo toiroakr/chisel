@@ -128,6 +128,23 @@ it("proves an unbounded pipeline boundary from structural and numeric contracts"
   expect(c.verify(joined).status).toBe("verified");
 });
 
+it("verifies pipeline contracts with an inherited object property as the discriminant", () => {
+  const first = c.behavior("prototype tag producer", {
+    input: c.variants("toString", { start: c.object({}) }),
+    result: c.variants("toString", { next: c.object({}) }),
+    effects: c.variants("toString", {}),
+  });
+  const second = c.behavior("prototype tag consumer", {
+    input: c.variants("toString", { next: c.object({}) }),
+    result: c.variants("toString", { done: c.object({}) }),
+    effects: c.variants("toString", {}),
+  });
+  const producer = c.implement(first, { cases: { start: c.model("produce", () => ({ result: { toString: "next" }, effects: [] })) } });
+  const consumer = c.implement(second, { cases: { next: c.model("consume", () => ({ result: { toString: "done" }, effects: [] })) } });
+  const [, joined] = c.compose("prototype tag pipeline", [producer, consumer]);
+  expect(c.verify(joined).status).toBe("verified");
+});
+
 it("verifies pipeline contracts with outer tagged invariants", () => {
   const first = c.behavior("outer producer", {
     input: c.variants("kind", { start: c.object({}) }),
