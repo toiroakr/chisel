@@ -1,6 +1,20 @@
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
 
+it("verifies a long quantified contract within the proof deadline", () => {
+  let input = c.object({ values: c.array(c.int()) });
+  for (let bound = 0; bound < 6000; bound++) input = input.refine(value => value.values.$all(item => item.$gte(bound)));
+  const definition = c.behavior("long contract", {
+    input: c.variants("kind", { request: input }),
+    result: c.array(c.int()).refine(values => values.$all(value => value.$gte(5999))),
+    effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("carry", input => ({ result: input.values, effects: [] })) } });
+  const started = performance.now();
+  expect(c.verify(impl, { candidates: 64 }).status).toBe("verified");
+  expect(performance.now() - started).toBeLessThan(5000);
+}, 30000);
+
 it("preserves a quantified input invariant when returning the same collection", () => {
   const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
   const definition = c.behavior("carry", {

@@ -116,7 +116,7 @@ export function feasibilityOf(
   const groups = new Map<string, Group>();
   const relations: Relation[] = [];
   const opaque: (readonly (readonly string[])[])[] = [];
-  const outcomes: { identity: unknown; outcome: boolean | string }[] = [];
+  const outcomes = new Map<string, { identity: unknown; outcome: boolean | string }[]>();
   const groupFor = (path: readonly string[], measure: Measure): string => {
     const key = JSON.stringify([path, measure]);
     if (!groups.has(key)) {
@@ -192,14 +192,17 @@ export function feasibilityOf(
   }
   for (const step of way.steps) {
     const identity = stepIdentity(step);
-    const seen = outcomes.find(previous => isDeepStrictEqual(previous.identity, identity));
+    const key = step.distinction.kind === "match" ? JSON.stringify(["match", positionData(step.distinction.on)?.path]) : describeRule(step.distinction);
+    const bucket = outcomes.get(key) ?? [];
+    const seen = bucket.find(previous => isDeepStrictEqual(previous.identity, identity));
     if (seen !== undefined) {
       if (seen.outcome !== step.outcome) {
         return { kind: "infeasible", reason: contradicts };
       }
       continue;
     }
-    outcomes.push({ identity, outcome: step.outcome });
+    bucket.push({ identity, outcome: step.outcome });
+    outcomes.set(key, bucket);
     const placed = placedConstraintOf(step);
     if (placed !== undefined) {
       groups.get(groupFor(placed.path, placed.measure))!.constraints.push(placed.constraint);
