@@ -127,3 +127,46 @@ it("proves an unbounded pipeline boundary from structural and numeric contracts"
   const [, joined] = c.compose("contract pipeline", [producer, consumer]);
   expect(c.verify(joined).status).toBe("verified");
 });
+
+it("verifies pipeline contracts with outer tagged invariants", () => {
+  const first = c.behavior("outer producer", {
+    input: c.variants("kind", { start: c.object({}) }),
+    result: c.variants("kind", { next: c.object({ n: c.int() }) }).refine(value => value.kind.$eq("next").$and(value.n.$gte(1))),
+    effects: c.variants("kind", {}),
+  });
+  const second = c.behavior("outer consumer", {
+    input: c.variants("kind", { next: c.object({ n: c.int() }) }).refine(value => value.kind.$eq("next").$and(value.n.$gte(0))),
+    result: c.variants("kind", { done: c.object({}) }), effects: c.variants("kind", {}),
+  });
+  const producer = c.implement(first, { cases: { start: c.model("produce", () => ({ result: { kind: "next", n: 1 }, effects: [] })) } });
+  const consumer = c.implement(second, { cases: { next: c.model("consume", () => ({ result: { kind: "done" }, effects: [] })) } });
+  const [, joined] = c.compose("outer contract pipeline", [producer, consumer]);
+  expect(c.verify(joined).status).toBe("verified");
+});
+
+it("does not transfer quantified facts between dotted keys and nested paths", async () => {
+  const bounded = c.array(c.int()).refine(values => values.$all(value => value.$lte(1000)));
+  const definition = c.behavior("distinct paths", {
+    input: c.variants("kind", { request: c.object({ "a.b": bounded, a: c.object({ b: c.array(c.int()) }) }) }),
+    result: bounded, effects: c.variants("kind", {}),
+  });
+  const implementation = c.implement(definition, { cases: { request: c.model("nested values", input => ({ result: input.a.b, effects: [] })) } });
+  expect(c.verify(implementation, { candidates: 64 }).status).toBe("undetermined");
+  await expect(c.perform(implementation, { kind: "request", "a.b": [1], a: { b: [1001] } })).rejects.toThrow("Invalid result");
+});
+
+it("checks finite pipeline domains with outer invariants", () => {
+  const first = c.behavior("finite producer", {
+    input: c.variants("kind", { start: c.object({}) }),
+    result: c.variants("kind", { next: c.object({ n: c.int().min(1).max(3) }) }).refine(value => value.kind.$eq("next").$and(value.n.$eq(1).$or(value.n.$eq(3)))),
+    effects: c.variants("kind", {}),
+  });
+  const second = c.behavior("finite consumer", {
+    input: c.variants("kind", { next: c.object({ n: c.int() }) }).refine(value => value.n.$ne(2)),
+    result: c.variants("kind", { done: c.object({}) }), effects: c.variants("kind", {}),
+  });
+  const producer = c.implement(first, { cases: { start: c.model("produce", () => ({ result: { kind: "next", n: 1 }, effects: [] })) } });
+  const consumer = c.implement(second, { cases: { next: c.model("consume", () => ({ result: { kind: "done" }, effects: [] })) } });
+  const [, joined] = c.compose("finite outer contracts", [producer, consumer]);
+  expect(c.verify(joined).status).toBe("verified");
+});

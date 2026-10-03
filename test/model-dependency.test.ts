@@ -11,7 +11,7 @@ it("proves a function dependency call from its declared contract", async () => {
     result: c.arithmetic("add", c.call(deps.price, input.quantity), 1), effects: [],
   })) } });
   expect(c.verify(impl).status).toBe("verified");
-  await expect(c.perform(impl, { kind: "request", quantity: 2 }, { price: n => n * 2 })).resolves.toEqual({ result: 5, effects: [] });
+  await expect(c.perform(impl, { kind: "request", quantity: 2 }, { price: n => n * 2 })).resolves.toStrictEqual({ result: 5, effects: [] });
   await expect(c.perform(impl, { kind: "request", quantity: 2 }, { price: () => -1 })).rejects.toThrow("Invalid dependency price result");
 });
 
@@ -120,7 +120,7 @@ it("passes the input value without internal dependency bindings", async () => {
     requires: { lookup: c.dependency(shape, c.int().min(1)) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("whole", (input, deps) => ({ result: c.call(deps.lookup, input), effects: [] })) } });
-  await expect(c.perform(impl, { kind: "request", n: 1 }, { lookup: input => input.n })).resolves.toEqual({ result: 1, effects: [] });
+  await expect(c.perform(impl, { kind: "request", n: 1 }, { lookup: input => input.n })).resolves.toStrictEqual({ result: 1, effects: [] });
   expect(c.verify(impl).status).toBe("verified");
 });
 

@@ -8,8 +8,8 @@ import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, dependencyName, interpret, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
 import { conjuncts, holds, isTerm, positionData, positionTerm, sizeOf, termPaths, withDeps } from "./rule.js";
-import type { AnySchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
-import { isVariantsSchema, schemaAtPath, tagOf, object } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
+import { isVariantsSchema, schemaAtPath, tagOf, object, literal } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
 
@@ -129,17 +129,24 @@ function pipelineBoundary(first: AnyImplementation, second: AnyImplementation, l
   const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
   const verified = isVariantsSchema(source) && source.variantTags.every(tag => {
     if (departed.includes(tag) || !Object.hasOwn(target.variants, tag)) return true;
-    const from = source.invariants.reduce((schema, rule) => schema.refine(rule), source.variants[tag]!);
-    const to = target.invariants.reduce((schema, rule) => schema.refine(rule), target.variants[tag]!);
+    const from = taggedCase(source, tag);
+    const to = taggedCase(target, tag);
     if (includesSchema(to, from, limit)) return true;
     const domain = domainOf(from, limit);
-    return domain.exhaustive && domain.values.every(value => target.parse({ ...(value as object), [target.discriminant]: tag }).success);
+    return domain.exhaustive && domain.values.every(value => target.parse(value).success);
   });
   return {
     decision: `${first.behavior.name} → ${second.behavior.name}`,
     status: verified ? "verified" : "undetermined",
     reason: verified ? "Every forwarded result satisfies the next stage's input" : "The next stage's input is not proved for every forwarded result",
   };
+}
+function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
+  const variant = sum.variants[tag] as ObjectSchema<ObjectShape>;
+  const declared = variant.shape[sum.discriminant];
+  const discriminant = declared ? declared.refine(value => ({ kind: "compare", left: value, operator: "==", right: tag })) : literal(tag);
+  const schema = object({ ...variant.shape, [sum.discriminant]: discriminant });
+  return [...variant.invariants, ...sum.invariants].reduce((current, rule) => current.refine(() => rule), schema);
 }
 function summarize(decisions: readonly ConstructionProof[]): ProofReport {
   return { status: decisions.some(item => item.status === "refuted") ? "refuted" : decisions.every(item => item.status === "verified") ? "verified" : "undetermined", decisions };
