@@ -769,7 +769,7 @@ function decide<Result, Effect>(
 ): Execution<Result, Effect> {
   let resolved = deps;
   if (decision.expression !== undefined && Object.keys(definition.requires).length > 0) {
-    const values = typeof deps === "object" && deps !== null ? { ...deps } as Record<string, unknown> : {};
+    const values: Record<string, unknown> = Object.assign(Object.create(null), typeof deps === "object" && deps !== null ? deps : {});
     for (const [name, dependency] of Object.entries(definition.requires)) {
       if (dependency.takes !== "nothing") continue;
       const parsed = dependency.output.parse(values[name]);

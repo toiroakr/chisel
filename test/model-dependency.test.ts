@@ -181,3 +181,14 @@ it("rejects a dependency namespace collision with the input discriminant", () =>
     requires: { enabled: c.dependency(c.boolean()) },
   })).toThrow("#deps is reserved");
 });
+
+it("does not resolve a missing function dependency from Object.prototype", async () => {
+  const definition = c.behavior("own dependency", {
+    input: c.variants("kind", { request: c.object({}) }),
+    result: c.string(), effects: c.variants("kind", {}),
+    requires: { toString: c.dependency(c.boolean(), c.string()) },
+  });
+  const implementation = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({ result: c.call(deps.toString, true), effects: [] })) } });
+  await expect(c.perform(implementation, { kind: "request" }, {})).rejects.toThrow("Missing function dependency toString");
+  await expect(c.perform(implementation, { kind: "request" }, { toString: () => "declared" })).resolves.toStrictEqual({ result: "declared", effects: [] });
+});
