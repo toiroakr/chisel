@@ -185,7 +185,7 @@ npm run example:verified
 
 The executable CLI runs all commands in a worker with a default 30-second deadline (including module loading), a 256 MiB old-generation heap limit, and a 1 MiB streamed-output limit. The deadline terminates synchronous loops too. `runIsolated(argv, timeoutMs)` offers this boundary to hosts. Direct in-process `check` / `perform` calls cannot preempt arbitrary JavaScript callbacks; expression evaluation has its own step budget. The worker is a resource boundary, not an I/O sandbox for imported modules.
 
-The proof system preserves matching quantified facts from input invariants and guards, including nested quantifiers and captured input fields. It also proves structural schema inclusion for collections and pipeline boundaries. General map/fold constructions, recursive proofs, and unsupported substitutions remain unresolved. Full Souther language compatibility is not implied by a passing report; the guarantee applies to the selected model and the reported obligations.
+The proof system preserves matching quantified facts from input invariants and guards, including nested quantifiers and captured input fields. It also proves structural schema inclusion for collections and pipeline boundaries. Typed `map` and `fold` expressions prove their element and accumulator contracts. Recursive proofs, general higher-order functions, and unsupported substitutions remain unresolved. Full Souther language compatibility is not implied by a passing report; the guarantee applies to the selected model and the reported obligations.
 
 ### Function dependencies in models
 
@@ -213,11 +213,55 @@ const implementation = c.implement(pricing, {
 c.verify(implementation);
 ```
 
-The verifier proves each argument satisfies the dependency's input contract and treats each call's result as an independent value allowed by its output contract. For `dependency(behavior)`, supported unconditional `ensures` also supply facts. Verification never executes the injected callback or uses a fake table as proof of its universal behavior.
+The verifier proves each argument satisfies the dependency's input contract and treats each call's result as an independent value allowed by its output contract. For `dependency(behavior)`, supported unconditional `ensures` also supply facts. Bind a result and branch on its variant tag to use a case-scoped `ensures` within the matching branch. Verification never executes the injected callback or uses a fake table as proof of its universal behavior.
 
 At runtime, every call validates its input, output, and applicable `ensures`. Model inputs, value dependencies, and call inputs and outputs are copied and frozen, including Decimal values, to prevent a dependency from mutating values used by another expression. Unsupported host objects such as mutable custom class instances are rejected at this boundary; use plain data or the supported Decimal, Rational, and Temporal types. The proof is conditional on the declared dependency contracts; it does not certify host callback termination or implementation. Case-scoped dependency postconditions are checked at runtime but currently do not supply proof facts. Call results cannot yet be projected into fields or used directly as guards.
 
 A model can pass the entire input with `c.call(deps.lookup, input)`; internal dependency bindings are excluded. `#deps` is reserved as a top-level input field when a behavior declares dependencies. Existing fake tables work with `call` in example checks.
+
+### Local values and collections
+
+`bind(schema, expression, value => body)` evaluates an expression once, validates its contract, and makes its fields available to the body. This also lets `choose` inspect a function result. Inside a model builder with a dependency that returns `answer`:
+
+```ts
+const answer = c.object({ accepted: c.boolean(), amount: c.int().min(1) });
+const result = c.bind(answer, c.call(deps.lookup, input), value =>
+  c.choose(value.accepted.$eq(true), value.amount, 0),
+);
+```
+
+For a variant result, `matchValue(schema, expression, cases)` requires a body for every tag and exposes the fields of that case. It evaluates the expression once:
+
+```ts
+const answer = c.variants("kind", {
+  missing: c.object({}),
+  ok: c.object({ amount: c.int().min(1) }),
+});
+const result = c.matchValue(answer, c.call(deps.lookup, input), {
+  missing: () => 0,
+  ok: value => value.amount,
+});
+```
+
+`map(elementSchema, outputSchema, values, element => body)` proves the body for an arbitrary element. `fold(elementSchema, accumulatorSchema, values, initial, (accumulator, element) => body)` proves that the initial value and every update satisfy the accumulator schema. This is an inductive invariant, independent of the array length:
+
+```ts
+const bounded = c.int64().min(0n).max(100n);
+const maximum = c.fold(bounded, bounded, input.values, 0n, (accumulator, value) =>
+  c.choose(value.$gt(accumulator), value, accumulator),
+);
+const incremented = c.map(
+  bounded, c.int64().min(1n).max(101n), input.values,
+  value => c.arithmetic("add", value, 1n),
+);
+```
+
+These builders run at declaration time; the interpreter executes the resulting expressions. Nested collections and captured input fields are supported. Runtime checks validate each element and update, including the initial accumulator for an empty array. Iterations share the evaluation budget, and nested body proofs share the path budget. Dependency calls inside a body remain independent at each iteration.
+
+Locals cannot escape their body. Declare each binding separately rather than reusing its expression in multiple locations. Top-level input names starting with `#local:` are reserved in models. Reading the whole input inside a body excludes local bindings.
+
+Construction proofs and example coverage are separate. `verify` can prove a body with local or iterated branches, but those branches' coverage is currently unmeasured: `check --strict` cannot succeed for such a model. Branch-free collection expressions remain eligible for strict checking. Array-length relationships and arbitrary fold postconditions beyond the declared accumulator contract are not inferred.
+
 
 ## Commands
 

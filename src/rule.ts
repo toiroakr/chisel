@@ -230,6 +230,11 @@ export function bindElement(scope: unknown, name: string, element: unknown): unk
     : { [name]: element };
 }
 
+export function withLocal(scope: unknown, name: string, value: unknown): unknown {
+  const original = typeof scope === "object" && scope !== null && INPUT in scope ? (scope as { [INPUT]: unknown })[INPUT] : scope;
+  return { ...(typeof scope === "object" && scope !== null ? scope : {}), [name]: value, [INPUT]: original };
+}
+
 export function withDeps(input: unknown, deps: unknown): unknown {
   return deps === undefined || typeof input !== "object" || input === null
     ? input

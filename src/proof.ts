@@ -5,11 +5,11 @@ import { brokenEnsures } from "./behavior.js";
 import { constantsOf, domainOf } from "./domain.js";
 import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
-import { childrenOf, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
+import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, holds, isTerm, positionData, positionTerm, sizeOf, termPaths, withDeps } from "./rule.js";
+import { conjuncts, holds, isTerm, positionData, positionTerm, sizeOf, termPaths, rootsRead, withDeps } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
-import { isVariantsSchema, schemaAtPath, tagOf, object, literal } from "./schema.js";
+import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
 
@@ -67,12 +67,12 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
     if (failed) { decisions.push(failed); continue; }
     if (!calls && domain.exhaustive) { decisions.push({ ...base, status: "verified", reason: "Every valid input was checked, including intermediate constructions" }); continue; }
     const scope = feasibilityScope(definition, tag);
-    let remaining = ways;
+    const budget = { remaining: ways };
     let proven = true;
     for (const path of modelPaths(decision.expression)) {
-      if (--remaining < 0) { proven = false; break; }
-      if (feasibilityOf(path, scope, undefined, candidates).kind === "infeasible") continue;
-      const prepared = prepareExpression(path.value, definition, tag, scope, path.steps, candidates);
+      if (--budget.remaining < 0) { proven = false; break; }
+      if (feasibilityOf({ steps: availableSteps(path.steps, scope) }, scope, undefined, candidates).kind === "infeasible") continue;
+      const prepared = prepareExpression(path.value, definition, tag, scope, path.steps, candidates, budget);
       if (!prepared) { proven = false; break; }
       const execution = prepared.value as { result?: unknown; effects?: unknown };
       const prove = (schema: AnySchema, value: unknown): boolean => provesValue(schema, value, prepared.scope, path.steps, candidates);
@@ -85,21 +85,68 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
       }
       if (!proven) break;
     }
-    decisions.push({ ...base, status: proven ? "verified" : "undetermined", reason: proven ? "Every construction and postcondition follows from the input, path conditions, and dependency contracts" : remaining < 0 ? `Proof exceeds ${ways} paths` : "Universal construction safety could not be proved from the available contracts and conditions" });
+    decisions.push({ ...base, status: proven ? "verified" : "undetermined", reason: proven ? "Every construction and postcondition follows from the input, path conditions, and dependency contracts" : budget.remaining < 0 ? `Proof exceeds ${ways} paths` : "Universal construction safety could not be proved from the available contracts and conditions" });
   }
   return summarize(decisions);
 }
 function containsCalls(value: unknown): boolean {
   return nodeOf(value)?.kind === "call" || childrenOf(value).some(containsCalls);
 }
-function prepareExpression(template: unknown, definition: AnyBehavior, tag: string, originalScope: AnySchema, steps: readonly Step[], limit: number): { value: unknown; scope: AnySchema } | undefined {
+function prepareExpression(template: unknown, definition: AnyBehavior, tag: string, originalScope: AnySchema, steps: readonly Step[], limit: number, budget: { remaining: number }): { value: unknown; scope: AnySchema } | undefined {
   let scope = originalScope as ObjectSchema<ObjectShape>;
   let index = 0;
   let valid = true;
+  const conditional: { root: string; cases: readonly string[]; rule: Rule; output: AnyVariantsSchema }[] = [];
+  const usable = () => availableSteps(steps, scope);
+  const prove = (schema: AnySchema, value: unknown) => intermediates(value, (inner, child) => provesValue(inner, child, scope, usable(), limit)) && provesValue(schema, value, scope, usable(), limit);
+  function fresh(schema: AnySchema): ReturnType<typeof positionTerm> {
+    let name: string;
+    do { name = `#call${index++}`; } while (Object.hasOwn(scope.shape, name));
+    scope = { ...scope, shape: { ...scope.shape, [name]: schema } };
+    return positionTerm([name], "value");
+  }
+  function activate(): void {
+    for (const item of conditional) {
+      const selected = selectedTag(item.output, [item.root], usable());
+      if (selected !== undefined && item.cases.includes(selected) && !scope.invariants.includes(item.rule)) scope = { ...scope, invariants: [...scope.invariants, item.rule] };
+    }
+  }
   function lower(value: unknown): unknown {
+    if (!valid) return undefined;
     const position = isTerm(value) ? positionData(value) : undefined;
     if (position?.path.length === 0 && position.measure === "value") {
       return { ...Object.fromEntries(Object.keys(definition.input.variants[tag]!.shape).map(key => [key, positionTerm([key], "value")])), [definition.input.discriminant]: tag };
+    }
+    const original = nodeOf(value);
+    if (original?.kind === "bind") {
+      const bound = lower(original.value);
+      if (!prove(original.schema, bound)) { valid = false; return undefined; }
+      const source = isTerm(bound) ? positionData(bound) : undefined;
+      const aliases = Object.fromEntries(Object.keys(scope.shape).map(key => [key, positionTerm([key], "value")]));
+      if (source?.path.length === 1) aliases[source.path[0]!] = positionTerm([original.name], "value");
+      const assumptions = source?.path.length === 1 ? scope.invariants.filter(rule => rootsRead(rule).has(source.path[0])).flatMap(rule => { const copy = substitute(rule, aliases); return copy ? [copy] : []; }) : [];
+      scope = { ...scope, shape: { ...scope.shape, [original.name]: selectedCase(original.schema, [original.name], steps) }, invariants: [...scope.invariants, ...assumptions] };
+      if (source?.path.length === 1) for (const item of [...conditional]) {
+        if (item.root !== source.path[0]) continue;
+        const rule = substitute(item.rule, aliases);
+        if (rule) conditional.push({ ...item, root: original.name, rule });
+      }
+      activate();
+      return lower(original.body);
+    }
+    if (original?.kind === "map" || original?.kind === "fold") {
+      const values = lower(original.values);
+      if (!prove(array(original.element), values)) { valid = false; return undefined; }
+      if (original.kind === "fold" && !prove(original.output, lower(original.initial))) { valid = false; return undefined; }
+      const bodyScope = { ...scope, shape: { ...scope.shape, [original.name]: original.element, ...(original.kind === "fold" ? { [original.accumulator]: original.output } : {}) } };
+      for (const path of modelPaths(original.body)) {
+        if (--budget.remaining < 0) { valid = false; return undefined; }
+        const bodySteps = [...usable(), ...path.steps];
+        if (feasibilityOf({ steps: availableSteps(bodySteps, bodyScope) }, bodyScope, undefined, limit).kind === "infeasible") continue;
+        const prepared = prepareExpression(path.value, definition, tag, bodyScope, bodySteps, limit, budget);
+        if (!prepared || !intermediates(prepared.value, (schema, child) => provesValue(schema, child, prepared.scope, bodySteps, limit)) || !provesValue(original.output, prepared.value, prepared.scope, bodySteps, limit)) { valid = false; return undefined; }
+      }
+      return fresh(original.kind === "map" ? array(original.output) : original.output);
     }
     const children = childrenOf(value);
     const lowered = children.length ? replaceChildren(value, children.map(lower)) : value;
@@ -107,25 +154,46 @@ function prepareExpression(template: unknown, definition: AnyBehavior, tag: stri
     if (node?.kind !== "call") return lowered;
     const name = dependencyName(node.dependency);
     const declared = Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined;
-    const prove = (schema: AnySchema, value: unknown) => provesValue(schema, value, scope, steps, limit);
-    if (declared?.takes !== "input" || !intermediates(node.input, prove) || !prove(declared.input, node.input)) {
+    if (declared?.takes !== "input" || !prove(declared.input, node.input)) {
       valid = false;
       return undefined;
     }
-    let resultName: string;
-    do { resultName = `#call${index++}`; } while (Object.hasOwn(scope.shape, resultName));
-    const result = positionTerm([resultName], "value");
-    const assumptions = (declared.injected?.behavior.ensures ?? []).flatMap(clause => {
-      if (clause.cases !== undefined) return [];
+    const result = fresh(declared.output);
+    const resultName = positionData(result)!.path[0]!;
+    for (const clause of declared.injected?.behavior.ensures ?? []) {
       const rule = substitute(clause.rule, { input: node.input, value: result });
-      return rule ? [rule] : [];
-    });
-    scope = { ...scope, shape: { ...scope.shape, [resultName]: declared.output }, invariants: [...scope.invariants, ...assumptions] };
+      if (!rule) continue;
+      if (clause.cases === undefined) scope = { ...scope, invariants: [...scope.invariants, rule] };
+      else if (isVariantsSchema(declared.output)) conditional.push({ root: resultName, cases: clause.cases, rule, output: declared.output });
+    }
     return result;
   }
   const value = lower(template);
   return valid ? { value, scope } : undefined;
 }
+function availableSteps(steps: readonly Step[], scope: AnySchema): readonly Step[] {
+  return steps.filter(step => localRoots(step.distinction).every(name => schemaAtPath(scope, [name]) !== undefined));
+}
+function selectedCase(schema: AnySchema, path: readonly string[], steps: readonly Step[]): AnySchema {
+  if (!isVariantsSchema(schema)) return schema;
+  const selected = selectedTag(schema, path, steps);
+  return selected === undefined ? schema : taggedCase(schema, selected);
+}
+function selectedTag(schema: AnyVariantsSchema, path: readonly string[], steps: readonly Step[]): string | undefined {
+  let candidates = schema.variantTags as readonly string[];
+  for (const step of steps) {
+    const rule = step.distinction;
+    if (rule.kind !== "compare" || rule.operator !== "==" && rule.operator !== "!=") continue;
+    for (const [left, right] of [[rule.left, rule.right], [rule.right, rule.left]]) {
+      const position = isTerm(left) ? positionData(left) : undefined;
+      if (position?.measure !== "value" || position.path.length !== path.length + 1 || !path.every((key, index) => key === position.path[index]) || position.path.at(-1) !== schema.discriminant || typeof right !== "string") continue;
+      const equal = (rule.operator === "==") === (step.outcome === true);
+      candidates = candidates.filter(tag => (tag === right) === equal);
+    }
+  }
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 function pipelineBoundary(first: AnyImplementation, second: AnyImplementation, limit: number): ConstructionProof {
   const source = first.behavior.result;
   const target = second.behavior.input;
