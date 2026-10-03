@@ -1,6 +1,33 @@
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
 
+it("rejects function dependencies inherited from the declaration map prototype", () => {
+  const declarations = { lookup: c.dependency(c.boolean(), c.boolean()) };
+  const requires: typeof declarations = Object.create(declarations);
+  const definition = c.behavior("inherited declaration", {
+    input: c.variants("kind", { request: c.object({}) }),
+    result: c.boolean(), effects: c.variants("kind", {}), requires,
+  });
+  expect(() => c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({
+    result: c.call(deps.lookup, true), effects: [],
+  })) } })).toThrow("call requires a declared function dependency");
+});
+
+it("does not prove or execute calls whose declaration was moved to a prototype", async () => {
+  const requires = { lookup: c.dependency(c.boolean(), c.boolean()) };
+  const definition = c.behavior("changed declaration", {
+    input: c.variants("kind", { request: c.object({}) }),
+    result: c.boolean(), effects: c.variants("kind", {}), requires,
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({
+    result: c.call(deps.lookup, true), effects: [],
+  })) } });
+  Object.setPrototypeOf(requires, { lookup: requires.lookup });
+  Reflect.deleteProperty(requires, "lookup");
+  expect(c.verify(impl).status).toBe("undetermined");
+  await expect(c.perform(impl, { kind: "request" }, { lookup: value => value })).rejects.toThrow("Missing function dependency lookup");
+});
+
 it("proves a function dependency call from its declared contract", async () => {
   const definition = c.behavior("pricing", {
     input: c.variants("kind", { request: c.object({ quantity: c.int().min(1).max(100) }) }),

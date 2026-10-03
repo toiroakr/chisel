@@ -103,21 +103,22 @@ function prepareExpression(template: unknown, definition: AnyBehavior, tag: stri
     const lowered = children.length ? replaceChildren(value, children.map(lower)) : value;
     const node = nodeOf(lowered);
     if (node?.kind !== "call") return lowered;
-    const declared = definition.requires[dependencyName(node.dependency)];
+    const name = dependencyName(node.dependency);
+    const declared = Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined;
     const prove = (schema: AnySchema, value: unknown) => provesValue(schema, value, scope, steps, limit);
     if (declared?.takes !== "input" || !intermediates(node.input, prove) || !prove(declared.input, node.input)) {
       valid = false;
       return undefined;
     }
-    let name: string;
-    do { name = `#call${index++}`; } while (Object.hasOwn(scope.shape, name));
-    const result = positionTerm([name], "value");
+    let resultName: string;
+    do { resultName = `#call${index++}`; } while (Object.hasOwn(scope.shape, resultName));
+    const result = positionTerm([resultName], "value");
     const assumptions = (declared.injected?.behavior.ensures ?? []).flatMap(clause => {
       if (clause.cases !== undefined) return [];
       const rule = substitute(clause.rule, { input: node.input, value: result });
       return rule ? [rule] : [];
     });
-    scope = { ...scope, shape: { ...scope.shape, [name]: declared.output }, invariants: [...scope.invariants, ...assumptions] };
+    scope = { ...scope, shape: { ...scope.shape, [resultName]: declared.output }, invariants: [...scope.invariants, ...assumptions] };
     return result;
   }
   const value = lower(template);
@@ -190,6 +191,10 @@ function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, ste
   });
 }
 function includesSchema(target: AnySchema, source: AnySchema, limit: number): boolean {
+  if (source.kind === "literal" || source.kind === "enum") {
+    const domain = domainOf(source, limit);
+    if (domain.exhaustive) return domain.values.every(value => target.parse(value).success);
+  }
   return provesValue(target, positionTerm(["value"], "value"), object({ value: source }), [], limit);
 }
 function sameShape(target: AnySchema, source: AnySchema, limit: number): boolean {

@@ -412,7 +412,10 @@ export function implement<B extends AnyBehavior>(
     if (decision.kind !== "rules" || decision.expression === undefined) continue;
     const inspect = (value: unknown): void => {
       const node = nodeOf(value);
-      if (node?.kind === "call" && definition.requires[dependencyName(node.dependency)]?.takes !== "input") throw new SpecificationError("call requires a declared function dependency");
+      if (node?.kind === "call") {
+        const name = dependencyName(node.dependency);
+        if (!Object.hasOwn(definition.requires, name) || definition.requires[name]?.takes !== "input") throw new SpecificationError("call requires a declared function dependency");
+      }
       if (node?.kind === "construct" && DATA in node.schema && !options.constructs?.includes(node.schema)) throw new SpecificationError(`Construction of ${(node.schema as unknown as { name: string }).name} requires an explicit constructs declaration`);
       childrenOf(value).forEach(inspect);
     };
@@ -781,7 +784,7 @@ function decide<Result, Effect>(
   const scope = withDeps(input, resolved);
   if (decision.expression !== undefined) {
     return interpret(decision.expression, scope, { observe, distinguish,
-      invoke: (name, argument) => invokeDependency(name, definition.requires[name], (resolved as Record<string, unknown> | undefined)?.[name], argument),
+      invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
     }) as Execution<Result, Effect>;
   }

@@ -145,6 +145,34 @@ it("verifies pipeline contracts with an inherited object property as the discrim
   expect(c.verify(joined).status).toBe("verified");
 });
 
+it.each([
+  [c.array(c.enum(["a"])), c.array(c.string())],
+  [c.array(c.literal("a")), c.array(c.string())],
+  [c.record(c.enum(["a"])), c.record(c.string())],
+  [c.record(c.literal("a")), c.record(c.string())],
+])("proves finite leaf inclusion inside unbounded collections (%#)", (source, target) => {
+  const definition = c.behavior("compatible collections", {
+    input: c.variants("kind", { request: c.object({ values: source }) }),
+    result: target, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("carry", input => ({
+    result: input.values, effects: [],
+  })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("does not prove finite leaf inclusion from a partial enumeration", () => {
+  const definition = c.behavior("incompatible collections", {
+    input: c.variants("kind", { request: c.object({ values: c.array(c.enum(["long", "x"])) }) }),
+    result: c.array(c.string().min(2)), effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("carry", input => ({
+    result: input.values, effects: [],
+  })) } });
+  expect(c.verify(impl, { candidates: 1 }).status).toBe("undetermined");
+  expect(c.verify(impl).status).not.toBe("verified");
+});
+
 it("verifies pipeline contracts with outer tagged invariants", () => {
   const first = c.behavior("outer producer", {
     input: c.variants("kind", { start: c.object({}) }),
