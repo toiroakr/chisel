@@ -1,8 +1,9 @@
-import { Decimal } from "decimal.js";
+import { snapshotValue } from "./data.js";
+import type { Decimal } from "decimal.js";
 import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
-import type { Execution, RulesDecision, ValueDepsOf, Branch } from "./behavior.js";
+import type { Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
-import { depsTerm, holds, isDecimal, isTerm, readOperand, selfTerm } from "./rule.js";
+import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, selfTerm } from "./rule.js";
 import type { Schema } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
@@ -16,6 +17,7 @@ export type Template<T> = Term<T> | Expression<T> | (T extends readonly (infer E
   ? readonly Template<E>[]
   : T extends object ? { readonly [K in keyof T]: Template<T[K]> } : T);
 export type Node =
+  | { readonly kind: "call"; readonly dependency: Term<unknown>; readonly input: unknown }
   | { readonly kind: "choose"; readonly condition: Rule; readonly yes: unknown; readonly no: unknown }
   | { readonly kind: "construct"; readonly schema: Schema<unknown>; readonly value: unknown }
   | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat"; readonly left: unknown; readonly right: unknown };
@@ -28,6 +30,15 @@ export function choose<T>(condition: Rule, yes: Template<T>, no: Template<NoInfe
 }
 export function construct<T>(schema: Schema<T>, value: Template<NoInfer<T extends object ? Pick<T, Extract<keyof T, string | number>> : T>>): Expression<T> {
   return expression({ kind: "construct", schema: schema as Schema<unknown>, value });
+}
+export function call<Input, Output>(dependency: Term<(input: Input) => Output>, input: Template<NoInfer<Input>>): Expression<Output> {
+  dependencyName(dependency);
+  return expression({ kind: "call", dependency, input });
+}
+export function dependencyName(dependency: Term<unknown>): string {
+  const position = positionData(dependency);
+  if (!position || position.measure !== "value" || position.path.length !== 2 || position.path[0] !== DEPS) throw new Error("call expects a declared function dependency");
+  return position.path[1]!;
 }
 export function concat(left: Template<string>, right: Template<string>): Expression<string> {
   return expression({ kind: "operation", operator: "concat", left, right });
@@ -44,6 +55,7 @@ export function nodeOf(value: unknown): Node | undefined {
 }
 export function childrenOf(value: unknown): readonly unknown[] {
   const node = nodeOf(value);
+  if (node?.kind === "call") return [node.input];
   if (node?.kind === "choose") return [node.yes, node.no];
   if (node?.kind === "construct") return [node.value];
   if (node?.kind === "operation") return [node.left, node.right];
@@ -69,7 +81,7 @@ function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaini
   if (typeof value === "function" || typeof value === "symbol") throw new Error("Model expressions cannot contain callbacks or symbols");
   if (isTerm(value)) return value;
   if (atom(value)) {
-    if (isDecimal(value)) { const copy = new Decimal(value); Object.freeze(copy.d); return Object.freeze(copy); }
+    if (isDecimal(value)) return snapshotValue(value);
     if (typeof value === "string") {
       if (!value.isWellFormed()) throw new Error("Model text must be well-formed Unicode");
       return value.normalize("NFC");
@@ -81,6 +93,7 @@ function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaini
   const parents = new Set([...ancestors, value]);
   const check = (child: unknown) => checkedTemplate(child, parents, remaining);
   const node = nodeOf(value);
+  if (node?.kind === "call") return expression({ ...node, input: check(node.input) });
   if (node?.kind === "choose") return expression({ ...node, yes: check(node.yes), no: check(node.no) });
   if (node?.kind === "construct") return expression({ ...node, value: check(node.value) });
   if (node?.kind === "operation") return expression({ ...node, left: check(node.left), right: check(node.right) });
@@ -88,9 +101,9 @@ function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaini
 }
 export function model<Input, Result, Effect, Deps = unknown>(
   id: string,
-  build: (input: TermOf<NoInfer<Input>>, deps: TermOf<ValueDepsOf<NoInfer<Deps>>>) => Template<Execution<NoInfer<Result>, NoInfer<Effect>>>,
+  build: (input: TermOf<NoInfer<Input>>, deps: TermOf<NoInfer<Deps>>) => Template<Execution<NoInfer<Result>, NoInfer<Effect>>>,
 ): RulesDecision<Input, Result, Effect, Deps> {
-  const template = checkedTemplate(build(selfTerm<NoInfer<Input>>(), depsTerm<ValueDepsOf<NoInfer<Deps>>>()));
+  const template = checkedTemplate(build(selfTerm<NoInfer<Input>>(), depsTerm<NoInfer<Deps>>()));
   return Object.freeze({
     kind: "rules", id, expression: template,
     guards: choicesOf(template).map(node => ({ kind: "guard" as const, condition: node.condition, orElse: () => { throw new Error("Expression guards are interpreted"); } })),
@@ -99,6 +112,7 @@ export function model<Input, Result, Effect, Deps = unknown>(
 }
 export function interpret(template: unknown, scope: unknown, options: {
   readonly steps?: number;
+  readonly invoke?: (name: string, input: unknown) => unknown;
   readonly observe?: ComparisonObserver;
   readonly distinguish?: (distinction: Branch, outcome: boolean | string) => void;
   readonly arm?: (index: number, outcome: boolean) => void;
@@ -109,6 +123,10 @@ export function interpret(template: unknown, scope: unknown, options: {
     if (--remaining < 0) throw new EvaluationLimit("Model evaluation step budget exceeded");
     if (isTerm(value)) return readOperand(value, scope);
     const node = nodeOf(value);
+    if (node?.kind === "call") {
+      if (!options.invoke) throw new Error("Dependency calls require an execution environment");
+      return options.invoke(dependencyName(node.dependency), read(node.input));
+    }
     if (node?.kind === "choose") {
       const outcome = holds(node.condition, scope, options.observe, options.distinguish);
       options.arm?.(choices.indexOf(node), outcome);
@@ -166,9 +184,15 @@ export function* modelPaths(template: unknown): Generator<ModelPath> {
     for (const child of modelPaths(children[index])) yield* product(index + 1, { value: undefined, values: [...before.values, child.value], steps: [...before.steps, ...child.steps], choices: [...before.choices, ...child.choices] });
   }
   for (const path of product(0, { value: undefined, values: [], steps: [], choices: [] })) {
-    const value = node?.kind === "construct" ? expression({ ...node, value: path.values[0] })
-      : node?.kind === "operation" ? expression({ ...node, left: path.values[0], right: path.values[1] })
-      : Array.isArray(template) ? path.values : Object.fromEntries(Object.keys(template as object).map((key, index) => [key, path.values[index]]));
+    const value = replaceChildren(template, path.values);
     yield { value, steps: path.steps, choices: path.choices };
   }
+}
+
+export function replaceChildren(template: unknown, values: readonly unknown[]): unknown {
+  const node = nodeOf(template);
+  if (node?.kind === "call") return expression({ ...node, input: values[0] });
+  if (node?.kind === "construct") return expression({ ...node, value: values[0] });
+  if (node?.kind === "operation") return expression({ ...node, left: values[0], right: values[1] });
+  return Array.isArray(template) ? values : Object.fromEntries(Object.keys(template as object).map((key, index) => [key, values[index]]));
 }

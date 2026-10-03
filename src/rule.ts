@@ -218,6 +218,7 @@ function condition(rule: Rule): Rule & Condition {
 // input fields in the scope a guard is evaluated against, not in a separate one,
 // so a comparison reached records the dependency values with the input.
 export const DEPS = "#deps";
+const INPUT = Symbol.for("chisel.input");
 
 export function depsTerm<T>(): TermOf<T> {
   return termAt([DEPS], "value") as TermOf<T>;
@@ -232,7 +233,7 @@ export function bindElement(scope: unknown, name: string, element: unknown): unk
 export function withDeps(input: unknown, deps: unknown): unknown {
   return deps === undefined || typeof input !== "object" || input === null
     ? input
-    : { ...input, [DEPS]: deps };
+    : { ...input, [DEPS]: deps, [INPUT]: input };
 }
 
 export function rootTerm<T>(key: string): TermOf<T> {
@@ -776,6 +777,7 @@ function read(operand: unknown, value: unknown): unknown {
     return readLinear(data, value);
   }
   const { path, measure } = data;
+  if (path.length === 0 && typeof value === "object" && value !== null && INPUT in value) value = (value as { [INPUT]: unknown })[INPUT];
   const found = path.reduce<unknown>(
     (current, key) =>
       typeof current === "object" && current !== null

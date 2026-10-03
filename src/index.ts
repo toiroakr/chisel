@@ -169,7 +169,7 @@ export type { JsonValue } from "./codec.js";
 export { PAIR_LIMIT } from "./pairs.js";
 export type { PairObligation, PairMeasure } from "./pairs.js";
 
-export { model, choose, construct, concat, arithmetic, quotient } from "./model.js";
+export { model, call, choose, construct, concat, arithmetic, quotient } from "./model.js";
 export type { Expression, Template } from "./model.js";
 
 export { verify } from "./proof.js";

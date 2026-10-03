@@ -1,5 +1,6 @@
-import { DATA } from "./data.js";
-import { interpret, childrenOf, nodeOf } from "./model.js";
+import { invokeDependency } from "./dependency.js";
+import { DATA, snapshotValue } from "./data.js";
+import { interpret, childrenOf, dependencyName, nodeOf } from "./model.js";
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
@@ -21,6 +22,7 @@ import type {
   TermOf,
 } from "./rule.js";
 import {
+  DEPS,
   describeRule,
   holds,
   readOperand,
@@ -282,6 +284,9 @@ export function behavior<
   if (options.input.variantTags.includes("$default")) {
     throw new SpecificationError(`${name} cannot take a case named $default`);
   }
+  if (Object.keys(options.requires ?? {}).length && (options.input.discriminant === DEPS || options.input.variantTags.some(tag => Object.hasOwn(options.input.variants[tag]!.shape, DEPS)))) {
+    throw new SpecificationError("#deps is reserved when dependencies are declared");
+  }
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
   const repeated = clauses.find(
     (clause, index) => clauses.findIndex(other => other.name === clause.name) !== index,
@@ -407,6 +412,7 @@ export function implement<B extends AnyBehavior>(
     if (decision.kind !== "rules" || decision.expression === undefined) continue;
     const inspect = (value: unknown): void => {
       const node = nodeOf(value);
+      if (node?.kind === "call" && definition.requires[dependencyName(node.dependency)]?.takes !== "input") throw new SpecificationError("call requires a declared function dependency");
       if (node?.kind === "construct" && DATA in node.schema && !options.constructs?.includes(node.schema)) throw new SpecificationError(`Construction of ${(node.schema as unknown as { name: string }).name} requires an explicit constructs declaration`);
       childrenOf(value).forEach(inspect);
     };
@@ -643,11 +649,12 @@ export async function runTraced<B extends AnyBehavior>(
   const arms: ArmTaken[] = [];
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
+  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput.value) : parsedInput.value;
   const execution =
     selected.kind === "rules"
       ? decide(
           selected,
-          parsedInput.value,
+          decisionInput,
           deps,
           arms,
           (rule, scope) => comparisons.push({ rule, scope }),
@@ -656,7 +663,7 @@ export async function runTraced<B extends AnyBehavior>(
         )
       : await selected.run(parsedInput.value as never, deps as never);
   return {
-    execution: validated(definition, parsedInput.value, execution),
+    execution: validated(definition, decisionInput, execution),
     arms,
     comparisons,
     way: selected.kind === "rules" ? { decision: selected.id, steps } : undefined,
@@ -728,7 +735,7 @@ export function traceSync(
   try {
     decide(
       decision,
-      parsed.value,
+      decision.expression !== undefined ? snapshotValue(parsed.value) : parsed.value,
       deps,
       [],
       (rule, scope) => comparisons.push({ rule, scope }),
@@ -767,13 +774,14 @@ function decide<Result, Effect>(
       if (dependency.takes !== "nothing") continue;
       const parsed = dependency.output.parse(values[name]);
       if (!parsed.success) throw new SpecificationError(formatIssues(`Invalid dependency ${name}`, parsed.issues));
-      values[name] = parsed.value;
+      values[name] = snapshotValue(parsed.value);
     }
     resolved = values;
   }
   const scope = withDeps(input, resolved);
   if (decision.expression !== undefined) {
     return interpret(decision.expression, scope, { observe, distinguish,
+      invoke: (name, argument) => invokeDependency(name, definition.requires[name], (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
     }) as Execution<Result, Effect>;
   }

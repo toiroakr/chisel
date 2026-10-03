@@ -185,7 +185,39 @@ npm run example:verified
 
 The executable CLI runs all commands in a worker with a default 30-second deadline (including module loading), a 256 MiB old-generation heap limit, and a 1 MiB streamed-output limit. The deadline terminates synchronous loops too. `runIsolated(argv, timeoutMs)` offers this boundary to hosts. Direct in-process `check` / `perform` calls cannot preempt arbitrary JavaScript callbacks; expression evaluation has its own step budget. The worker is a resource boundary, not an I/O sandbox for imported modules.
 
-The proof system deliberately refuses unsupported universal proofs, including general quantified constructions and function dependencies. Use finite domains, express a supported invariant, or keep the report unresolved. Full Souther language compatibility is not implied by a passing report; the guarantee applies to the selected model and the reported obligations.
+The proof system preserves matching quantified facts from input invariants and guards, including nested quantifiers and captured input fields. It also proves structural schema inclusion for collections and pipeline boundaries. General map/fold constructions, recursive proofs, and unsupported substitutions remain unresolved. Full Souther language compatibility is not implied by a passing report; the guarantee applies to the selected model and the reported obligations.
+
+### Function dependencies in models
+
+Use `call` to invoke a declared function dependency in an expression:
+
+```ts
+const pricing = c.behavior("pricing", {
+  input: c.variants("kind", {
+    request: c.object({ quantity: c.int().min(1).max(100) }),
+  }),
+  result: c.int().min(1).max(101),
+  effects: c.variants("kind", {}),
+  requires: {
+    price: c.dependency(c.int().min(1).max(100), c.int().min(0).max(100)),
+  },
+});
+const implementation = c.implement(pricing, {
+  cases: {
+    request: c.model("price", (input, deps) => ({
+      result: c.arithmetic("add", c.call(deps.price, input.quantity), 1),
+      effects: [],
+    })),
+  },
+});
+c.verify(implementation);
+```
+
+The verifier proves each argument satisfies the dependency's input contract and treats each call's result as an independent value allowed by its output contract. For `dependency(behavior)`, supported unconditional `ensures` also supply facts. Verification never executes the injected callback or uses a fake table as proof of its universal behavior.
+
+At runtime, every call validates its input, output, and applicable `ensures`. Model inputs, value dependencies, and call inputs and outputs are copied and frozen, including Decimal values, to prevent a dependency from mutating values used by another expression. Unsupported host objects such as mutable custom class instances are rejected at this boundary; use plain data or the supported Decimal, Rational, and Temporal types. The proof is conditional on the declared dependency contracts; it does not certify host callback termination or implementation. Case-scoped dependency postconditions are checked at runtime but currently do not supply proof facts. Call results cannot yet be projected into fields or used directly as guards.
+
+A model can pass the entire input with `c.call(deps.lookup, input)`; internal dependency bindings are excluded. `#deps` is reserved as a top-level input field when a behavior declares dependencies. Existing fake tables work with `call` in example checks.
 
 ## Commands
 

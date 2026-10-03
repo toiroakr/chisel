@@ -1,0 +1,129 @@
+import { expect, it } from "vitest";
+import * as c from "../src/index.js";
+
+it("preserves a quantified input invariant when returning the same collection", () => {
+  const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
+  const definition = c.behavior("carry", {
+    input: c.variants("kind", { input: c.object({ values: positive }) }),
+    result: positive, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("carry", input => ({
+    result: c.construct(positive, input.values), effects: [],
+  })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("uses an all guard to prove a collection construction", () => {
+  const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
+  const definition = c.behavior("guarded", {
+    input: c.variants("kind", { input: c.object({ values: c.array(c.int()) }) }),
+    result: positive, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("guarded", input => ({
+    result: c.choose(input.values.$all(x => x.$gte(1)), c.construct(positive, input.values), c.construct(positive, [])),
+    effects: [],
+  })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("carries a quantified relation declared on a parent object", () => {
+  const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
+  const definition = c.behavior("parent", {
+    input: c.variants("kind", { input: c.object({ cart: c.object({ values: c.array(c.int()) }).refine(cart => cart.values.$all(x => x.$gte(1))) }) }),
+    result: positive, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("parent", input => ({ result: input.cart.values, effects: [] })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("keeps nested quantifier bindings distinct", () => {
+  const matrix = c.array(c.array(c.int())).refine(rows => rows.$all(row => row.$all(value => value.$gte(1))));
+  const definition = c.behavior("matrix", {
+    input: c.variants("kind", { input: c.object({ rows: c.array(c.array(c.int())) }) }),
+    result: matrix, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("matrix", input => ({
+    result: c.choose(input.rows.$all(row => row.$all(value => value.$gte(1))), c.construct(matrix, input.rows), []), effects: [],
+  })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("does not use any as evidence that all elements satisfy a condition", () => {
+  const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
+  const definition = c.behavior("some", {
+    input: c.variants("kind", { input: c.object({ values: c.array(c.int()) }) }),
+    result: positive, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("some", input => ({
+    result: c.choose(input.values.$any(x => x.$gte(1)), c.construct(positive, input.values), []), effects: [],
+  })) } });
+  expect(c.verify(impl, { candidates: 1 }).status).toBe("undetermined");
+});
+
+it("does not transfer a quantified fact to a different collection", () => {
+  const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
+  const definition = c.behavior("other", {
+    input: c.variants("kind", { input: c.object({ left: c.array(c.int()), right: c.array(c.int()) }) }),
+    result: positive, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("other", input => ({
+    result: c.choose(input.left.$all(x => x.$gte(1)), c.construct(positive, input.right), []), effects: [],
+  })) } });
+  expect(c.verify(impl, { candidates: 1 }).status).toBe("undetermined");
+});
+
+it("proves compatible collection element schemas without enumerating the collection", () => {
+  const definition = c.behavior("element bounds", {
+    input: c.variants("kind", { input: c.object({ values: c.array(c.object({ n: c.int().min(1) })) }) }),
+    result: c.array(c.object({ n: c.int().min(0) })), effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("elements", input => ({ result: input.values, effects: [] })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("does not skip an element invariant while proving structural compatibility", () => {
+  const definition = c.behavior("unsafe elements", {
+    input: c.variants("kind", { input: c.object({ values: c.array(c.object({ n: c.int() })) }) }),
+    result: c.array(c.object({ n: c.int().min(1) })), effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("elements", input => ({ result: input.values, effects: [] })) } });
+  expect(c.verify(impl, { candidates: 1 }).status).toBe("undetermined");
+});
+it("does not use a denied all guard to certify a collection", () => {
+  const positive = c.array(c.int()).refine(xs => xs.$all(x => x.$gte(1)));
+  const definition = c.behavior("denied", {
+    input: c.variants("kind", { input: c.object({ values: c.array(c.int()) }) }),
+    result: positive, effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("denied", input => ({
+    result: c.choose(input.values.$all(x => x.$gte(1)), c.construct(positive, []), c.construct(positive, input.values)), effects: [],
+  })) } });
+  expect(c.verify(impl, { candidates: 1 }).status).toBe("undetermined");
+});
+
+it("preserves free variables when substituting a quantified postcondition", () => {
+  const definition = c.behavior("captured bound", {
+    input: c.variants("kind", { input: c.object({ lower: c.int(), upper: c.int(), values: c.array(c.int()) }) }),
+    result: c.object({ limit: c.int(), values: c.array(c.int()) }).refine(value => value.values.$all(item => item.$gte(value.limit))),
+    effects: c.variants("kind", {}),
+  });
+  const impl = c.implement(definition, { cases: { input: c.model("wrong bound", input => ({
+    result: { limit: input.upper, values: c.choose(input.values.$all(item => item.$gte(input.lower)), input.values, []) }, effects: [],
+  })) } });
+  expect(c.verify(impl, { candidates: 1 }).status).toBe("undetermined");
+});
+it("proves an unbounded pipeline boundary from structural and numeric contracts", () => {
+  const first = c.behavior("producer", {
+    input: c.variants("kind", { start: c.object({}) }),
+    result: c.variants("kind", { next: c.object({ values: c.array(c.int().min(1)) }) }),
+    effects: c.variants("kind", {}),
+  });
+  const second = c.behavior("consumer", {
+    input: c.variants("kind", { next: c.object({ values: c.array(c.int().min(0)) }) }),
+    result: c.variants("kind", { done: c.object({}) }), effects: c.variants("kind", {}),
+  });
+  const producer = c.implement(first, { cases: { start: c.model("empty", () => ({ result: { kind: "next", values: [] }, effects: [] })) } });
+  const consumer = c.implement(second, { cases: { next: c.model("done", () => ({ result: { kind: "done" }, effects: [] })) } });
+  const [, joined] = c.compose("contract pipeline", [producer, consumer]);
+  expect(c.verify(joined).status).toBe("verified");
+});
