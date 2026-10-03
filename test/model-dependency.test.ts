@@ -1,6 +1,46 @@
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
 
+it("rejects inherited value dependencies in conditions", () => {
+  const declarations = { enabled: c.dependency(c.boolean()) };
+  const requires: typeof declarations = Object.create(declarations);
+  const definition = c.behavior("inherited value", {
+    input: c.variants("kind", { request: c.object({}) }),
+    result: c.int().min(1).max(1), effects: c.variants("kind", {}), requires,
+  });
+  expect(() => c.implement(definition, { cases: { request: c.model("choose", (_, deps) => ({
+    result: c.choose(deps.enabled.$eq(true), 1, 0), effects: [],
+  })) } })).toThrow("Model requires a declared value dependency enabled");
+});
+
+it.each(["direct", "linear", "quantified"] as const)("rejects inherited value dependencies in %s expressions", mode => {
+  const declarations = { minimum: c.dependency(c.int()) };
+  const requires: typeof declarations = Object.create(declarations);
+  const definition = c.behavior("inherited expression value", {
+    input: c.variants("kind", { request: c.object({ values: c.array(c.int()) }) }),
+    result: c.int(), effects: c.variants("kind", {}), requires,
+  });
+  expect(() => c.implement(definition, { cases: { request: c.model("read", (input, deps) => ({
+    result: mode === "direct" ? deps.minimum : mode === "linear" ? deps.minimum.$plus(1) : c.choose(input.values.$all(value => value.$gte(deps.minimum)), 1, 0),
+    effects: [],
+  })) } })).toThrow("Model requires a declared value dependency minimum");
+});
+
+it("does not prove or execute conditions whose value declaration became inherited", async () => {
+  const requires = { enabled: c.dependency(c.boolean()) };
+  const definition = c.behavior("changed value declaration", {
+    input: c.variants("kind", { request: c.object({}) }),
+    result: c.int().min(0).max(1), effects: c.variants("kind", {}), requires,
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("choose", (_, deps) => ({
+    result: c.choose(deps.enabled.$eq(true), 1, 0), effects: [],
+  })) } });
+  Object.setPrototypeOf(requires, { enabled: requires.enabled });
+  Reflect.deleteProperty(requires, "enabled");
+  expect(c.verify(impl).status).toBe("undetermined");
+  await expect(c.perform(impl, { kind: "request" }, { enabled: false })).rejects.toThrow("Model requires a declared value dependency enabled");
+});
+
 it("rejects function dependencies inherited from the declaration map prototype", () => {
   const declarations = { lookup: c.dependency(c.boolean(), c.boolean()) };
   const requires: typeof declarations = Object.create(declarations);
@@ -25,7 +65,7 @@ it("does not prove or execute calls whose declaration was moved to a prototype",
   Object.setPrototypeOf(requires, { lookup: requires.lookup });
   Reflect.deleteProperty(requires, "lookup");
   expect(c.verify(impl).status).toBe("undetermined");
-  await expect(c.perform(impl, { kind: "request" }, { lookup: value => value })).rejects.toThrow("Missing function dependency lookup");
+  await expect(c.perform(impl, { kind: "request" }, { lookup: value => value })).rejects.toThrow("call requires a declared function dependency");
 });
 
 it("proves a function dependency call from its declared contract", async () => {

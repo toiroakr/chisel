@@ -1,9 +1,9 @@
 import { snapshotValue } from "./data.js";
 import type { Decimal } from "decimal.js";
 import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
-import type { Execution, RulesDecision, Branch } from "./behavior.js";
+import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
-import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, selfTerm } from "./rule.js";
+import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, selfTerm, termData } from "./rule.js";
 import type { Schema } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
@@ -61,6 +61,36 @@ export function childrenOf(value: unknown): readonly unknown[] {
   if (node?.kind === "operation") return [node.left, node.right];
   if (isTerm(value) || atom(value)) return [];
   return Object.values(value as object);
+}
+export function modelDependencyIssue(template: unknown, definition: AnyBehavior, tags: readonly string[]): string | undefined {
+  const inputOwnsRoot = Object.keys(definition.requires).length === 0 && tags.every(tag =>
+    definition.input.discriminant === DEPS || Object.hasOwn(definition.input.variants[tag]!.shape, DEPS));
+  function inspect(value: unknown): string | undefined {
+    if (isTerm(value) && !inputOwnsRoot) {
+      const data = termData(value);
+      const paths = data.kind === "position" ? [data.path] : data.parts.map(part => part.path);
+      for (const path of paths) {
+        if (path[0] !== DEPS) continue;
+        const name = path[1];
+        if (name === undefined || !Object.hasOwn(definition.requires, name) || definition.requires[name]?.takes !== "nothing") return `Model requires a declared value dependency ${name ?? "<root>"}`;
+      }
+    }
+    const node = nodeOf(value);
+    if (node?.kind === "call") {
+      const name = dependencyName(node.dependency);
+      if (!Object.hasOwn(definition.requires, name) || definition.requires[name]?.takes !== "input") return "call requires a declared function dependency";
+    }
+    if (node?.kind === "choose") {
+      const issue = inspect(node.condition);
+      if (issue) return issue;
+    }
+    for (const child of childrenOf(value)) {
+      const issue = inspect(child);
+      if (issue) return issue;
+    }
+    return undefined;
+  }
+  return inspect(template);
 }
 function atom(value: unknown): boolean {
   return value === null || typeof value !== "object" || isDecimal(value) ||

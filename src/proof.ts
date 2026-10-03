@@ -5,7 +5,7 @@ import { brokenEnsures } from "./behavior.js";
 import { constantsOf, domainOf } from "./domain.js";
 import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
-import { childrenOf, dependencyName, interpret, modelPaths, nodeOf, replaceChildren } from "./model.js";
+import { childrenOf, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
 import { conjuncts, holds, isTerm, positionData, positionTerm, sizeOf, termPaths, withDeps } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
@@ -40,6 +40,8 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
       continue;
     }
     const base = { decision: decision.id };
+    const dependencyIssue = modelDependencyIssue(decision.expression, definition, [tag]);
+    if (dependencyIssue) { decisions.push({ ...base, status: "undetermined", reason: dependencyIssue }); continue; }
     const calls = containsCalls(decision.expression);
     const domain = domainOf(object({ input: definition.input, deps: object(Object.fromEntries(Object.entries(definition.requires).filter(([, dependency]) => dependency.takes === "nothing").map(([name, dependency]) => [name, dependency.output]))) }), candidates, constantsOf(decision.guards.map(guard => guard.condition)));
     let failed: ConstructionProof | undefined;

@@ -1,6 +1,6 @@
 import { invokeDependency } from "./dependency.js";
 import { DATA, snapshotValue } from "./data.js";
-import { interpret, childrenOf, dependencyName, nodeOf } from "./model.js";
+import { interpret, childrenOf, modelDependencyIssue, nodeOf } from "./model.js";
 import type { Requirements, Resolved } from "./dependency.js";
 import type {
   AnyVariantsSchema,
@@ -410,12 +410,10 @@ export function implement<B extends AnyBehavior>(
   }
   for (const decision of Object.values(cases) as ImplementationCases<AnyBehavior>[string][]) {
     if (decision.kind !== "rules" || decision.expression === undefined) continue;
+    const dependencyIssue = modelDependencyIssue(decision.expression, definition, tagsOf.get(decision)!);
+    if (dependencyIssue) throw new SpecificationError(dependencyIssue);
     const inspect = (value: unknown): void => {
       const node = nodeOf(value);
-      if (node?.kind === "call") {
-        const name = dependencyName(node.dependency);
-        if (!Object.hasOwn(definition.requires, name) || definition.requires[name]?.takes !== "input") throw new SpecificationError("call requires a declared function dependency");
-      }
       if (node?.kind === "construct" && DATA in node.schema && !options.constructs?.includes(node.schema)) throw new SpecificationError(`Construction of ${(node.schema as unknown as { name: string }).name} requires an explicit constructs declaration`);
       childrenOf(value).forEach(inspect);
     };
@@ -771,6 +769,10 @@ function decide<Result, Effect>(
   definition: AnyBehavior,
 ): Execution<Result, Effect> {
   let resolved = deps;
+  if (decision.expression !== undefined) {
+    const issue = modelDependencyIssue(decision.expression, definition, [tagOf(definition.input, input)!]);
+    if (issue) throw new SpecificationError(issue);
+  }
   if (decision.expression !== undefined && Object.keys(definition.requires).length > 0) {
     const values: Record<string, unknown> = Object.assign(Object.create(null), typeof deps === "object" && deps !== null ? deps : {});
     for (const [name, dependency] of Object.entries(definition.requires)) {
