@@ -117,5 +117,6 @@ it("preserves an input field named #deps when no dependencies are declared", asy
   });
   const impl = c.implement(definition, { cases: { input: c.model("identity", input => ({ result: input["#deps"], effects: [] })) } });
   await expect(c.perform(impl, { kind: "input", "#deps": true })).resolves.toEqual({ result: true, effects: [] });
+  await expect(c.perform(impl, { kind: "input", "#deps": true }, {})).resolves.toStrictEqual({ result: true, effects: [] });
   expect(c.verify(impl).status).toBe("verified");
 });

@@ -768,7 +768,7 @@ function decide<Result, Effect>(
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
   definition: AnyBehavior,
 ): Execution<Result, Effect> {
-  let resolved = deps;
+  let resolved = Object.keys(definition.requires).length === 0 ? undefined : deps;
   if (decision.expression !== undefined) {
     const issue = modelDependencyIssue(decision.expression, definition, [tagOf(definition.input, input)!]);
     if (issue) throw new SpecificationError(issue);
