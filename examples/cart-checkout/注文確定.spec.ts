@@ -23,13 +23,13 @@ const カート = c.variants("状態", {
 });
 
 const 確定結果 = c.variants("結果", {
-  確定: c.object({ カートID, 合計金額: c.number() }),
+  確定: c.object({ カートID, 合計金額: c.int() }),
   不可: c.object({ 理由: c.string() }),
 });
 
 const 確定作用 = c.variants("種類", {
-  在庫引当: c.object({ 商品ID, 数量: c.number() }),
-  決済要求: c.object({ カートID, 金額: c.number(), 内訳: c.record(c.int().min(0)).min(1) }),
+  在庫引当: c.object({ 商品ID, 数量: c.int() }),
+  決済要求: c.object({ カートID, 金額: c.int(), 内訳: c.record(c.int().min(0)).min(1) }),
   クーポン消費: c.object({ クーポンコード }),
 });
 
