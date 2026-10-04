@@ -259,3 +259,29 @@ it("does not resolve a missing function dependency from Object.prototype", async
   await expect(c.perform(implementation, { kind: "request" }, {})).rejects.toThrow("Missing function dependency toString");
   await expect(c.perform(implementation, { kind: "request" }, { toString: () => "declared" })).resolves.toStrictEqual({ result: "declared", effects: [] });
 });
+
+it("distinguishes dependency contract failures from callback exceptions", async () => {
+  const definition = c.behavior("dependency errors", {
+    input: c.variants("kind", { request: c.object({}) }), result: c.int(), effects: c.variants("kind", {}),
+    requires: { lookup: c.dependency(c.boolean(), c.int().min(1)) },
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({ result: c.call(deps.lookup, true), effects: [] })) } });
+  await expect(c.perform(impl, { kind: "request" }, { lookup: () => 0 })).rejects.toBeInstanceOf(c.SpecificationError);
+  const failure = new Error("callback failed");
+  await expect(c.perform(impl, { kind: "request" }, { lookup: () => { throw failure; } })).rejects.toBe(failure);
+});
+
+it("uses specification errors for missing functions, arguments, and postconditions", async () => {
+  const lookup = c.behavior("checked lookup", {
+    input: c.variants("kind", { request: c.object({ minimum: c.int().min(1) }) }), result: c.int(), effects: c.variants("kind", {}),
+    ensures: ensure => [ensure.always("minimum", (input, value) => value.$gte(input.minimum))],
+  });
+  const definition = c.behavior("checked boundary", {
+    input: c.variants("kind", { request: c.object({ minimum: c.int() }) }), result: c.int(), effects: c.variants("kind", {}),
+    requires: { lookup: c.dependency(lookup) },
+  });
+  const impl = c.implement(definition, { cases: { request: c.model("call", (input, deps) => ({ result: c.call(deps.lookup, input), effects: [] })) } });
+  await expect(c.perform(impl, { kind: "request", minimum: 1 })).rejects.toBeInstanceOf(c.SpecificationError);
+  await expect(c.perform(impl, { kind: "request", minimum: 0 }, { lookup: () => 1 })).rejects.toBeInstanceOf(c.SpecificationError);
+  await expect(c.perform(impl, { kind: "request", minimum: 1 }, { lookup: () => 0 })).rejects.toBeInstanceOf(c.SpecificationError);
+});

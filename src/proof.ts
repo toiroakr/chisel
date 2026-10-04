@@ -232,7 +232,7 @@ function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, ste
   if (!containsSymbolic(value)) return schema.parse(value).success;
   if (provesNumeric(schema, original, scope, steps)) return true;
   if (node?.kind === "operation") return false;
-  if (schema.kind === "optional") return value === undefined || provesValue((schema as OptionalSchema<unknown>).schema, value, scope, steps, limit);
+  if (schema.kind === "optional") return provesValue(presentSchema(schema as OptionalSchema<unknown>), value, scope, steps, limit);
   if (isTerm(value)) {
     const position = positionData(value);
     if (!position || mayBeAbsent(scope, position.path)) return false;
@@ -261,11 +261,19 @@ function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, ste
   });
 }
 function includesSchema(target: AnySchema, source: AnySchema, limit: number): boolean {
+  if (source.kind === "optional") {
+    if (source.parse(undefined).success && !target.parse(undefined).success) return false;
+    return includesSchema(target, presentSchema(source as OptionalSchema<unknown>), limit);
+  }
+  if (target.kind === "optional") return includesSchema(presentSchema(target as OptionalSchema<unknown>), source, limit);
   if (source.kind === "literal" || source.kind === "enum") {
     const domain = domainOf(source, limit);
     if (domain.exhaustive) return domain.values.every(value => target.parse(value).success);
   }
   return provesValue(target, positionTerm(["value"], "value"), object({ value: source }), [], limit);
+}
+function presentSchema(schema: OptionalSchema<unknown>): AnySchema {
+  return schema.invariants.reduce((present, rule) => present.refine(() => rule), schema.schema);
 }
 function sameShape(target: AnySchema, source: AnySchema, limit: number): boolean {
   if (target === source) return true;
