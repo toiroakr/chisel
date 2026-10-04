@@ -116,7 +116,7 @@ export function feasibilityOf(
   const groups = new Map<string, Group>();
   const relations: Relation[] = [];
   const opaque: (readonly (readonly string[])[])[] = [];
-  const outcomes = new Map<string, boolean | string>();
+  const outcomes = new Map<string, { identity: unknown; outcome: boolean | string }[]>();
   const groupFor = (path: readonly string[], measure: Measure): string => {
     const key = JSON.stringify([path, measure]);
     if (!groups.has(key)) {
@@ -191,15 +191,18 @@ export function feasibilityOf(
       .constraints.push({ operator: placement.operator, bound: placement.bound });
   }
   for (const step of way.steps) {
-    const key = stepKey(step);
-    const seen = outcomes.get(key);
+    const identity = stepIdentity(step);
+    const key = step.distinction.kind === "match" ? JSON.stringify(["match", positionData(step.distinction.on)?.path]) : describeRule(step.distinction);
+    const bucket = outcomes.get(key) ?? [];
+    const seen = bucket.find(previous => isDeepStrictEqual(previous.identity, identity));
     if (seen !== undefined) {
-      if (seen !== step.outcome) {
+      if (seen.outcome !== step.outcome) {
         return { kind: "infeasible", reason: contradicts };
       }
       continue;
     }
-    outcomes.set(key, step.outcome);
+    bucket.push({ identity, outcome: step.outcome });
+    outcomes.set(key, bucket);
     const placed = placedConstraintOf(step);
     if (placed !== undefined) {
       groups.get(groupFor(placed.path, placed.measure))!.constraints.push(placed.constraint);
@@ -359,10 +362,21 @@ function placedConstraintOf(
   };
 }
 
-function stepKey(step: Step): string {
+function stepIdentity(step: Step): unknown {
   return step.distinction.kind === "match"
-    ? `match ${positionOf(step.distinction.on).path.join(".")}`
-    : describeRule(step.distinction);
+    ? ["match", termData(step.distinction.on)]
+    : ruleIdentity(step.distinction);
+}
+function ruleIdentity(rule: Rule): unknown {
+  const operand = (value: unknown): unknown => isTerm(value) ? ["term", termData(value)] : ["constant", value];
+  switch (rule.kind) {
+    case "compare": return [rule.kind, rule.operator, operand(rule.left), operand(rule.right)];
+    case "all":
+    case "any": return [rule.kind, operand(rule.of), rule.element, ruleIdentity(rule.each)];
+    case "not": return [rule.kind, ruleIdentity(rule.rule)];
+    case "and":
+    case "or": return [rule.kind, rule.rules.map(ruleIdentity)];
+  }
 }
 
 // The values a form takes as each of its parts ranges over its own interval,

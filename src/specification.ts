@@ -1,3 +1,4 @@
+import { hasScopedChoices } from "./model.js";
 import { verify } from "./proof.js";
 import type { ProofReport } from "./proof.js";
 import { constantsOf, domainOf } from "./domain.js";
@@ -1233,6 +1234,10 @@ export function generate(
       definition.input.placeholderFor(tag),
     ];
     const plan = plans.get(decision);
+    if (plan?.kind === "scoped") {
+      notComposed.push(`${decision.id}: local and iteration branch coverage is not yet supported`);
+      continue;
+    }
     if (plan?.kind === "too many") {
       notComposed.push(`${decision.id}: ${tooManyWays(wayLimit)}ため組み立てない`);
       continue;
@@ -1553,7 +1558,7 @@ function measureRules(
   }
   const decided = decisionsWithCases(implementation);
   const notRead = decided.flatMap(([decision]) =>
-    decision.kind === "decision" || (decision.kind === "rules" && plans.get(decision)?.kind === "too many")
+    decision.kind === "decision" || (decision.kind === "rules" && ["too many", "scoped"].includes(plans.get(decision)?.kind ?? ""))
       ? [decision.id]
       : [],
   );
@@ -1561,7 +1566,7 @@ function measureRules(
     taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
   const rules = decided.flatMap(([decision, tags]) => {
     const plan = plans.get(decision);
-    if (decision.kind !== "rules" || plan === undefined || plan.kind === "too many") {
+    if (decision.kind !== "rules" || plan === undefined || (plan.kind === "too many" || plan.kind === "scoped")) {
       return [];
     }
     const ways = plan.kind === "finite" ? plan.reached.map(item => item.way) : plan.ways;
@@ -1604,7 +1609,7 @@ function measureArms(
   }
   const decided = decisionsWithCases(implementation);
   const notRead = decided.flatMap(([decision]) =>
-    decision.kind === "decision" || (decision.kind === "rules" && plans.get(decision)?.kind === "too many")
+    decision.kind === "decision" || (decision.kind === "rules" && ["too many", "scoped"].includes(plans.get(decision)?.kind ?? ""))
       ? [decision.id]
       : [],
   );
@@ -1612,7 +1617,7 @@ function measureArms(
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
   const arms = decided.flatMap(([decision, tags]) => {
     const plan = plans.get(decision);
-    if (decision.kind !== "rules" || plan === undefined || plan.kind === "too many") {
+    if (decision.kind !== "rules" || plan === undefined || (plan.kind === "too many" || plan.kind === "scoped")) {
       return [];
     }
     const ways =
@@ -2228,7 +2233,8 @@ function withJointExclusions(definition: AnyBehavior, position: Position, combin
 type WayPlan =
   | { readonly kind: "finite"; readonly reached: readonly (Reached & { readonly tag: string })[] }
   | { readonly kind: "ways"; readonly ways: readonly Way[] }
-  | { readonly kind: "too many" };
+  | { readonly kind: "too many" }
+  | { readonly kind: "scoped" };
 
 function plansOf(
   implementation: Implementation<AnyBehavior> | undefined,
@@ -2240,6 +2246,7 @@ function plansOf(
     if (decision.kind !== "rules") {
       continue;
     }
+    if (hasScopedChoices(decision.expression)) { plans.set(decision, { kind: "scoped" }); continue; }
     const reaches = tags.map(tag => ({
       tag,
       reached: decision.expression !== undefined ? undefined : finiteReach(decision, scopeOf(implementation!, tag), combinations, [[implementation!.behavior.input.discriminant]]),
