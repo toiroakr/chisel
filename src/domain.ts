@@ -4,8 +4,8 @@ import { deepEqual } from "./equal.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, DecimalSchema } from "./schema.js";
 import { bordersOf } from "./border.js";
 import { carrierOf } from "./partition.js";
-import type { Rule } from "./rule.js";
-import { conjuncts, isTerm, positionData, termData } from "./rule.js";
+import type { Measure, Rule } from "./rule.js";
+import { conjuncts, isTerm, positionData, termData, counts } from "./rule.js";
 
 export interface Domain {
   readonly values: readonly unknown[];
@@ -135,7 +135,7 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
     }
     for (const border of bordersOf(current.invariants.flatMap(conjuncts), measure => carrierOf(current, measure))) {
       for (const point of border.points) if (point.witness !== undefined) {
-        values.push(border.measure === "length" && current.kind === "string" && typeof point.witness === "number" && point.witness >= 0 && point.witness <= limit ? "_".repeat(point.witness) : point.witness);
+        values.push(counts(border.measure) && current.kind === "string" && typeof point.witness === "number" && point.witness >= 0 && point.witness <= limit ? "_".repeat(point.witness) : point.witness);
       }
     }
     return finish(values, exhaustive);
@@ -156,8 +156,8 @@ function productOf(domains: readonly Domain[], limit: number): { values: unknown
   return { values, exhaustive };
 }
 
-function integralBounds(schema: AnySchema, measure: "value" | "length"): { lower: number; upper: number | undefined } {
-  let lower = measure === "length" ? 0 : -Infinity;
+function integralBounds(schema: AnySchema, measure: Measure): { lower: number; upper: number | undefined } {
+  let lower = counts(measure) ? 0 : -Infinity;
   let upper = Infinity;
   for (const rule of schema.invariants.flatMap(conjuncts)) {
     if (rule.kind !== "compare" || !isTerm(rule.left) || typeof rule.right !== "number") continue;

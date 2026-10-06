@@ -24,7 +24,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, conjuncts, holds, resize, sizeOf, stepInto } from "./rule.js";
+import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite } from "./rule.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -65,7 +65,7 @@ export function coordinatesIn(
   return position
     .valuesIn(given)
     .filter(value => value !== undefined)
-    .map(value => (measure === "length" ? sizeOf(value) : value));
+    .map(value => measured(value, measure));
 }
 
 export interface UndividedPosition {
@@ -405,15 +405,13 @@ function withOwnBorders(
 
 function writer(focus: Focus, empty?: () => unknown): Position["write"] {
   return (given, measure, coordinate) =>
-    focus.update(given, current =>
-      measure === "length" ? resize(current, coordinate as number, empty) : coordinate,
-    );
+    focus.update(given, current => rewrite(current, measure, coordinate, empty));
 }
 
 export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
   // An enum's lengths are those of its few values, not a range a row can step
   // through, so a rule on one draws no border.
-  if (measure === "length") {
+  if (counts(measure)) {
     return schema.kind === "enum" ? undefined : lengthCarrier;
   }
   switch (schema.kind) {

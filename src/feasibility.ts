@@ -3,8 +3,8 @@ import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
-import type { CompareRule, LinearTermData, Operator, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths } from "./rule.js";
+import type { CompareRule, LinearTermData, Measure, Operator, Rule, Term } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths, counts } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
@@ -15,7 +15,6 @@ export type Feasibility =
   | { readonly kind: "infeasible"; readonly reason: string }
   | { readonly kind: "undecided"; readonly reason: string };
 
-type Measure = "value" | "length";
 
 interface Constraint {
   readonly operator: Operator;
@@ -455,7 +454,7 @@ function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | u
   }
   const form = differenceOf(rule);
   const kinds = form.parts.map(part =>
-    part.measure === "length" ? "integer" : schemaAtPath(scope, part.path)?.kind,
+    counts(part.measure) ? "integer" : schemaAtPath(scope, part.path)?.kind,
   );
   // A part that may be left out is not one: the comparison holds without it.
   return typeof form.constant === "number" &&
@@ -490,7 +489,7 @@ function relationOf(
 // the steps of a way do not carry.
 function differenceCarrierOf(sides: readonly Group[], scope: AnySchema): Carrier | undefined {
   const kinds = sides.map(side =>
-    side.measure === "length" ? "integer" : schemaAtPath(scope, side.path)?.kind,
+    counts(side.measure) ? "integer" : schemaAtPath(scope, side.path)?.kind,
   );
   if (kinds.every(kind => kind === "integer")) {
     return integerCarrier;
