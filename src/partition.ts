@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { int64Carrier, rationalCarrier } from "./border.js";
 import type {
   AnySchema,
@@ -24,7 +25,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite } from "./rule.js";
+import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed } from "./rule.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -408,11 +409,46 @@ function writer(focus: Focus, empty?: () => unknown): Position["write"] {
     focus.update(given, current => rewrite(current, measure, coordinate, empty));
 }
 
+// A transformed string is stepped past a bound as it reads: the value the
+// string carrier steps to is transformed again, and dropped where that moves it
+// back across the bound, so a witness is one the transforms leave as it is.
+function transformedStringCarrier(transforms: ReturnType<typeof partsOfMeasure>["transforms"]): Carrier {
+  return {
+    ...stringCarrier,
+    past: (value, direction) => {
+      const moved = stringCarrier.past?.(value, direction);
+      if (moved === undefined) return undefined;
+      const read = transformed(moved, transforms);
+      return Math.sign(stringCarrier.compare(read, value)) === direction ? read : undefined;
+    },
+  };
+}
+
+// Writes a coordinate at a position, or gives undefined where a transformed
+// measure cannot read back as it: no value lowercases to "ABC". A measure with
+// no transform is written as before.
+export function writeExactly(
+  position: Pick<Position, "write" | "valuesIn">,
+  given: unknown,
+  measure: Border["measure"],
+  coordinate: unknown,
+): unknown {
+  const written = position.write(given, measure, coordinate);
+  return partsOfMeasure(measure).transforms.length === 0 ||
+    position.valuesIn(written).some(value => value !== undefined && isDeepStrictEqual(measured(value, measure), coordinate))
+    ? written
+    : undefined;
+}
+
 export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
   // An enum's lengths are those of its few values, not a range a row can step
   // through, so a rule on one draws no border.
   if (counts(measure)) {
     return schema.kind === "enum" ? undefined : lengthCarrier;
+  }
+  const { transforms } = partsOfMeasure(measure);
+  if (transforms.length > 0) {
+    return schema.kind === "string" ? transformedStringCarrier(transforms) : undefined;
   }
   switch (schema.kind) {
     case "int64": return int64Carrier;

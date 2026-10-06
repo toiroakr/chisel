@@ -17,8 +17,28 @@ export type Comparable = number | bigint | Rational | string | Moment | Decimal;
 // separate module graph, and a per-module symbol would not recognise their terms.
 const TERM = Symbol.for("chisel.term");
 
-// What a term reads at its path: the value itself or its length.
-export type Measure = "value" | "length";
+// A change a term makes to the string it reads before reading it, as the
+// String.prototype method of that name does.
+export type Transform = "trim" | "lowercase" | "uppercase";
+
+type Reading = "value" | "length";
+
+// What a term reads at its path: the value itself or its length, after the
+// transforms written before a colon, in order (`trim,lowercase:length`). One
+// string, so two terms read the same coordinate exactly when their measures are
+// equal, and a transformed value is never taken for the value itself.
+export type Measure = Reading | `${string}:${Reading}`;
+
+export function measureOf(transforms: readonly Transform[], reading: Reading): Measure {
+  return transforms.length === 0 ? reading : `${transforms.join(",")}:${reading}`;
+}
+
+export function partsOfMeasure(measure: Measure): { readonly transforms: readonly Transform[]; readonly reading: Reading } {
+  const colon = measure.lastIndexOf(":");
+  return colon === -1
+    ? { transforms: [], reading: measure as Reading }
+    : { transforms: measure.slice(0, colon).split(",") as Transform[], reading: measure.slice(colon + 1) as Reading };
+}
 
 export interface PositionTermData {
   readonly kind: "position";
@@ -80,6 +100,14 @@ interface Measured {
   $length(): TermOf<number>;
 }
 
+// A string read after a change, as the String.prototype method of that name
+// makes it: the value itself is left as it is.
+interface Transformable {
+  $trim(): TermOf<string>;
+  $lowercase(): TermOf<string>;
+  $uppercase(): TermOf<string>;
+}
+
 interface Quantified<E> {
   $all(each: (element: TermOf<E>) => Rule): Rule & Condition;
   $any(each: (element: TermOf<E>) => Rule): Rule & Condition;
@@ -95,6 +123,9 @@ type TermOperator =
   | "$eq"
   | "$ne"
   | "$length"
+  | "$trim"
+  | "$lowercase"
+  | "$uppercase"
   | "$all"
   | "$any"
   | "$plus"
@@ -116,7 +147,7 @@ export type TermOf<T> = Term<T> &
       : [T] extends [Moment]
       ? Ordered<T>
       : [T] extends [string]
-        ? Ordered<T> & Measured
+        ? Ordered<T> & Measured & Transformable
         : [T] extends [readonly (infer E)[]]
           ? Measured & Quantified<E>
           : [T] extends [object]
@@ -574,20 +605,47 @@ export function resize(current: unknown, size: number, empty?: () => unknown): u
   return current;
 }
 
-// Whether a measure counts (a length), rather than reading the value itself.
+// Whether a measure counts (a length), rather than reading a value.
 export function counts(measure: Measure): boolean {
-  return measure === "length";
+  return partsOfMeasure(measure).reading === "length";
+}
+
+const TRANSFORMS: Readonly<Record<Transform, (text: string) => string>> = {
+  trim: text => text.trim(),
+  lowercase: text => text.toLowerCase(),
+  uppercase: text => text.toUpperCase(),
+};
+
+export function transformed(value: unknown, transforms: readonly Transform[]): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+  return transforms.reduce((text, transform) => TRANSFORMS[transform](text), value);
 }
 
 // What `measure` reads of a value found at a term's path.
 export function measured(value: unknown, measure: Measure): unknown {
-  return measure === "length" ? sizeOf(value) : value;
+  const { transforms, reading } = partsOfMeasure(measure);
+  const read = transformed(value, transforms);
+  return reading === "length" ? sizeOf(read) : read;
 }
 
-// A value whose `measure` reads `target`: the target itself, or the current
-// value resized to it.
+// A value whose `measure` reads `target`, written on the current value. Each
+// transform gives back a string it then leaves as it is, so a target the
+// transforms leave alone is written as it is, and one they change is not
+// written at all, since no value reads back as it. A length is written by
+// resizing the transformed value, or by a string of `_` where resizing leaves
+// whitespace at an end that `trim` would take off.
 export function rewrite(current: unknown, measure: Measure, target: unknown, empty?: () => unknown): unknown {
-  return measure === "length" ? resize(current, target as number, empty) : target;
+  const { transforms, reading } = partsOfMeasure(measure);
+  if (reading === "value") {
+    return transforms.length === 0 || transformed(target, transforms) === target ? target : current;
+  }
+  if (transforms.length === 0 || typeof current !== "string") {
+    return resize(current, target as number, empty);
+  }
+  const resized = resize(transformed(current, transforms), target as number);
+  return measured(resized, measure) === target ? resized : resize("", target as number);
 }
 
 function compare(operator: Operator, left: unknown, right: unknown): Rule & Condition {
@@ -627,7 +685,11 @@ function termAt(path: readonly string[], measure: Measure): Term<unknown> {
         case "minus":
           return (other: unknown) => linearTerm(combined(data, other, -1));
         case "length":
-          return () => termAt(path, "length");
+          return () => termAt(path, measureOf(partsOfMeasure(measure).transforms, "length"));
+        case "trim":
+        case "lowercase":
+        case "uppercase":
+          return () => termAt(path, measureOf([...partsOfMeasure(measure).transforms, name], "value"));
         case "all":
         case "any":
           return (each: (element: TermOf<unknown>) => Rule) => quantified(name, self, each);
@@ -861,7 +923,9 @@ function describeOperand(operand: unknown, path: string, elements: ElementLabels
   )
     .filter(part => part !== "")
     .join(".");
-  return measure === "length" ? `length(${location})` : location;
+  const { transforms, reading } = partsOfMeasure(measure);
+  const read = transforms.reduce((inner, transform) => `${transform}(${inner})`, location);
+  return reading === "length" ? `length(${read})` : read;
 }
 
 // A plain date has no time of day, so adding a nanosecond leaves it where it is.
