@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, counts, measured } from "./rule.js";
+import { conjuncts, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -355,7 +355,8 @@ function substitute(rule: Rule, template: unknown, bound: ReadonlySet<string> = 
       if (resolved === null || typeof resolved !== "object") return missing;
       resolved = (resolved as Record<string, unknown>)[position.path[index]!];
     }
-    if (counts(position.measure)) {
+    // A length, or a transformed value, is read off what the template holds, never taken for it.
+    if (position.measure !== "value") {
       if (isTerm(resolved)) {
         const source = positionData(resolved);
         return source && source.measure === "value" ? positionTerm(source.path, position.measure) : missing;
