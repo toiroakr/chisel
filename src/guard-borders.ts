@@ -12,7 +12,7 @@ import {
 } from "./border.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
-import { carrierOf, positionsOf } from "./partition.js";
+import { carrierOf, positionsOf, writeExactly } from "./partition.js";
 import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
 import {
   DEPS,
@@ -694,7 +694,10 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     comparison: rule,
     border,
     coordinateOf: reached => readOperand(term, reached.scope),
-    compose: (given, coordinate) => at(positionSegments)?.write(given, measure, coordinate),
+    compose: (given, coordinate) => {
+      const position = at(positionSegments);
+      return position === undefined ? undefined : writeExactly(position, given, measure, coordinate);
+    },
   }));
 }
 

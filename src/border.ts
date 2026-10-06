@@ -222,7 +222,8 @@ function withoutRefusedPoints(border: Border, others: readonly Drawn[]): Border 
 }
 
 export function emptiedBy(borders: readonly Border[]): readonly Border[] | undefined {
-  for (const measure of ["value", "length"] as const) {
+  // The value and its length first, as before transforms, then each transformed measure.
+  for (const measure of new Set<Measure>(["value", "length", ...borders.map(border => border.measure)])) {
     const invariants = borders.filter(
       border => border.source === "invariant" && border.measure === measure,
     );
