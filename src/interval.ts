@@ -1,7 +1,7 @@
 import { Rational, fractionOf, INT64_MIN, INT64_MAX } from "./exact.js";
 import { nodeOf } from "./model.js";
 import type { Rule, Operator } from "./rule.js";
-import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData } from "./rule.js";
+import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData, counts } from "./rule.js";
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -62,9 +62,9 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     if (optionalAlong(scope, term.path)) return undefined;
     const schema = schemaAtPath(scope, term.path);
     if (!schema) return undefined;
-    const integral = term.measure === "length" || schema.kind === "integer" || schema.kind === "int64";
-    let low: Rational | undefined = term.measure === "length" ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
-    let high: Rational | undefined = term.measure === "length" ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
+    const integral = counts(term.measure) || schema.kind === "integer" || schema.kind === "int64";
+    let low: Rational | undefined = counts(term.measure) ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
+    let high: Rational | undefined = counts(term.measure) ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
     const rules: { rule: Rule; prefix: readonly string[]; holds: boolean }[] = [];
     for (let size = 0; size <= term.path.length; size++) {
       const at = schemaAtPath(scope, term.path.slice(0, size));

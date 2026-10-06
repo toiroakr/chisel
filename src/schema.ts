@@ -11,7 +11,7 @@ import {
   isTerm,
   satisfy,
   selfTerm,
-  termData, positionData, positionOf,
+  termData, positionData, positionOf, counts,
 } from "./rule.js";
 
 export interface ValidationIssue {
@@ -796,8 +796,8 @@ function offGridExpression(
     return undefined;
   }
   const scales = data.parts.map(part => {
-    const schema = part.measure === "length" ? undefined : resolve(part.path);
-    return part.measure === "length" || schema?.kind === "integer"
+    const schema = counts(part.measure) ? undefined : resolve(part.path);
+    return counts(part.measure) || schema?.kind === "integer"
       ? 0
       : schema?.kind === "decimal"
         ? (schema as DecimalSchema).scale
