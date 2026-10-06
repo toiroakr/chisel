@@ -17,15 +17,18 @@ export type Comparable = number | bigint | Rational | string | Moment | Decimal;
 // separate module graph, and a per-module symbol would not recognise their terms.
 const TERM = Symbol.for("chisel.term");
 
+// What a term reads at its path: the value itself or its length.
+export type Measure = "value" | "length";
+
 export interface PositionTermData {
   readonly kind: "position";
   readonly path: readonly string[];
-  readonly measure: "value" | "length";
+  readonly measure: Measure;
 }
 
 export interface LinearPart {
   readonly path: readonly string[];
-  readonly measure: "value" | "length";
+  readonly measure: Measure;
   readonly coefficient: number;
 }
 
@@ -437,9 +440,7 @@ function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | u
       : operator === "<"
         ? move(bound, -1)
         : bound;
-  return writeAt(value, path, current =>
-    measure === "length" ? resize(current, target as number) : target,
-  );
+  return writeAt(value, path, current => rewrite(current, measure, target));
 }
 
 export type ElementLabels = Readonly<Record<string, string>>;
@@ -573,6 +574,22 @@ export function resize(current: unknown, size: number, empty?: () => unknown): u
   return current;
 }
 
+// Whether a measure counts (a length), rather than reading the value itself.
+export function counts(measure: Measure): boolean {
+  return measure === "length";
+}
+
+// What `measure` reads of a value found at a term's path.
+export function measured(value: unknown, measure: Measure): unknown {
+  return measure === "length" ? sizeOf(value) : value;
+}
+
+// A value whose `measure` reads `target`: the target itself, or the current
+// value resized to it.
+export function rewrite(current: unknown, measure: Measure, target: unknown, empty?: () => unknown): unknown {
+  return measure === "length" ? resize(current, target as number, empty) : target;
+}
+
 function compare(operator: Operator, left: unknown, right: unknown): Rule & Condition {
   return condition({ kind: "compare", operator, left, right });
 }
@@ -586,7 +603,7 @@ const OPERATORS: Readonly<Record<string, Operator>> = {
   ne: "!=",
 };
 
-function termAt(path: readonly string[], measure: PositionTermData["measure"]): Term<unknown> {
+function termAt(path: readonly string[], measure: Measure): Term<unknown> {
   const data: PositionTermData = { kind: "position", path, measure };
   const self: Term<unknown> = new Proxy({} as Term<unknown>, {
     get: (_target, key) => {
@@ -623,7 +640,7 @@ function termAt(path: readonly string[], measure: PositionTermData["measure"]): 
   return self;
 }
 
-export function positionTerm(path: readonly string[], measure: PositionTermData["measure"]): Term<unknown> {
+export function positionTerm(path: readonly string[], measure: Measure): Term<unknown> {
   return termAt(path, measure);
 }
 
@@ -790,10 +807,7 @@ function read(operand: unknown, value: unknown): unknown {
         : undefined,
     value,
   );
-  if (found === undefined || measure === "value") {
-    return found;
-  }
-  return sizeOf(found);
+  return found === undefined ? found : measured(found, measure);
 }
 
 function ordering(left: unknown, right: unknown): number {

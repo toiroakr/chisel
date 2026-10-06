@@ -25,7 +25,6 @@ import {
   readOperand,
   selfTerm,
   shiftTerms,
-  sizeOf,
   stepInto,
   termData,
   termPaths,
@@ -36,6 +35,8 @@ import {
   withDeps,
   decimalOfUnits,
   decimalUnits,
+  counts,
+  measured,
 } from "./rule.js";
 import { enumOf, holdsNoDecimal, int, isVariantsSchema, object, offGridEquality, schemaAtPath } from "./schema.js";
 import type {
@@ -719,7 +720,7 @@ function betweenExpression(
       standsIn,
       path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
       segments: segmentsOf(frame, keys),
-      kind: part.measure === "length" ? "integer" : schema?.kind,
+      kind: counts(part.measure) ? "integer" : schema?.kind,
     };
   });
   const carrier = parts.every(part => part.kind === "integer")
@@ -805,7 +806,7 @@ function betweenExpression(
         if (value === undefined) {
           return undefined;
         }
-        rest += part.coefficient * (part.measure === "length" && !part.standsIn ? sizeOf(value) : value);
+        rest += part.coefficient * (counts(part.measure) && !part.standsIn ? (measured(value, part.measure) as number) : value);
       }
       return moved.write(given, moving.measure, ((coordinate as number) - rest) / moving.coefficient);
     },
@@ -831,7 +832,7 @@ function between(
       standsIn,
       path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
       segments: segmentsOf(frame, keys),
-      kind: measure === "length" ? "integer" : schema?.kind,
+      kind: counts(measure) ? "integer" : schema?.kind,
       scale: measure === "value" && schema?.kind === "decimal" ? (schema as DecimalSchema).scale : 0,
     };
   });
@@ -925,7 +926,7 @@ function between(
           : held.write(given, fixed.measure, counter);
       }
       const base =
-        fixed.measure === "length" && !fixed.standsIn ? sizeOf(other) : (other as number);
+        counts(fixed.measure) && !fixed.standsIn ? (measured(other, fixed.measure) as number) : (other as number);
       return moved.write(given, moving.measure, base + sign * (coordinate as number));
     },
   }));
@@ -1055,7 +1056,7 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
       if (terms.some(term => positionData(term) === undefined)) {
         const kinds = differenceOf(rule).parts.map(part => {
           const { frame, keys } = locate(positionTerm(part.path, part.measure), frames);
-          return part.measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+          return counts(part.measure) ? "integer" : schemaAt(frame.scope, keys)?.kind;
         });
         return kinds.every(kind => kind === "integer" || kind === "number")
           ? []
@@ -1065,7 +1066,7 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
         const { frame, keys } = locate(term, frames);
         const schema = schemaAt(frame.scope, keys);
         // The length of an enum is not read: see carrierOf.
-        return positionOf(term).measure === "length" ? (schema?.kind === "enum" ? undefined : int()) : schema;
+        return counts(positionOf(term).measure) ? (schema?.kind === "enum" ? undefined : int()) : schema;
       });
       const sides = schemas.map(
         (schema): Side => ({

@@ -1,6 +1,6 @@
 import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { compareText } from "./text.js";
-import type { Operator, Rule, Term } from "./rule.js";
+import type { Measure, Operator, Rule, Term } from "./rule.js";
 import type { Decimal } from "decimal.js";
 import { decimalStep, describeRule, isDecimal, isTerm, termData, positionData } from "./rule.js";
 
@@ -18,7 +18,7 @@ export interface BorderPoint {
 
 export interface Border {
   readonly source: "invariant" | "guard" | "ensures";
-  readonly measure: "value" | "length";
+  readonly measure: Measure;
   readonly rule: string;
   readonly closed: boolean;
   readonly points: readonly BorderPoint[];
