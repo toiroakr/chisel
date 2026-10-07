@@ -821,15 +821,17 @@ function decide<Result, Effect>(
 
 // An action's own code reads a function dependency's answer as a value
 // (`BehaviorDeps`), so only a model's `call` awaits one: a promise handed to
-// such code is refused rather than read as if it were the answer.
+// such code is refused rather than read as if it were the answer. The function
+// is read as the handler would read it (a method of a class instance too) and
+// called on the dependencies supplied, so a method reading `this` still works.
 function answeringValues(definition: AnyBehavior, deps: unknown): unknown {
   if (typeof deps !== "object" || deps === null) return deps;
   const wrapped: Record<string, unknown> = { ...deps };
   for (const [name, dependency] of Object.entries(definition.requires)) {
-    const supplied = wrapped[name];
+    const supplied = (deps as Record<string, unknown>)[name];
     if (dependency.takes === "nothing" || typeof supplied !== "function") continue;
-    wrapped[name] = (input: unknown) => {
-      const answer = (supplied as (input: unknown) => unknown)(input);
+    wrapped[name] = (...args: unknown[]) => {
+      const answer: unknown = Reflect.apply(supplied, deps, args);
       if (!isPromiseLike(answer)) return answer;
       Promise.resolve(answer).catch(() => undefined);
       throw new SpecificationError(`Dependency ${name} answered a promise, which only a model's call awaits`);
