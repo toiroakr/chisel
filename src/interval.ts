@@ -5,7 +5,7 @@ import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData } fr
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
 import type { Step } from "./ways.js";
-import { fixedLength, onTimeline, temporalKindOf, timelineOf } from "./temporal.js";
+import { fixedLength, onTimeline, temporalKindOf, timelineOf, TIMELINE_RANGE } from "./temporal.js";
 import { isDeepStrictEqual } from "node:util";
 
 interface Interval {
@@ -17,10 +17,6 @@ interface Interval {
   readonly scale?: number | undefined;
 }
 const zero = new Rational(0n);
-// Temporal holds an instant within 10^8 days of 1970-01-01, and a date or a
-// date-time within a day of that.
-const TIMELINE_MIN = new Rational(-8_640_000_000_000_000_000_000n);
-const TIMELINE_MAX = new Rational(8_640_000_000_000_000_000_000n);
 // A bound a rule compares with, as a number or as a place on the timeline.
 function boundOf(value: unknown): Rational | undefined {
   const placed = timelineOf(value);
@@ -38,7 +34,9 @@ export function provesTemporal(schema: AnySchema, value: unknown, scope: AnySche
     return schema.invariants.length === 0;
   }
   const range = interval(value, scope, steps);
-  if (!range || range.low.comparedTo(TIMELINE_MIN) < 0 || range.high.comparedTo(TIMELINE_MAX) > 0) return false;
+  if (!range || !onTimeline(range.kind)) return false;
+  const held = TIMELINE_RANGE[range.kind];
+  if (range.low.comparedTo(held.low) < 0 || range.high.comparedTo(held.high) > 0) return false;
   return schema.invariants.every(rule => satisfied(rule, range));
 }
 function kindOf(value: unknown, scope: AnySchema): string | undefined {
@@ -98,10 +96,10 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     if (optionalAlong(scope, term.path)) return undefined;
     const schema = schemaAtPath(scope, term.path);
     if (!schema) return undefined;
-    const timeline = term.measure === "value" && onTimeline(schema.kind);
-    const integral = timeline || term.measure === "length" || schema.kind === "integer" || schema.kind === "int64";
-    let low: Rational | undefined = timeline ? TIMELINE_MIN : term.measure === "length" ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
-    let high: Rational | undefined = timeline ? TIMELINE_MAX : term.measure === "length" ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
+    const timeline = term.measure === "value" && onTimeline(schema.kind) ? TIMELINE_RANGE[schema.kind] : undefined;
+    const integral = !!timeline || term.measure === "length" || schema.kind === "integer" || schema.kind === "int64";
+    let low: Rational | undefined = timeline ? timeline.low : term.measure === "length" ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
+    let high: Rational | undefined = timeline ? timeline.high : term.measure === "length" ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
     const rules: { rule: Rule; prefix: readonly string[]; holds: boolean }[] = [];
     for (let size = 0; size <= term.path.length; size++) {
       const at = schemaAtPath(scope, term.path.slice(0, size));

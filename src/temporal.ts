@@ -61,16 +61,17 @@ export function countBetween(start: unknown, end: unknown, unit: string): number
 
 // ── The timeline the proofs measure on ──
 // A date, date-time or instant is placed on one line of nanoseconds since
-// 1970-01-01, a date and a date-time read in UTC, so a move by a unit of fixed
-// length is an addition. Months and years have no fixed length, and a time of
-// day wraps at midnight, so neither is placed.
+// 1970-01-01, a date and a date-time read as if in UTC, so a move by a unit of
+// fixed length is an addition. Months and years have no fixed length, and a time
+// of day wraps at midnight, so neither is placed.
+const DAY = 86_400_000_000_000n;
 const NANOSECONDS: Readonly<Partial<Record<TemporalUnit, bigint>>> = {
   milliseconds: 1_000_000n,
   seconds: 1_000_000_000n,
   minutes: 60_000_000_000n,
   hours: 3_600_000_000_000n,
-  days: 86_400_000_000_000n,
-  weeks: 604_800_000_000_000n,
+  days: DAY,
+  weeks: 7n * DAY,
 };
 export const fixedLength = (unit: string): Rational | undefined => {
   const length = NANOSECONDS[unit as TemporalUnit];
@@ -78,11 +79,32 @@ export const fixedLength = (unit: string): Rational | undefined => {
 };
 export const onTimeline = (kind: string): kind is "date" | "datetime" | "instant" =>
   kind === "date" || kind === "datetime" || kind === "instant";
+// Where Temporal holds each type on that line: an instant within 10^8 days of
+// 1970-01-01, a date from the day before the earliest instant to the day of the
+// latest, and a date-time strictly within a day of the instants.
+const INSTANT_LIMIT = 100_000_000n * DAY;
+export const TIMELINE_RANGE: Readonly<Record<"date" | "datetime" | "instant", { readonly low: Rational; readonly high: Rational }>> = {
+  instant: { low: new Rational(-INSTANT_LIMIT), high: new Rational(INSTANT_LIMIT) },
+  date: { low: new Rational(-INSTANT_LIMIT - DAY), high: new Rational(INSTANT_LIMIT) },
+  datetime: { low: new Rational(-INSTANT_LIMIT - DAY + 1n), high: new Rational(INSTANT_LIMIT + DAY - 1n) },
+};
 export function timelineOf(value: unknown): Rational | undefined {
   const kind = temporalKindOf(value);
   if (kind === "instant") return new Rational((value as TemporalTypes.Instant).epochNanoseconds);
-  if (kind === "datetime") return new Rational((value as TemporalTypes.PlainDateTime).toZonedDateTime("UTC").epochNanoseconds);
-  if (kind === "date") return new Rational((value as TemporalTypes.PlainDate).toZonedDateTime({ timeZone: "UTC" }).epochNanoseconds);
+  // A date or a date-time is counted from its own fields, not through an
+  // instant in UTC, which Temporal refuses for the ones beyond the instants.
+  if (kind === "datetime") {
+    const at = value as TemporalTypes.PlainDateTime;
+    return new Rational(epochDays(at.toPlainDate()) * DAY + nanosecondOfDay(at.toPlainTime()));
+  }
+  if (kind === "date") return new Rational(epochDays(value as TemporalTypes.PlainDate) * DAY);
   return undefined;
+}
+function epochDays(date: TemporalTypes.PlainDate): bigint {
+  const iso = date.withCalendar("iso8601");
+  return BigInt(iso.with({ year: 1970, month: 1, day: 1 }).until(iso, { largestUnit: "days" }).days);
+}
+function nanosecondOfDay(time: TemporalTypes.PlainTime): bigint {
+  return ((((BigInt(time.hour) * 60n + BigInt(time.minute)) * 60n + BigInt(time.second)) * 1000n + BigInt(time.millisecond)) * 1000n + BigInt(time.microsecond)) * 1000n + BigInt(time.nanosecond);
 }
 export type { Value as TemporalValue };
