@@ -94,6 +94,22 @@ describe("proofs", () => {
     expect(c.verify(answering(unbounded, c.date(), r => c.plus(r.at, r.by, "days")).implementation).status).toBe("undetermined");
   });
 
+  it("leave a date unproved when a move inside it may leave the range Temporal holds", async () => {
+    // A call skips the counterexample search, so only the proof decides.
+    const definition = c.behavior("there and back", {
+      input: c.variants("kind", { given: c.object({ at: c.date().min(date("2000-01-01")).max(date("+275760-09-11")) }) }),
+      result: c.variants("outcome", { ok: c.object({ on: c.date(), days: c.int(), n: c.int() }) }),
+      effects: c.variants("type", {}),
+      requires: { f: c.dependency(c.int(), c.int()) },
+    });
+    const implementation = c.implement(definition, { cases: { given: c.model("there and back", (r, deps) => ({
+      result: { outcome: "ok" as const, on: c.minus(c.plus(r.at, 30, "days"), 30, "days"), days: c.between(r.at, c.plus(r.at, 30, "days"), "days"), n: c.call(deps.f, 1) },
+      effects: [],
+    })) } });
+    expect(c.verify(implementation).status).toBe("undetermined");
+    await expect(c.perform(implementation, { kind: "given", at: date("+275760-09-11") }, { f: (n: number) => n })).rejects.toThrow();
+  });
+
   it("leave months and years unproved, since they have no fixed length", () => {
     expect(c.verify(answering(bounded, c.date(), r => c.plus(r.at, 1, "months")).implementation).status).toBe("undetermined");
   });

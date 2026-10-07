@@ -151,7 +151,12 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     if (right.kind !== "number" || !right.integral) return undefined;
     const sign = new Rational(node.operator === "plus" ? 1n : -1n);
     const a = right.low.times(unit).times(sign), b = right.high.times(unit).times(sign);
-    return { kind: left.kind, integral: true, low: left.low.plus(min(a, b)), high: left.high.plus(max(a, b)) };
+    const low = left.low.plus(min(a, b)), high = left.high.plus(max(a, b));
+    // Temporal refuses a move that leaves the range it holds the type in, even
+    // one a later move brings back or a count only reads.
+    const held = TIMELINE_RANGE[left.kind];
+    if (low.comparedTo(held.low) < 0 || high.comparedTo(held.high) > 0) return undefined;
+    return { kind: left.kind, integral: true, low, high };
   }
   if (node?.kind === "operation") {
     if (node.operator === "concat") return undefined;
