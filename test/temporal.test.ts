@@ -122,4 +122,26 @@ describe("proofs", () => {
   it("prove a time of day moved by clock units, since it wraps", () => {
     expect(c.verify(answering(c.object({ at: c.time() }), c.time(), r => c.plus(r.at, 90, "minutes")).implementation).status).toBe("verified");
   });
+
+  it("leave a time of day unproved when its amount may not be whole or may be too long a duration", async () => {
+    const half = answering(c.object({ at: c.time(), by: c.number() }), c.time(), r => c.plus(r.at, r.by, "hours"));
+    expect(c.verify(half.implementation).status).not.toBe("verified");
+    await expect(half.run({ at: time("10:00"), by: 1.5 })).rejects.toThrow(/whole number of hours/);
+    // 2^53 seconds and more is no duration Temporal takes.
+    const long = (by: AnySchema) => answering(c.object({ at: c.time(), by }), c.time(), r => c.plus(r.at, r.by, "hours"));
+    expect(c.verify(long(c.int()).implementation).status).not.toBe("verified");
+    await expect(long(c.int()).run({ at: time("10:00"), by: 2_501_999_792_984 })).rejects.toThrow();
+    expect(c.verify(long(c.int().min(-2_501_999_792_983).max(2_501_999_792_983)).implementation).status).toBe("verified");
+  });
+
+  it("leave weeks between unproved when the end may lie within a week of the range Temporal holds", async () => {
+    const weeks = (end: AnySchema) => answering(c.object({ from: c.date(), to: end }), c.int(), r => c.between(r.from, r.to, "weeks"));
+    // Temporal rounds the count by placing the week past the end, which lies beyond the latest date.
+    expect(c.verify(weeks(c.date()).implementation).status).not.toBe("verified");
+    await expect(weeks(c.date()).run({ from: date("+275760-09-12"), to: date("+275760-09-13") })).rejects.toThrow();
+    const roomy = weeks(c.date().min(date("-271821-04-26")).max(date("+275760-09-06")));
+    expect(c.verify(roomy.implementation).status).toBe("verified");
+    expect(await roomy.run({ from: date("+275760-09-13"), to: date("+275760-09-06") })).toBe(-1);
+    expect(await roomy.run({ from: date("-271821-04-19"), to: date("-271821-04-26") })).toBe(1);
+  });
 });
