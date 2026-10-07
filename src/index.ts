@@ -57,6 +57,7 @@ export type {
   FunctionDependencyNames,
   Requirements,
   Resolved,
+  Supplied,
   ValueDependencies,
   ValueDependency,
 } from "./dependency.js";
@@ -90,6 +91,7 @@ export type {
   AnyImplementation,
   Behavior,
   BehaviorDeps,
+  SuppliedDeps,
   BehaviorEffect,
   BehaviorInput,
   BehaviorResult,

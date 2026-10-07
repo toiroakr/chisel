@@ -1,4 +1,4 @@
-import { snapshotValue } from "./data.js";
+import { isPromiseLike, snapshotValue } from "./data.js";
 import type { Decimal } from "decimal.js";
 import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
@@ -198,6 +198,11 @@ export function model<Input, Result, Effect, Deps = unknown>(
     otherwise: () => { throw new Error("Expression models are interpreted"); },
   });
 }
+// Evaluates an expression model. A dependency call that answers a promise is
+// awaited, and the evaluation then answers a promise too; one that answers a
+// value continues at once, so a model whose dependencies answer values (or
+// that calls none) is evaluated synchronously, as the analyses that trace it
+// need. `read` is a generator that yields only a pending call.
 export function interpret(template: unknown, scope: unknown, options: {
   readonly steps?: number;
   readonly invoke?: (name: string, input: unknown) => unknown;
@@ -212,40 +217,41 @@ export function interpret(template: unknown, scope: unknown, options: {
     if (!result.success) throw new Error(`Invalid local construction: ${result.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
     return snapshotValue(result.value);
   }
-  function read(value: unknown, current: unknown = scope): unknown {
+  function* read(value: unknown, current: unknown = scope): Evaluation {
     if (--remaining < 0) throw new EvaluationLimit("Model evaluation step budget exceeded");
     if (isTerm(value)) return readOperand(value, current);
     const node = nodeOf(value);
-    if (node?.kind === "bind") return read(node.body, withLocal(current, node.name, parsed(node.schema, read(node.value, current))));
+    if (node?.kind === "bind") return yield* read(node.body, withLocal(current, node.name, parsed(node.schema, yield* read(node.value, current))));
     if (node?.kind === "map" || node?.kind === "fold") {
-      const values = read(node.values, current);
+      const values = yield* read(node.values, current);
       if (!Array.isArray(values)) throw new Error("Iteration expects an array");
-      let accumulator = node.kind === "fold" ? parsed(node.output, read(node.initial, current)) : undefined;
+      let accumulator = node.kind === "fold" ? parsed(node.output, yield* read(node.initial, current)) : undefined;
       const result: unknown[] = [];
       for (const value of values) {
         const elementScope = withLocal(current, node.name, parsed(node.element, value));
         const iterationScope = node.kind === "fold" ? withLocal(elementScope, node.accumulator, accumulator) : elementScope;
-        const next = parsed(node.output, read(node.body, iterationScope));
+        const next = parsed(node.output, yield* read(node.body, iterationScope));
         if (node.kind === "fold") accumulator = next; else result.push(next);
       }
       return node.kind === "fold" ? accumulator : result;
     }
     if (node?.kind === "call") {
       if (!options.invoke) throw new Error("Dependency calls require an execution environment");
-      return options.invoke(dependencyName(node.dependency), read(node.input, current));
+      const answer = options.invoke(dependencyName(node.dependency), yield* read(node.input, current));
+      return isPromiseLike(answer) ? yield answer : answer;
     }
     if (node?.kind === "choose") {
       const outcome = holds(node.condition, current, options.observe, options.distinguish);
       options.arm?.(choices.indexOf(node), outcome);
-      return read(outcome ? node.yes : node.no, current);
+      return yield* read(outcome ? node.yes : node.no, current);
     }
     if (node?.kind === "construct") {
-      const parsed = node.schema.parse(read(node.value, current));
+      const parsed = node.schema.parse(yield* read(node.value, current));
       if (!parsed.success) throw new Error(`Invalid construction: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
       return parsed.value;
     }
     if (node?.kind === "operation") {
-      const left = read(node.left, current), right = read(node.right, current);
+      const left = yield* read(node.left, current), right = yield* read(node.right, current);
       if (node.operator === "concat") {
         if (typeof left !== "string" || typeof right !== "string") throw new Error("concat expects strings");
         return (left + right).normalize("NFC");
@@ -267,9 +273,36 @@ export function interpret(template: unknown, scope: unknown, options: {
       return result;
     }
     if (atom(value)) return value;
-    return Array.isArray(value) ? value.map(child => read(child, current)) : Object.fromEntries(Object.entries(value as object).map(([key, child]) => [key, read(child, current)]));
+    if (Array.isArray(value)) {
+      const elements: unknown[] = [];
+      for (const child of value) elements.push(yield* read(child, current));
+      return elements;
+    }
+    const entries: [string, unknown][] = [];
+    for (const [key, child] of Object.entries(value as object)) entries.push([key, yield* read(child, current)]);
+    return Object.fromEntries(entries);
   }
-  return read(template);
+  const evaluation = read(template);
+  const first = evaluation.next();
+  return first.done ? first.value : resume(evaluation, first.value);
+}
+
+// A generator over the expression being read: it yields a call's pending
+// answer and is resumed with what the answer settles to.
+type Evaluation = Generator<PromiseLike<unknown>, unknown, unknown>;
+
+async function resume(evaluation: Evaluation, pending: PromiseLike<unknown>): Promise<unknown> {
+  for (;;) {
+    let settled: { readonly value: unknown } | { readonly error: unknown };
+    try {
+      settled = { value: await pending };
+    } catch (error) {
+      settled = { error };
+    }
+    const step = "error" in settled ? evaluation.throw(settled.error) : evaluation.next(settled.value);
+    if (step.done) return step.value;
+    pending = step.value;
+  }
 }
 export interface ModelPath {
   readonly value: unknown;
