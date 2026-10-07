@@ -5,16 +5,52 @@ import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData } fr
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
 import type { Step } from "./ways.js";
+import { fixedLength, onTimeline, temporalKindOf, timelineOf } from "./temporal.js";
 import { isDeepStrictEqual } from "node:util";
 
 interface Interval {
   readonly low: Rational;
   readonly high: Rational;
-  readonly kind: "number" | "bigint" | "rational" | "decimal";
+  // A date, date-time or instant ranges over its nanoseconds since 1970-01-01 (temporal.ts).
+  readonly kind: "number" | "bigint" | "rational" | "decimal" | "date" | "datetime" | "instant";
   readonly integral: boolean;
   readonly scale?: number | undefined;
 }
 const zero = new Rational(0n);
+// Temporal holds an instant within 10^8 days of 1970-01-01, and a date or a
+// date-time within a day of that.
+const TIMELINE_MIN = new Rational(-8_640_000_000_000_000_000_000n);
+const TIMELINE_MAX = new Rational(8_640_000_000_000_000_000_000n);
+// A bound a rule compares with, as a number or as a place on the timeline.
+function boundOf(value: unknown): Rational | undefined {
+  const placed = timelineOf(value);
+  if (placed) return placed;
+  try { return fractionOf(value as number); } catch { return undefined; }
+}
+// Whether a date, time, date-time or instant meets its schema: a time of day
+// moved by clock units always does, since it wraps at midnight; a date,
+// date-time or instant does when its range on the timeline stays where Temporal
+// holds it and within the schema's bounds.
+export function provesTemporal(schema: AnySchema, value: unknown, scope: AnySchema, steps: readonly Step[]): boolean {
+  if (!["date", "time", "datetime", "instant"].includes(schema.kind) || kindOf(value, scope) !== schema.kind) return false;
+  if (schema.kind === "time") {
+    // Any time of day meets a time schema without bounds; one with bounds is not read here.
+    return schema.invariants.length === 0;
+  }
+  const range = interval(value, scope, steps);
+  if (!range || range.low.comparedTo(TIMELINE_MIN) < 0 || range.high.comparedTo(TIMELINE_MAX) > 0) return false;
+  return schema.invariants.every(rule => satisfied(rule, range));
+}
+function kindOf(value: unknown, scope: AnySchema): string | undefined {
+  if (isTerm(value)) {
+    const term = termData(value);
+    return term.kind === "position" && term.measure === "value" ? schemaAtPath(scope, term.path)?.kind : undefined;
+  }
+  const node = nodeOf(value);
+  if (node?.kind === "construct") return node.schema.kind;
+  if (node?.kind === "temporal") return node.operator === "between" ? "integer" : kindOf(node.left, scope);
+  return temporalKindOf(value);
+}
 const inverse: Record<Operator, Operator> = { "<": ">=", "<=": ">", ">": "<=", ">=": "<", "==": "!=", "!=": "==" };
 export function provesNumeric(schema: AnySchema, value: unknown, scope: AnySchema, steps: readonly Step[]): boolean {
   const range = interval(value, scope, steps);
@@ -33,8 +69,8 @@ function satisfied(rule: Rule, range: Interval): boolean {
   if (rule.kind !== "compare" || !isTerm(rule.left)) return false;
   const position = positionData(rule.left);
   if (!position || position.path.length || position.measure !== "value" || isTerm(rule.right)) return false;
-  let bound: Rational;
-  try { bound = fractionOf(rule.right as number); } catch { return false; }
+  const bound = boundOf(rule.right);
+  if (!bound) return false;
   const low = range.low.comparedTo(bound), high = range.high.comparedTo(bound);
   switch (rule.operator) {
     case ">": return low > 0;
@@ -52,7 +88,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
       let total = interval(term.constant, scope, steps);
       for (const part of term.parts) {
         const found = interval(positionTerm(part.path, part.measure), scope, steps);
-        if (!total || !found || total.kind !== found.kind && total.kind !== "number") return undefined;
+        if (!total || !found || onTimeline(found.kind) || total.kind !== found.kind && total.kind !== "number") return undefined;
         const coefficient = fractionOf(part.coefficient);
         const a = found.low.times(coefficient), b = found.high.times(coefficient);
         total = { kind: found.kind, scale: found.scale === undefined ? undefined : Math.max(total.scale ?? 0, found.scale), integral: total.integral && found.integral && Number.isInteger(part.coefficient), low: total.low.plus(min(a, b)), high: total.high.plus(max(a, b)) };
@@ -62,9 +98,10 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     if (optionalAlong(scope, term.path)) return undefined;
     const schema = schemaAtPath(scope, term.path);
     if (!schema) return undefined;
-    const integral = term.measure === "length" || schema.kind === "integer" || schema.kind === "int64";
-    let low: Rational | undefined = term.measure === "length" ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
-    let high: Rational | undefined = term.measure === "length" ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
+    const timeline = term.measure === "value" && onTimeline(schema.kind);
+    const integral = timeline || term.measure === "length" || schema.kind === "integer" || schema.kind === "int64";
+    let low: Rational | undefined = timeline ? TIMELINE_MIN : term.measure === "length" ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
+    let high: Rational | undefined = timeline ? TIMELINE_MAX : term.measure === "length" ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
     const rules: { rule: Rule; prefix: readonly string[]; holds: boolean }[] = [];
     for (let size = 0; size <= term.path.length; size++) {
       const at = schemaAtPath(scope, term.path.slice(0, size));
@@ -75,22 +112,39 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
       if (item.rule.kind !== "compare" || !isTerm(item.rule.left) || isTerm(item.rule.right)) continue;
       const left = positionData(item.rule.left);
       if (!left || left.measure !== term.measure || !isDeepStrictEqual([...item.prefix, ...left.path], term.path)) continue;
-      let bound: Rational;
-      try { bound = fractionOf(item.rule.right as number); } catch { continue; }
+      const bound = boundOf(item.rule.right);
+      if (!bound) continue;
       const operator = item.holds ? item.rule.operator : inverse[item.rule.operator];
       const next = integral && bound.denominator === 1n && (operator === "<" || operator === ">") ? bound.plus(new Rational(operator === "<" ? -1n : 1n)) : bound;
       if ([">", ">=", "=="].includes(operator)) low = low ? max(low, next) : next;
       if (["<", "<=", "=="].includes(operator)) high = high ? min(high, next) : next;
     }
     if (!low || !high || low.comparedTo(high) > 0) return undefined;
+    if (timeline) return { low, high, integral, kind: schema.kind as "date" | "datetime" | "instant" };
     return { low, high, integral, scale: schema.kind === "decimal" ? (schema as DecimalSchema).scale : undefined, kind: schema.kind === "int64" ? "bigint" : schema.kind === "rational" ? "rational" : schema.kind === "decimal" ? "decimal" : "number" };
   }
   const node = nodeOf(value);
   if (node?.kind === "construct") return interval(node.value, scope, steps);
+  if (node?.kind === "temporal") {
+    // Only a unit of fixed length moves a value along the timeline by a fixed amount.
+    const unit = fixedLength(node.unit);
+    const left = interval(node.left, scope, steps), right = interval(node.right, scope, steps);
+    if (!unit || !left || !right || !onTimeline(left.kind)) return undefined;
+    if (node.operator === "between") {
+      if (right.kind !== left.kind) return undefined;
+      // Whole units from start to end, the part of a unit dropped toward zero.
+      const whole = (span: Rational) => new Rational(span.numerator / (span.denominator * unit.numerator));
+      return exactNumber({ kind: "number", integral: true, low: whole(right.low.minus(left.high)), high: whole(right.high.minus(left.low)) });
+    }
+    if (right.kind !== "number" || !right.integral) return undefined;
+    const sign = new Rational(node.operator === "plus" ? 1n : -1n);
+    const a = right.low.times(unit).times(sign), b = right.high.times(unit).times(sign);
+    return { kind: left.kind, integral: true, low: left.low.plus(min(a, b)), high: left.high.plus(max(a, b)) };
+  }
   if (node?.kind === "operation") {
     if (node.operator === "concat") return undefined;
     const left = interval(node.left, scope, steps), right = interval(node.right, scope, steps);
-    if (!left || !right || node.operator !== "quotient" && left.kind !== right.kind) return undefined;
+    if (!left || !right || onTimeline(left.kind) || onTimeline(right.kind) || node.operator !== "quotient" && left.kind !== right.kind) return undefined;
     let low: Rational, high: Rational;
     if (node.operator === "add") { low = left.low.plus(right.low); high = left.high.plus(right.high); }
     else if (node.operator === "subtract") { low = left.low.minus(right.high); high = left.high.minus(right.low); }
@@ -103,6 +157,8 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     const scale = left.scale === undefined || right.scale === undefined ? undefined : node.operator === "multiply" ? left.scale + right.scale : Math.max(left.scale, right.scale);
     return exactNumber({ low, high, scale, kind: node.operator === "quotient" ? "rational" : left.kind, integral: node.operator !== "divide" && node.operator !== "quotient" && left.integral && right.integral });
   }
+  const placed = timelineOf(value);
+  if (placed) return { low: placed, high: placed, integral: true, kind: temporalKindOf(value) as "date" | "datetime" | "instant" };
   try {
     const bound = fractionOf(value as number);
     return { low: bound, high: bound, scale: isDecimal(value) ? value.decimalPlaces() : undefined, integral: bound.denominator === 1n, kind: typeof value === "number" ? "number" : typeof value === "bigint" ? "bigint" : isDecimal(value) ? "decimal" : "rational" };

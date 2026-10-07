@@ -1,5 +1,5 @@
 import { EvaluationLimit } from "./exact.js";
-import { provesNumeric } from "./interval.js";
+import { provesNumeric, provesTemporal } from "./interval.js";
 import type { AnyBehavior, AnyImplementation } from "./behavior.js";
 import { brokenEnsures } from "./behavior.js";
 import { constantsOf, domainOf } from "./domain.js";
@@ -230,8 +230,8 @@ function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, ste
   const node = nodeOf(original);
   const value = node?.kind === "construct" ? node.value : original;
   if (!containsSymbolic(value)) return schema.parse(value).success;
-  if (provesNumeric(schema, original, scope, steps)) return true;
-  if (node?.kind === "operation") return false;
+  if (provesNumeric(schema, original, scope, steps) || provesTemporal(schema, original, scope, steps)) return true;
+  if (node?.kind === "operation" || node?.kind === "temporal") return false;
   if (schema.kind === "optional") return provesValue(presentSchema(schema as OptionalSchema<unknown>), value, scope, steps, limit);
   if (isTerm(value)) {
     const position = positionData(value);

@@ -302,6 +302,21 @@ The analyzer follows the example-adequacy model of [Souther](https://github.com/
 
 Besides `c.instant()` for an exact moment (`Temporal.Instant`), `c.date()`, `c.time()` and `c.datetime()` hold a calendar date, a time of day and a wall-clock date and time (`Temporal.PlainDate`, `PlainTime` and `PlainDateTime`); a condition orders values of one of these types, and ordering two types against each other does not compile.
 
+A model moves one of these values by a whole number of one unit with `c.plus(value, amount, unit)` and `c.minus(value, amount, unit)`, and counts the whole units from one to another with `c.between(start, end, unit)`, as Temporal's `add`, `subtract` and `until` do:
+
+```ts
+c.model("plan the receipt", order => ({
+  result: {
+    outcome: "planned",
+    expectedOn: c.plus(order.exFactoryOn, order.leadTimeDays, "days"),
+    daysLate: c.between(order.exFactoryOn, order.completedOn, "days"),
+  },
+  effects: [],
+}))
+```
+
+The unit is the type's: a date takes `years`, `months`, `weeks` and `days`, a time of day and an instant `hours`, `minutes`, `seconds` and `milliseconds`, and a date-time both, so `c.plus(time, 1, "days")` does not compile. The amount is a whole number, which may be negative. A month or year that lands past the target month's last day moves to that day (`2026-01-31` plus a month is `2026-02-28`) unless `{ overflow: "reject" }` asks for the value to be refused instead; a time of day wraps at midnight (`23:00` plus 90 minutes is `00:30`); `between` drops a part of a unit, toward zero, and is negative when the end comes first. `verify` places a date, a date-time and an instant on one line of nanoseconds since 1970-01-01, so a move by a unit of fixed length (`weeks` to `milliseconds`) and a count between two such values are proved from the bounds of their parts, as integer arithmetic is: `c.plus(on, by, "days")` with `on` at most `2099-12-31` and `by` at most 365 meets a `c.date().max(...)` a year later, and is refuted with a counterexample against one that ends on `2099-12-31`; a date with no bounds may be moved out of the range Temporal holds, so it is left undetermined. A month or year has no fixed length and is left undetermined too, and a moved time of day meets a `c.time()` without bounds.
+
 Any schema takes `.describe("...")`, as in zod, and a behavior a `description`, saying what they mean to the people reading the specification; neither changes what is parsed or measured, and an optional field carries the description of what it holds. `variants("状態", { 下書き: c.object({...}).describe("まだ申請していない"), ... })` names each case.
 
 Use `c.int()` for whole units such as yen and pieces, and `c.decimal(scale)` for values with fixed fractional digits. A `c.number()` has no value next to a bound, so `price < 1000` owes a row at 1000 but cannot name the one just below it. Where the digits after the point are fixed, as for an amount in cents or a weight in grams, `c.decimal(2)` (or `decimal(3)`) says so. Its values are [decimal.js](https://github.com/MikeMcl/decimal.js) `Decimal`s, so arithmetic on them is exact (`new Decimal("0.1").plus("0.2")` is `0.3`): a value with more digits is refused, a bound steps by one unit of the last digit, so the same guard owes a row at 999.99 too, and `generate` writes the rows as `new Decimal("999.99")`, importing decimal.js beside chisel. A bound written off that grid, such as `$gte(new Decimal("0.004"))` in cents, draws the border of `$gte(new Decimal("0.01"))`. An equality with such a value settles without a row (`$ne(new Decimal("0.005"))` in cents always holds, and `$eq` never does), so it is refused wherever it is written: `implement` refuses it in a guard (`guard in 半端な額 compares $.合計 with 0.005, which no decimal(2) holds: $.合計 != 0.005`), `refine` and its shorthands in an invariant (`refine compares $.合計 with 0.005, …`), and `behavior` in an `ensures` clause (`Ensures 半端にしない compares value.合計 with 0.005, …`). A decimal is compared only with a decimal: two of them draw a border on their difference in units of the finer scale.

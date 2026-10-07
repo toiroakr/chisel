@@ -7,6 +7,9 @@ import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, se
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
+import type { Temporal as TemporalTypes } from "temporal-spec";
+import type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
+import { countBetween, moveTemporal } from "./temporal.js";
 
 const EXPRESSION = Symbol.for("chisel.expression");
 export interface Expression<T> {
@@ -23,7 +26,8 @@ export type Node =
   | { readonly kind: "call"; readonly dependency: Term<unknown>; readonly input: unknown }
   | { readonly kind: "choose"; readonly condition: Rule; readonly yes: unknown; readonly no: unknown }
   | { readonly kind: "construct"; readonly schema: Schema<unknown>; readonly value: unknown }
-  | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat"; readonly left: unknown; readonly right: unknown };
+  | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat"; readonly left: unknown; readonly right: unknown }
+  | { readonly kind: "temporal"; readonly operator: "plus" | "minus" | "between"; readonly left: unknown; readonly right: unknown; readonly unit: string; readonly overflow: Overflow };
 
 function expression<T>(node: Node): Expression<T> {
   return Object.freeze({ [EXPRESSION]: Object.freeze(node) });
@@ -87,6 +91,43 @@ export function concat(left: Template<string>, right: Template<string>): Express
 export function arithmetic<T extends number | bigint | Rational | Decimal>(operator: "add" | "subtract" | "multiply" | "divide", left: Template<T>, right: Template<NoInfer<T>>): Expression<T> {
   return expression({ kind: "operation", operator, left, right });
 }
+type PlainDate = TemporalTypes.PlainDate;
+type PlainTime = TemporalTypes.PlainTime;
+type PlainDateTime = TemporalTypes.PlainDateTime;
+type Instant = TemporalTypes.Instant;
+interface MoveOptions {
+  // What a month or year added to a day the target month lacks does:
+  // "constrain" (the default) moves to the month's last day, "reject" refuses.
+  readonly overflow?: Overflow;
+}
+function temporal<T>(operator: "plus" | "minus" | "between", left: unknown, right: unknown, unit: string, options: MoveOptions = {}): Expression<T> {
+  return expression({ kind: "temporal", operator, left, right, unit, overflow: options.overflow ?? "constrain" });
+}
+// A date, time, date-time or instant moved later by a whole number of one unit.
+export function plus(value: Template<PlainDate>, amount: Template<number>, unit: CalendarUnit, options?: MoveOptions): Expression<PlainDate>;
+export function plus(value: Template<PlainTime>, amount: Template<number>, unit: ClockUnit): Expression<PlainTime>;
+export function plus(value: Template<PlainDateTime>, amount: Template<number>, unit: CalendarUnit | ClockUnit, options?: MoveOptions): Expression<PlainDateTime>;
+export function plus(value: Template<Instant>, amount: Template<number>, unit: ClockUnit): Expression<Instant>;
+export function plus(value: unknown, amount: Template<number>, unit: string, options?: MoveOptions): Expression<unknown> {
+  return temporal("plus", value, amount, unit, options);
+}
+// A date, time, date-time or instant moved earlier by a whole number of one unit.
+export function minus(value: Template<PlainDate>, amount: Template<number>, unit: CalendarUnit, options?: MoveOptions): Expression<PlainDate>;
+export function minus(value: Template<PlainTime>, amount: Template<number>, unit: ClockUnit): Expression<PlainTime>;
+export function minus(value: Template<PlainDateTime>, amount: Template<number>, unit: CalendarUnit | ClockUnit, options?: MoveOptions): Expression<PlainDateTime>;
+export function minus(value: Template<Instant>, amount: Template<number>, unit: ClockUnit): Expression<Instant>;
+export function minus(value: unknown, amount: Template<number>, unit: string, options?: MoveOptions): Expression<unknown> {
+  return temporal("minus", value, amount, unit, options);
+}
+// The whole units from start to end, negative when end comes first; a part of
+// a unit is dropped.
+export function between(start: Template<PlainDate>, end: Template<PlainDate>, unit: CalendarUnit): Expression<number>;
+export function between(start: Template<PlainTime>, end: Template<PlainTime>, unit: ClockUnit): Expression<number>;
+export function between(start: Template<PlainDateTime>, end: Template<PlainDateTime>, unit: CalendarUnit | ClockUnit): Expression<number>;
+export function between(start: Template<Instant>, end: Template<Instant>, unit: ClockUnit): Expression<number>;
+export function between(start: unknown, end: unknown, unit: string): Expression<number> {
+  return temporal("between", start, end, unit);
+}
 export function quotient(left: Template<number | bigint | Decimal | Rational>, right: Template<number | bigint | Decimal | Rational>): Expression<Rational> {
   return expression({ kind: "operation", operator: "quotient", left, right });
 }
@@ -102,7 +143,7 @@ export function childrenOf(value: unknown): readonly unknown[] {
   if (node?.kind === "call") return [node.input];
   if (node?.kind === "choose") return [node.yes, node.no];
   if (node?.kind === "construct") return [node.value];
-  if (node?.kind === "operation") return [node.left, node.right];
+  if (node?.kind === "operation" || node?.kind === "temporal") return [node.left, node.right];
   if (isTerm(value) || atom(value)) return [];
   return Object.values(value as object);
 }
@@ -184,7 +225,7 @@ function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaini
   if (node?.kind === "call") return expression({ ...node, input: check(node.input) });
   if (node?.kind === "choose") return expression({ ...node, yes: check(node.yes), no: check(node.no) });
   if (node?.kind === "construct") return expression({ ...node, value: check(node.value) });
-  if (node?.kind === "operation") return expression({ ...node, left: check(node.left), right: check(node.right) });
+  if (node?.kind === "operation" || node?.kind === "temporal") return expression({ ...node, left: check(node.left), right: check(node.right) });
   return Object.freeze(Array.isArray(value) ? value.map(check) : Object.fromEntries(Object.entries(value as object).map(([key, child]) => [key, check(child)])));
 }
 export function model<Input, Result, Effect, Deps = unknown>(
@@ -243,6 +284,10 @@ export function interpret(template: unknown, scope: unknown, options: {
       const parsed = node.schema.parse(read(node.value, current));
       if (!parsed.success) throw new Error(`Invalid construction: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
       return parsed.value;
+    }
+    if (node?.kind === "temporal") {
+      const left = read(node.left, current), right = read(node.right, current);
+      return node.operator === "between" ? countBetween(left, right, node.unit) : moveTemporal(node.operator, left, right, node.unit, node.overflow);
     }
     if (node?.kind === "operation") {
       const left = read(node.left, current), right = read(node.right, current);
@@ -303,6 +348,6 @@ export function replaceChildren(template: unknown, values: readonly unknown[]): 
   if (node?.kind === "fold") return expression({ ...node, values: values[0], initial: values[1], body: values.length > 2 ? values[2] : node.body });
   if (node?.kind === "call") return expression({ ...node, input: values[0] });
   if (node?.kind === "construct") return expression({ ...node, value: values[0] });
-  if (node?.kind === "operation") return expression({ ...node, left: values[0], right: values[1] });
+  if (node?.kind === "operation" || node?.kind === "temporal") return expression({ ...node, left: values[0], right: values[1] });
   return Array.isArray(template) ? values : Object.fromEntries(Object.keys(template as object).map((key, index) => [key, values[index]]));
 }
