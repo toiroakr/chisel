@@ -457,14 +457,15 @@ function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | u
     return value;
   }
   const { path, measure } = position;
-  const named = measure === "value" ? stepAt?.(path) : undefined;
+  const named = stepAt?.(path);
   if (named !== undefined && typeof named !== "function") {
     // A value of a finite domain is chosen, not stepped to: the first one the rule
-    // keeps, whichever way the rule orders them.
+    // keeps, whichever way the rule orders them, and however it reads the value
+    // (`$lowercase()` would otherwise write "high" into an enum of "High").
     const chosen = named.among.find(candidate => holds(rule, writeAt(value, path, () => candidate)));
     return chosen === undefined ? value : writeAt(value, path, () => chosen);
   }
-  const move = named ?? step;
+  const move = (measure === "value" ? named : undefined) ?? step;
   const target =
     operator === ">" || operator === "!="
       ? move(bound, 1)
