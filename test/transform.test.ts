@@ -265,3 +265,86 @@ describe("generating rows at a transformed coordinate", () => {
     expect(generated.notComposed.some(label => label.includes('ON (= "ABC")'))).toBe(true);
   });
 });
+
+describe("a border between a string's length and its transformed length", () => {
+  // Both sides read $.code, so moving one moves the other: a row is offered only
+  // where it stands at the point, and the point is otherwise named as not composed.
+  const padded = (condition: (code: c.TermOf<string>) => c.Rule) =>
+    c.behavior("padded", {
+      input: c.variants("kind", { request: c.object({ code: c.string() }).refine(request => condition(request.code)) }),
+      result: c.variants("outcome", { yes: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+  const yes = { result: { outcome: "yes" as const }, effects: [] };
+  const spaces = (code: string) => [...code].length - code.trim().length;
+
+  it("offers no row away from a point of an invariant", () => {
+    const definition = padded(code => code.$length().$gt(code.$trim().$length()));
+    const implementation = c.implement(definition, { cases: { request: c.model("yes", () => yes) } });
+    const rows = c.examples(definition, { wide: { given: { kind: "request", code: "    X    " }, expect: yes } });
+    const generated = c.generate(rows, implementation);
+    // ON is one space more than the trimmed length.
+    for (const row of generated.rows.filter(row => row.name.includes("ON (= 1)"))) {
+      expect(spaces((row.given as { code: string }).code)).toBe(1);
+    }
+    expect(
+      generated.rows.some(row => row.name.includes("ON (= 1)")) ||
+        generated.notComposed.some(label => label.includes("ON (= 1)")),
+    ).toBe(true);
+  });
+
+  it("offers no row away from a point of a guard", () => {
+    const definition = c.behavior("padded", {
+      input: c.variants("kind", { request: c.object({ code: c.string() }) }),
+      result: c.variants("outcome", { yes: c.object({}), no: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const implementation = c.implement(definition, {
+      cases: {
+        request: c.action("few spaces", {
+          guards: request => [
+            request.code.$length().$minus(request.code.$trim().$length()).$lte(1)
+              .$else(() => ({ result: { outcome: "no" as const }, effects: [] })),
+          ],
+          run: () => ({ result: { outcome: "yes" as const }, effects: [] }),
+        }),
+      },
+    });
+    const rows = c.examples(definition, {
+      bare: { given: { kind: "request", code: "X" }, expect: { result: { outcome: "yes" as const }, effects: [] } },
+    });
+    const generated = c.generate(rows, implementation);
+    const offered = generated.rows.filter(row => row.name.includes("−"));
+    // ON (= 0) is one space, OFF (= 1) two, OUT (> 1) more than two.
+    const wanted: Readonly<Record<string, (count: number) => boolean>> = {
+      "ON (= 0)": count => count === 1,
+      "OFF (= 1)": count => count === 2,
+      "OUT (> 1)": count => count > 2,
+    };
+    for (const row of offered) {
+      const [label, holdsAt] = Object.entries(wanted).find(([label]) => row.name.includes(label))!;
+      expect([label, holdsAt(spaces((row.given as { code: string }).code))]).toStrictEqual([label, true]);
+    }
+    for (const label of Object.keys(wanted)) {
+      expect(
+        offered.some(row => row.name.includes(label)) || generated.notComposed.some(named => named.includes(label)),
+      ).toBe(true);
+    }
+  });
+});
+
+describe("a match on a transformed value", () => {
+  it("is refused, since no case is written for the value it reads", () => {
+    const definition = c.behavior("levelled", {
+      input: c.variants("kind", { request: c.object({ level: c.enum(["High", "Low"]) }) }),
+      result: c.variants("outcome", { yes: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const yes = () => ({ result: { outcome: "yes" as const }, effects: [] });
+    expect(() =>
+      c.implement(definition, {
+        cases: { request: c.action("by level", { run: c.match(request => request.level.$lowercase(), { High: yes, Low: yes }) }) },
+      }),
+    ).toThrow(new c.SpecificationError("match in by level selects lowercase($.level), not the value of a field"));
+  });
+});
