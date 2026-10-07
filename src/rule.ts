@@ -1,6 +1,6 @@
 import { Rational, isRational, fractionOf, decimalOf } from "./exact.js";
 import { compareText } from "./text.js";
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import type { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { Execution, Guard } from "./behavior.js";
@@ -678,7 +678,7 @@ function combined(data: TermData, other: unknown, sign: 1 | -1): LinearTermData 
   const parts = [...base.parts];
   for (const part of right.parts) {
     const index = parts.findIndex(
-      existing => existing.measure === part.measure && isDeepStrictEqual(existing.path, part.path),
+      existing => existing.measure === part.measure && deepEqual(existing.path, part.path),
     );
     const coefficient = sign * part.coefficient;
     if (index === -1) {

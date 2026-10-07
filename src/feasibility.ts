@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
@@ -194,7 +194,7 @@ export function feasibilityOf(
     const identity = stepIdentity(step);
     const key = step.distinction.kind === "match" ? JSON.stringify(["match", positionData(step.distinction.on)?.path]) : describeRule(step.distinction);
     const bucket = outcomes.get(key) ?? [];
-    const seen = bucket.find(previous => isDeepStrictEqual(previous.identity, identity));
+    const seen = bucket.find(previous => deepEqual(previous.identity, identity));
     if (seen !== undefined) {
       if (seen.outcome !== step.outcome) {
         return { kind: "infeasible", reason: contradicts };
@@ -744,7 +744,7 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
     const discriminant = path[path.length - 1]!;
     const refusing = [...discriminated.invariants, ...inheritedAt(scope, path.slice(0, -1))]
       .flatMap(conjuncts)
-      .filter(rule => isDeepStrictEqual(boundTermPath(rule), [discriminant]));
+      .filter(rule => deepEqual(boundTermPath(rule), [discriminant]));
     return discriminated.variantTags.filter(tag =>
       refusing.every(rule => holds(rule, { [discriminant]: tag })),
     );
@@ -934,7 +934,7 @@ export function keepingInvariants(
     (path): Group => ({
       path,
       measure: "value",
-      constraints: isDeepStrictEqual(readAt(before, path), readAt(after, path))
+      constraints: deepEqual(readAt(before, path), readAt(after, path))
         ? []
         : [{ operator: "==", bound: readAt(after, path) }],
     }),
@@ -994,7 +994,7 @@ export function keepingOrderings(scope: AnySchema, before: unknown, after: unkno
       part =>
         Math.abs(part.coefficient) === 1 &&
         !moved.has(JSON.stringify(part.path)) &&
-        isDeepStrictEqual(readAt(before, part.path), readAt(after, part.path)),
+        deepEqual(readAt(before, part.path), readAt(after, part.path)),
     );
     if (moving === undefined) {
       return undefined;
@@ -1111,7 +1111,7 @@ export function finiteReach(
   }
   const positions = [...distinctPaths([...read, ...fixed])];
   const invariants = fieldInvariants(scope, []);
-  const has = (path: readonly string[]) => positions.some(other => isDeepStrictEqual(other, path));
+  const has = (path: readonly string[]) => positions.some(other => deepEqual(other, path));
   for (let grew = true; grew; ) {
     grew = false;
     for (const { prefix, rule } of invariants) {

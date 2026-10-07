@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation } from "./behavior.js";
 import { isTodo } from "./behavior.js";
 import type { Example, CoverageStatus } from "./specification.js";
@@ -64,7 +64,7 @@ export function pairCoverage(
         }
         const matches = (given: unknown) => sharedCollection < 0
           ? left.classify(given).includes(first) && right.classify(given).includes(second)
-          : left.instances(given).some(a => a.classes.includes(first) && right.instances(given).some(b => b.classes.includes(second) && isDeepStrictEqual(a.segments.slice(0, sharedCollection + 1), b.segments.slice(0, sharedCollection + 1))));
+          : left.instances(given).some(a => a.classes.includes(first) && right.instances(given).some(b => b.classes.includes(second) && deepEqual(a.segments.slice(0, sharedCollection + 1), b.segments.slice(0, sharedCollection + 1))));
         const matching = validRows.filter(row => matches(row.given));
         const base = { positions: [left.position.path, right.position.path] as const, classes: [first, second] as const };
         if (matching.some(row => !isTodo(row.expect))) {
@@ -107,7 +107,7 @@ export function pairCoverage(
 function axesOf(positions: readonly Position[], partitions: readonly GuardPartition[]): Axis[] {
   return positions.flatMap((position): Axis[] => {
     if (position.kind === "divided") return [{ position, classes: position.classes.filter(name => !position.excluded.includes(name)), classify: given => position.classify(given), instances: given => position.instancesIn(given).map(instance => ({ segments: instance.segments, classes: instance.classify(given) })), place: (given, name) => position.place(given, name) }];
-    const drawn = partitions.find(partition => isDeepStrictEqual(partition.segments, position.segments));
+    const drawn = partitions.find(partition => deepEqual(partition.segments, position.segments));
     if (drawn === undefined) return [];
     return [{
       position, classes: drawn.classes.map(item => item.name),

@@ -179,8 +179,5 @@ export { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
 export { int64, rational } from "./schema.js";
 export type { Int64Schema, RationalSchema } from "./schema.js";
 
-export { runIsolated } from "./isolated.js";
-export type { IsolatedResult } from "./isolated.js";
-
 export { data } from "./data.js";
 export type { DataSchema, Named } from "./data.js";

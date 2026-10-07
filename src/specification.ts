@@ -4,7 +4,7 @@ import type { ProofReport } from "./proof.js";
 import { constantsOf, domainOf } from "./domain.js";
 import { pairCoverage, PAIR_LIMIT } from "./pairs.js";
 import type { PairMeasure } from "./pairs.js";
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import type {
   AnyBehavior,
   AnyImplementation,
@@ -100,12 +100,12 @@ function answers(definition: AnyBehavior, expected: Expected<AnyBehavior>, actua
   const received = actual as Execution<unknown, unknown>;
   if (isCaseOnly(expected.result)) {
     return isVariantsSchema(definition.result) && tagOf(definition.result, received.result) === expected.result.case &&
-      isDeepStrictEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
+      deepEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
   }
   const result = definition.result.parse(received.result);
   const answer = definition.result.parse(expected.result);
-  return result.success && answer.success && isDeepStrictEqual(result.value, answer.value) &&
-    isDeepStrictEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
+  return result.success && answer.success && deepEqual(result.value, answer.value) &&
+    deepEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
 }
 
 export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
@@ -709,7 +709,7 @@ export async function check(
   }).concat(invariantContradictionsOf(definition));
   const partitions = positions.map((position, index): PartitionCoverage => {
     const drawn = guardPartitions.find(partition =>
-      isDeepStrictEqual(partition.segments, position.segments),
+      deepEqual(partition.segments, position.segments),
     );
     if (drawn !== undefined && position.kind !== "divided") {
       const values = answeredGivens.flatMap(given => position.valuesIn(given));
@@ -1343,7 +1343,7 @@ export function generate(
     [...rows, ...generated.map(row => ({ ...row, kind: "example" as const, expect: { kind: "todo" as const, reason: row.reason } }))] as readonly Example<AnyBehavior>[],
     { obligations: positiveLimit("pairs.obligations", options.pairs?.obligations, PAIR_LIMIT), candidates: positiveLimit("pairs.candidates", options.pairs?.candidates, combinations) });
   for (const { obligation, given } of pairs.witnesses) {
-    if (generated.some(row => isDeepStrictEqual(row.given, given))) continue;
+    if (generated.some(row => deepEqual(row.given, given))) continue;
     offer({ name: `${definition.name}: ${obligation.positions[0]} = ${obligation.classes[0]} × ${obligation.positions[1]} = ${obligation.classes[1]}`, given,
       reason: "組み合わせの期待結果を人間が決める必要があります", ...withFrom(given) });
   }
@@ -1480,7 +1480,7 @@ function pairablesOf(
       ];
     }
     const drawn = guardPartitions.find(partition =>
-      isDeepStrictEqual(partition.segments, position.segments),
+      deepEqual(partition.segments, position.segments),
     );
     if (drawn === undefined) {
       return [];
@@ -2114,8 +2114,8 @@ async function disregardBroken(
               path: instance.path,
               moves,
               unmoved: (varied: unknown) =>
-                (isDeepStrictEqual(classified(varied), taken) &&
-                  isDeepStrictEqual(coordinates(varied), original)) ||
+                (deepEqual(classified(varied), taken) &&
+                  deepEqual(coordinates(varied), original)) ||
                 (classified(varied).length === 0 && coordinates(varied).every(values => values.length === 0)),
             },
           ];
@@ -2145,7 +2145,7 @@ async function disregardBroken(
         return move === undefined ? axis.unmoved(varied) : move.reached(varied);
       });
       return holds &&
-        isDeepStrictEqual(readKept(varied), keptOriginally) &&
+        deepEqual(readKept(varied), keptOriginally) &&
         definition.input.parse(varied).success
         ? [{ choice, varied }]
         : [];
@@ -2170,7 +2170,7 @@ async function disregardBroken(
   for (const { choice, varied } of combinations) {
     const outcome = await runTraced(implementation, varied as never, standIns as never).then(
       (traced): { readonly text: string; readonly error?: string } | undefined =>
-        isDeepStrictEqual(traced.execution, answered) ? undefined : { text: "its answer changed" },
+        deepEqual(traced.execution, answered) ? undefined : { text: "its answer changed" },
       (error: unknown) => ({ text: "it threw", error: error instanceof Error ? error.message : String(error) }),
     );
     if (outcome !== undefined) {

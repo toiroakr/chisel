@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./isolated": {
+      "types": "./dist/isolated.d.ts",
+      "import": "./dist/isolated.js"
+    },
     "./report.schema.json": "./schema/report.schema.json"
   },
   "files": [

@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
@@ -107,7 +107,7 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
   const input = implementation.behavior.input;
   const positions = positionsOf(input, { containers: true });
   const at = (segments: readonly string[]): Position | undefined =>
-    positions.find(position => isDeepStrictEqual(position.segments, segments));
+    positions.find(position => deepEqual(position.segments, segments));
   return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
@@ -133,7 +133,7 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
   const input = definition.input;
   const positions = positionsOf(input);
   const at = (segments: readonly string[]): Position | undefined =>
-    positions.find(position => isDeepStrictEqual(position.segments, segments));
+    positions.find(position => deepEqual(position.segments, segments));
   return definition.ensures.flatMap(clause =>
     conjuncts(clause.rule).flatMap(part => {
       const onInput = unrooted(part);
@@ -156,7 +156,7 @@ export function ensuresBordersOf(definition: AnyBehavior): readonly GuardBorder[
 export function invariantPairBordersOf(definition: AnyBehavior): readonly GuardBorder[] {
   const positions = positionsOf(definition.input, { containers: true });
   const at = (segments: readonly string[]): Position | undefined =>
-    positions.find(position => isDeepStrictEqual(position.segments, segments));
+    positions.find(position => deepEqual(position.segments, segments));
   const reading: Reading = {
     source: "invariant",
     describe: (compared, read) => describeRule(compared, read.root.label, labelsOf(read)),
