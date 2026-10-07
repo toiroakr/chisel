@@ -136,4 +136,30 @@ describe("a dependency that answers a promise", () => {
       (await c.perform(handled, { kind: "place", items: ["apple"] }, { stock: () => ({ outcome: "available", quantity: 1 }) })).result,
     ).toStrictEqual({ outcome: "placed", quantities: [1] });
   });
+
+  it("still hands an action's own code a method of the dependencies supplied, called on them", async () => {
+    const handled = c.implement(order, {
+      cases: {
+        place: c.action("place by hand", {
+          run: (request, deps) =>
+            request.items.every(item => deps.stock({ kind: "ask", item }).outcome === "available")
+              ? { result: { outcome: "placed", quantities: request.items.map(() => 1) }, effects: [] }
+              : { result: { outcome: "short" }, effects: [] },
+        }),
+      },
+    });
+    class Shelf {
+      readonly #counts: Record<string, number>;
+      constructor(counts: Record<string, number>) { this.#counts = counts; }
+      stock({ item }: { readonly item: string }) {
+        return (this.#counts[item] ?? 0) > 0 ? { outcome: "available" as const, quantity: this.#counts[item]! } : { outcome: "missing" as const };
+      }
+    }
+    const shelf = { counts: { apple: 3 } as Record<string, number>, stock(this: { counts: Record<string, number> }, { item }: { readonly item: string }) {
+      return (this.counts[item] ?? 0) > 0 ? { outcome: "available" as const, quantity: this.counts[item]! } : { outcome: "missing" as const };
+    } };
+    expect((await c.perform(handled, { kind: "place", items: ["apple"] }, new Shelf({ apple: 3 }))).result).toStrictEqual({ outcome: "placed", quantities: [1] });
+    expect((await c.perform(handled, { kind: "place", items: ["plum"] }, new Shelf({ apple: 3 }))).result).toStrictEqual({ outcome: "short" });
+    expect((await c.perform(handled, { kind: "place", items: ["apple"] }, shelf)).result).toStrictEqual({ outcome: "placed", quantities: [1] });
+  });
 });
