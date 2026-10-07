@@ -164,6 +164,13 @@ describe("writing a transformed coordinate", () => {
     // No value lowercases to "M" or below it as written, so the value is left as it is.
     expect(satisfy(text.$lowercase().$lte("M"), "zz")).toBe("zz");
   });
+
+  it("chooses an enum's value the transforms read as the rule asks, rather than writing the target", () => {
+    const level = c.enum(["Low", "High"]).refine(value => value.$lowercase().$eq("high"));
+    expect(level.placeholder()).toBe("High");
+    const request = c.object({ level: c.enum(["Low", "High"]) }).refine(value => value.level.$lowercase().$eq("high"));
+    expect(request.placeholder()).toStrictEqual({ level: "High" });
+  });
 });
 
 describe("proving a transformed value", () => {
