@@ -4,6 +4,10 @@
 // dates by time, regular expressions by source and flags, boxed primitives by
 // value, typed arrays and array buffers by byte, and maps and sets regardless of order. It
 // needs no Node module, so the runtime runs where only Web APIs exist.
+//
+// Unlike Node, it compares Temporal values by what they hold: they keep it in
+// internal slots, no own key, so `isDeepStrictEqual` took every two dates as
+// equal and an example expecting the wrong date passed.
 export function deepEqual(left: unknown, right: unknown): boolean {
   return equal(left, right, { left: new Map(), right: new Map() });
 }
@@ -35,6 +39,8 @@ function equal(left: unknown, right: unknown, seen: Seen): boolean {
 }
 
 function contentsEqual(left: object, right: object, seen: Seen): boolean {
+  // Its string names the value with its calendar and time zone, as `equals` compares them.
+  if (Object.prototype.toString.call(left).startsWith("[object Temporal.") && String(left) !== String(right)) return false;
   if (left instanceof Date && !Object.is(left.getTime(), (right as Date).getTime())) return false;
   if (left instanceof RegExp) {
     const other = right as RegExp;

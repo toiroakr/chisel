@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it } from "vitest";
 import { deepEqual } from "../src/equal.js";
+import { behavior, date, examples, object, test, variants } from "../src/index.js";
 import { Rational } from "../src/exact.js";
 
 const cycle = () => {
@@ -75,5 +76,33 @@ describe("deepEqual", () => {
   it.each(pairs)("agrees with isDeepStrictEqual on %s", (_, left, right) => {
     expect(deepEqual(left, right)).toBe(isDeepStrictEqual(left, right));
     expect(deepEqual(right, left)).toBe(isDeepStrictEqual(right, left));
+  });
+
+  // isDeepStrictEqual reads no own key of a Temporal value, so it takes any two as equal.
+  it.each([
+    ["dates", Temporal.PlainDate.from("2020-01-01"), Temporal.PlainDate.from("2099-12-31")],
+    ["times", Temporal.PlainTime.from("09:00"), Temporal.PlainTime.from("09:00:00.000000001")],
+    ["date-times", Temporal.PlainDateTime.from("2020-01-01T00:00"), Temporal.PlainDateTime.from("2020-01-02T00:00")],
+    ["instants", Temporal.Instant.from("2020-01-01T00:00Z"), Temporal.Instant.from("2020-01-02T00:00Z")],
+    ["calendars", Temporal.PlainDate.from("2020-01-01"), Temporal.PlainDate.from("2020-01-01").withCalendar("japanese")],
+  ])("tells different temporal %s apart", (_, left, right) => {
+    expect(deepEqual(left, right)).toBe(false);
+    expect(deepEqual(left, Temporal[left.constructor.name as "PlainDate"].from(String(left)))).toBe(true);
+  });
+
+  it("fails an example expecting another date than the model answers", async () => {
+    const due = behavior("due", {
+      input: variants("kind", { given: object({ at: date() }) }),
+      result: variants("outcome", { ok: object({ due: date() }) }),
+      effects: variants("type", {}),
+    });
+    const rows = examples(due, {
+      wrong: {
+        given: { kind: "given", at: Temporal.PlainDate.from("2020-01-01") },
+        expect: { result: { outcome: "ok", due: Temporal.PlainDate.from("2099-12-31") }, effects: [] },
+      },
+    });
+    const { failures } = await test(rows, async given => ({ result: { outcome: "ok" as const, due: given.at }, effects: [] }));
+    expect(failures.map(failure => failure.name)).toStrictEqual(["wrong"]);
   });
 });
