@@ -34,8 +34,10 @@ export function temporalKindOf(value: unknown): TemporalKind | undefined {
   return typeof value === "object" && value !== null ? TAGS[Object.prototype.toString.call(value).slice(8, -1)] : undefined;
 }
 
+export const takesUnit = (kind: TemporalKind, unit: string): boolean => (UNITS[kind] as readonly string[]).includes(unit);
+
 function checkedUnit(kind: TemporalKind, unit: string, operation: string): TemporalUnit {
-  if (!(UNITS[kind] as readonly string[]).includes(unit)) {
+  if (!takesUnit(kind, unit)) {
     throw new Error(`${operation} cannot count a ${kind === "datetime" ? "date-time" : kind} in ${unit}; it takes ${UNITS[kind].join(", ")}`);
   }
   return unit as TemporalUnit;
@@ -88,6 +90,8 @@ export const TIMELINE_RANGE: Readonly<Record<"date" | "datetime" | "instant", { 
   date: { low: new Rational(-INSTANT_LIMIT - DAY), high: new Rational(INSTANT_LIMIT) },
   datetime: { low: new Rational(-INSTANT_LIMIT - DAY + 1n), high: new Rational(INSTANT_LIMIT + DAY - 1n) },
 };
+// Temporal refuses a duration of 2^53 seconds or more, whatever it is added to.
+export const DURATION_LIMIT = new Rational(2n ** 53n * 1_000_000_000n);
 export function timelineOf(value: unknown): Rational | undefined {
   const kind = temporalKindOf(value);
   if (kind === "instant") return new Rational((value as TemporalTypes.Instant).epochNanoseconds);
