@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 import type { AnySchema } from "../src/schema.js";
+import { timelineOf } from "../src/temporal.js";
 
 const date = (text: string) => Temporal.PlainDate.from(text);
 const time = (text: string) => Temporal.PlainTime.from(text);
@@ -101,6 +102,21 @@ describe("proofs", () => {
     expect(c.verify(answering(bounded, c.int(), r => c.between(r.at, r.to, "days")).implementation).status).toBe("verified");
     expect(c.verify(answering(bounded, c.int().min(-36_524).max(36_524), r => c.between(r.at, r.to, "days")).implementation).status).toBe("verified");
     expect(c.verify(answering(bounded, c.int().min(0), r => c.between(r.at, r.to, "days")).implementation).status).toBe("refuted");
+  });
+
+  it("count between date-times over the range Temporal holds them in, beyond the instants", () => {
+    const span = c.object({ at: c.datetime(), to: c.datetime() });
+    const hours = (result: AnySchema) => c.verify(answering(span, result, r => c.between(r.at, r.to, "hours")).implementation).status;
+    expect(hours(c.int().min(-4_800_000_047).max(4_800_000_047))).toBe("verified");
+    expect(hours(c.int().min(-4_800_000_000).max(4_800_000_000))).not.toBe("verified");
+  });
+
+  it("place the dates and date-times beyond the instants on the timeline", () => {
+    const day = 86_400_000_000_000n;
+    expect(timelineOf(datetime("+275760-09-13T23:59:59.999999999"))?.numerator).toBe(100_000_001n * day - 1n);
+    expect(timelineOf(datetime("-271821-04-19T00:00:00.000000001"))?.numerator).toBe(-100_000_001n * day + 1n);
+    expect(timelineOf(date("-271821-04-19"))?.numerator).toBe(-100_000_001n * day);
+    expect(timelineOf(datetime("2020-01-02T03:04:05.006007008"))?.numerator).toBe(instant("2020-01-02T03:04:05.006007008Z").epochNanoseconds);
   });
 
   it("prove a time of day moved by clock units, since it wraps", () => {
