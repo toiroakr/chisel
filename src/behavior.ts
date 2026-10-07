@@ -1,7 +1,7 @@
 import { invokeDependency } from "./dependency.js";
-import { DATA, snapshotValue } from "./data.js";
+import { DATA, isPromiseLike, snapshotValue } from "./data.js";
 import { interpret, childrenOf, modelDependencyIssue, nodeOf } from "./model.js";
-import type { Requirements, Resolved } from "./dependency.js";
+import type { Requirements, Resolved, Supplied } from "./dependency.js";
 import type {
   AnyVariantsSchema,
   EnumSchema,
@@ -157,6 +157,10 @@ export type BehaviorEffect<B> = B extends { readonly effects: infer Effect }
   : never;
 export type BehaviorDeps<B> = B extends { readonly requires: infer Requires }
   ? Resolved<Requires>
+  : never;
+// The dependencies a caller hands `perform`: a function may answer a promise.
+export type SuppliedDeps<B> = B extends { readonly requires: infer Requires }
+  ? Supplied<Requires>
   : never;
 
 export type ImplementationCases<B extends AnyBehavior> = {
@@ -597,7 +601,7 @@ export interface ArmTaken {
 export async function perform<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
-  deps?: BehaviorDeps<B>,
+  deps?: SuppliedDeps<B>,
 ): Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>> {
   return (await runTraced(implementation, input, deps)).execution;
 }
@@ -605,7 +609,7 @@ export async function perform<B extends AnyBehavior>(
 export async function runTraced<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
-  deps?: BehaviorDeps<B>,
+  deps?: SuppliedDeps<B>,
 ): Promise<{
   readonly execution: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
   readonly arms: readonly ArmTaken[];
@@ -653,7 +657,7 @@ export async function runTraced<B extends AnyBehavior>(
   const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput.value) : parsedInput.value;
   const execution =
     selected.kind === "rules"
-      ? decide(
+      ? await decide(
           selected,
           decisionInput,
           deps,
@@ -734,7 +738,7 @@ export function traceSync(
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
   try {
-    decide(
+    const execution = decide(
       decision,
       decision.expression !== undefined ? snapshotValue(parsed.value) : parsed.value,
       deps,
@@ -743,6 +747,9 @@ export function traceSync(
       (distinction, outcome) => steps.push({ distinction, outcome }),
       implementation.behavior,
     );
+    // A dependency that answers a promise ends the trace where it is called:
+    // the comparisons and the way so far are what can be read synchronously.
+    if (isPromiseLike(execution)) Promise.resolve(execution).catch(() => undefined);
   } catch {
     // Not undefined: the way is settled before a handler runs, so a handler
     // that needs a stand-in generate does not have leaves the way intact.
@@ -767,7 +774,7 @@ function decide<Result, Effect>(
   observe: ComparisonObserver,
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
   definition: AnyBehavior,
-): Execution<Result, Effect> {
+): Execution<Result, Effect> | Promise<Execution<Result, Effect>> {
   let resolved = Object.keys(definition.requires).length === 0 ? undefined : deps;
   if (decision.expression !== undefined) {
     const issue = modelDependencyIssue(decision.expression, definition, [tagOf(definition.input, input)!]);
@@ -788,7 +795,7 @@ function decide<Result, Effect>(
     return interpret(decision.expression, scope, { observe, distinguish,
       invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
-    }) as Execution<Result, Effect>;
+    }) as Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
   }
   for (const [index, candidate] of decision.guards.entries()) {
     if (!holds(candidate.condition, scope, observe, distinguish)) {

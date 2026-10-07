@@ -54,3 +54,7 @@ export function snapshotValue<T>(value: T): T {
   if (typeof value === "function") throw new Error("Cannot snapshot an unsupported host object");
   return value;
 }
+
+// A value to await: a promise, or any object with a `then` method.
+export const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
+  (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { then?: unknown }).then === "function";
