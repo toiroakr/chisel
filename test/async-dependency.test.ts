@@ -115,4 +115,25 @@ describe("a dependency that answers a promise", () => {
     });
     expect((await c.check(specification)).failures).toStrictEqual([]);
   });
+
+  it("is refused where an action's own code reads it, since only a model's call awaits", async () => {
+    const asking = (deps: { readonly stock: (input: { kind: "ask"; item: string }) => unknown }) =>
+      deps.stock({ kind: "ask", item: "apple" }) as { outcome: string };
+    const handled = c.implement(order, {
+      cases: {
+        place: c.action("place by hand", {
+          run: (_, deps) =>
+            asking(deps).outcome === "available"
+              ? { result: { outcome: "placed", quantities: [1] }, effects: [] }
+              : { result: { outcome: "short" }, effects: [] },
+        }),
+      },
+    });
+    await expect(
+      c.perform(handled, { kind: "place", items: ["apple"] }, { stock: async () => ({ outcome: "available", quantity: 1 }) }),
+    ).rejects.toThrow("Dependency stock answered a promise, which only a model's call awaits");
+    expect(
+      (await c.perform(handled, { kind: "place", items: ["apple"] }, { stock: () => ({ outcome: "available", quantity: 1 }) })).result,
+    ).toStrictEqual({ outcome: "placed", quantities: [1] });
+  });
 });
