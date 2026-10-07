@@ -666,7 +666,7 @@ export async function runTraced<B extends AnyBehavior>(
           (distinction, outcome) => steps.push({ distinction, outcome }),
           definition,
         )
-      : await selected.run(parsedInput.value as never, deps as never);
+      : await selected.run(parsedInput.value as never, answeringValues(definition, deps) as never);
   return {
     execution: validated(definition, decisionInput, execution),
     arms,
@@ -791,6 +791,7 @@ function decide<Result, Effect>(
     resolved = values;
   }
   const scope = withDeps(input, resolved);
+  if (decision.expression === undefined) deps = answeringValues(definition, deps);
   if (decision.expression !== undefined) {
     return interpret(decision.expression, scope, { observe, distinguish,
       invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
@@ -816,6 +817,25 @@ function decide<Result, Effect>(
   arms.push({ decision: decision.id, guard: decision.guards.length, arm: tag as string });
   distinguish(otherwise as Match<unknown, unknown, unknown>, tag as string);
   return selected(input, deps);
+}
+
+// An action's own code reads a function dependency's answer as a value
+// (`BehaviorDeps`), so only a model's `call` awaits one: a promise handed to
+// such code is refused rather than read as if it were the answer.
+function answeringValues(definition: AnyBehavior, deps: unknown): unknown {
+  if (typeof deps !== "object" || deps === null) return deps;
+  const wrapped: Record<string, unknown> = { ...deps };
+  for (const [name, dependency] of Object.entries(definition.requires)) {
+    const supplied = wrapped[name];
+    if (dependency.takes === "nothing" || typeof supplied !== "function") continue;
+    wrapped[name] = (input: unknown) => {
+      const answer = (supplied as (input: unknown) => unknown)(input);
+      if (!isPromiseLike(answer)) return answer;
+      Promise.resolve(answer).catch(() => undefined);
+      throw new SpecificationError(`Dependency ${name} answered a promise, which only a model's call awaits`);
+    };
+  }
+  return wrapped;
 }
 
 function formatIssues(
