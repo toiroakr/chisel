@@ -2,7 +2,7 @@
 // values Chisel compares: primitives by `Object.is`, then objects of one
 // prototype and one tag by their own enumerable keys, arrays with their holes,
 // dates by time, regular expressions by source and flags, boxed primitives by
-// value, typed arrays by element, and maps and sets regardless of order. It
+// value, typed arrays and array buffers by byte, and maps and sets regardless of order. It
 // needs no Node module, so the runtime runs where only Web APIs exist.
 export function deepEqual(left: unknown, right: unknown): boolean {
   return equal(left, right, new Map());
@@ -39,6 +39,11 @@ function equal(left: unknown, right: unknown, seen: Seen): boolean {
     const b = new Uint8Array((right as ArrayBufferView).buffer, (right as ArrayBufferView).byteOffset, (right as ArrayBufferView).byteLength);
     if (a.length !== b.length || a.some((byte, i) => byte !== b[i])) return false;
   }
+  if (left instanceof ArrayBuffer || (typeof SharedArrayBuffer !== "undefined" && left instanceof SharedArrayBuffer)) {
+    const a = new Uint8Array(left);
+    const b = new Uint8Array(right as ArrayBufferLike);
+    if (a.length !== b.length || a.some((byte, i) => byte !== b[i])) return false;
+  }
   if (left instanceof Map && !mapsEqual(left, right as Map<unknown, unknown>, seen)) return false;
   if (left instanceof Set && !setsEqual(left, right as Set<unknown>, seen)) return false;
   if (Array.isArray(left) && left.length !== (right as unknown[]).length) return false;
@@ -60,12 +65,16 @@ function ownEnumerableKeys(value: object): PropertyKey[] {
   return ArrayBuffer.isView(value) ? keys.filter(key => typeof key === "symbol" || !/^\d+$/.test(key)) : keys;
 }
 
+// A primitive is found by `has`; an object is matched with a right one left
+// over, itself included, so no right object stands for two.
 function setsEqual(left: Set<unknown>, right: Set<unknown>, seen: Seen): boolean {
   if (left.size !== right.size) return false;
-  const unmatched = [...right].filter(item => typeof item === "object" && item !== null);
+  const unmatched = [...right].filter(isObject);
   for (const item of left) {
-    if (right.has(item)) continue;
-    if (typeof item !== "object" || item === null) return false;
+    if (!isObject(item)) {
+      if (!right.has(item)) return false;
+      continue;
+    }
     const index = unmatched.findIndex(other => equal(item, other, seen));
     if (index === -1) return false;
     unmatched.splice(index, 1);
@@ -73,18 +82,24 @@ function setsEqual(left: Set<unknown>, right: Set<unknown>, seen: Seen): boolean
   return true;
 }
 
+// An object key is matched with any right entry left over whose key and value
+// are equal, not only the entry of the same key: two equal keys may hold their
+// values crossed.
 function mapsEqual(left: Map<unknown, unknown>, right: Map<unknown, unknown>, seen: Seen): boolean {
   if (left.size !== right.size) return false;
-  const unmatched = [...right].filter(([key]) => typeof key === "object" && key !== null);
+  const unmatched = [...right].filter(([key]) => isObject(key));
   for (const [key, value] of left) {
-    if (right.has(key)) {
-      if (!equal(value, right.get(key), seen)) return false;
+    if (!isObject(key)) {
+      if (!right.has(key) || !equal(value, right.get(key), seen)) return false;
       continue;
     }
-    if (typeof key !== "object" || key === null) return false;
     const index = unmatched.findIndex(([other, otherValue]) => equal(key, other, seen) && equal(value, otherValue, seen));
     if (index === -1) return false;
     unmatched.splice(index, 1);
   }
   return true;
+}
+
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
 }

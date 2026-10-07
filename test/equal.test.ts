@@ -10,6 +10,13 @@ const cycle = () => {
   return node;
 };
 const symbol = Symbol("key");
+const bytes = (...values: number[]) => new Uint8Array(values).buffer;
+const shared = (value: number) => {
+  const buffer = new SharedArrayBuffer(1);
+  new Uint8Array(buffer)[0] = value;
+  return buffer;
+};
+const [k1, k2, x, y, z] = [{ a: 1 }, { a: 1 }, { a: 1 }, { a: 1 }, { a: 2 }];
 const pairs: [string, unknown, unknown][] = [
   ["equal numbers", 1, 1],
   ["NaN", Number.NaN, Number.NaN],
@@ -30,10 +37,16 @@ const pairs: [string, unknown, unknown][] = [
   ["boxed numbers", new Number(1), new Number(2)],
   ["typed arrays", new Uint8Array([1, 2]), new Uint8Array([1, 2])],
   ["different typed arrays", new Uint8Array([1, 2]), new Uint8Array([1, 3])],
+  ["array buffers", bytes(1, 2), bytes(1, 2)],
+  ["different array buffers", bytes(1), bytes(2)],
+  ["different shared array buffers", shared(0), shared(1)],
   ["sets in another order", new Set([1, { a: 1 }]), new Set([{ a: 1 }, 1])],
   ["different sets", new Set([{ a: 1 }]), new Set([{ a: 2 }])],
   ["maps", new Map([["a", { b: 1 }]]), new Map([["a", { b: 1 }]])],
   ["maps keyed by objects", new Map([[{ k: 1 }, 1]]), new Map([[{ k: 1 }, 1]])],
+  ["a set reusing an identical item", new Set([x, y]), new Set([x, z])],
+  ["equal map keys holding crossed values", new Map([[k1, 1], [k2, 2]]), new Map([[k1, 2], [k2, 1]])],
+  ["a map reusing an identical key", new Map([[x, 1], [y, 1]]), new Map([[x, 1], [z, 1]])],
   ["different map values", new Map([["a", 1]]), new Map([["a", 2]])],
   ["symbol keys", { [symbol]: 1 }, { [symbol]: 2 }],
   ["errors", new Error("a"), new Error("b")],

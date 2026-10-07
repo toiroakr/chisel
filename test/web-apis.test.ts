@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 
-// The modules an entry reaches through its imports, type-only ones aside.
+// The modules an entry reaches through its imports, type-only ones aside and
+// side-effect ones (`import "node:fs";`) included.
 function reached(entry: string): Set<string> {
   const seen = new Set<string>();
   const visit = (file: string) => {
@@ -9,7 +10,11 @@ function reached(entry: string): Set<string> {
     seen.add(file);
     if (!file.startsWith("src/")) return;
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    for (const [, specifier] of source.matchAll(/^(?:import|export) (?!type )[^;]*?from "([^"]+)"/gms)) {
+    const imports = [
+      ...source.matchAll(/^(?:import|export) (?!type )[^;]*?from "([^"]+)"/gms),
+      ...source.matchAll(/^import "([^"]+)"/gm),
+    ];
+    for (const [, specifier] of imports) {
       visit(specifier!.startsWith("./") ? `src/${specifier!.slice(2).replace(/\.js$/, ".ts")}` : specifier!);
     }
   };
