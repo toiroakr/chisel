@@ -31,7 +31,7 @@ import {
   depsTerm,
   withDeps,
   termData,
-  rootsRead, positionOf,
+  rootsRead, positionOf, describeTerm,
 } from "./rule.js";
 import { offGridEqualityIn } from "./guard-borders.js";
 import { scopesOf } from "./ensures.js";
@@ -495,7 +495,14 @@ function checkMatch(
   if (decision?.kind !== "rules" || typeof decision.otherwise === "function") {
     return;
   }
-  const keys = positionOf(decision.otherwise.on).path;
+  const { path: keys, measure } = positionOf(decision.otherwise.on);
+  // A match's cases are the values of what it selects; `$lowercase()` would hand
+  // it a value no case is written for, and the arms would be measured on another.
+  if (measure !== "value") {
+    throw new SpecificationError(
+      `match in ${decision.id} selects ${describeTerm(decision.otherwise.on)}, not the value of a field`,
+    );
+  }
   const caseTags = new Set<string>();
   let what = "sum";
   for (const tag of tags) {
