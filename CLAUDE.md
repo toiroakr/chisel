@@ -107,7 +107,7 @@ Use `model(id, builder)` from `src/model.ts` for certified implementations. The 
 
 `data.ts` provides nominal named objects and validated immutable construction. Named `construct` nodes require `implement(..., { constructs: [...] })`. `exact.ts` provides Rational and signed-64-bit bounds; `int64()` and `rational()` integrate with schema, carriers, codecs and code generation. String parsing is NFC with Unicode scalar length and ordering. `domain.ts` shares bounded candidate generation and exhaustive-domain evidence; `pairs.ts` classifies feasible, impossible and undecided pair obligations, with no inference of impossibility from unsuccessful sampling.
 
-The CLI adds `verify`; all executable CLI commands use `isolated.ts` workers with time, heap and output limits. In-process APIs retain their normal execution context. `npm run build` compiles and verifies `examples/verified.spec.ts`. `docs/editor-task.json` is a problem matcher example; no standalone LSP is installed. The JSON report's additive `measures.pairs` and `measures.constructions` are part of schema version 2.
+The CLI adds `verify`; all executable CLI commands use `isolated.ts` workers with time, heap and output limits; `runIsolated` is exported from the `chisel/isolated` entry, not from `src/index.ts`, which reaches no `node:` module (held by `test/web-apis.test.ts`). In-process APIs retain their normal execution context. `npm run build` compiles and verifies `examples/verified.spec.ts`. `docs/editor-task.json` is a problem matcher example; no standalone LSP is installed. The JSON report's additive `measures.pairs` and `measures.constructions` are part of schema version 2.
 
 ### Contract proofs across dependencies and collections
 

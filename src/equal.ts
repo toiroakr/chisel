@@ -5,10 +5,13 @@
 // value, typed arrays and array buffers by byte, and maps and sets regardless of order. It
 // needs no Node module, so the runtime runs where only Web APIs exist.
 export function deepEqual(left: unknown, right: unknown): boolean {
-  return equal(left, right, new Map());
+  return equal(left, right, { left: new Map(), right: new Map() });
 }
 
-type Seen = Map<object, Set<object>>;
+// The objects being compared on the path from the root, each side's mapped to
+// the depth it was entered at. A pair leaves it once compared, so a candidate
+// tried and refused while matching sets and maps is not later taken as equal.
+type Seen = { left: Map<object, number>; right: Map<object, number> };
 
 function equal(left: unknown, right: unknown, seen: Seen): boolean {
   if (Object.is(left, right)) return true;
@@ -16,12 +19,22 @@ function equal(left: unknown, right: unknown, seen: Seen): boolean {
   if (Object.getPrototypeOf(left) !== Object.getPrototypeOf(right)) return false;
   const tag = Object.prototype.toString.call(left);
   if (tag !== Object.prototype.toString.call(right)) return false;
-  // A pair already being compared is assumed equal; a cycle holds when the rest does.
-  const pairs = seen.get(left);
-  if (pairs?.has(right)) return true;
-  if (pairs) pairs.add(right);
-  else seen.set(left, new Set([right]));
+  // Met again on the path, as Node decides it: a cycle holds when both sides
+  // close it at the same depth and the rest is equal.
+  const leftDepth = seen.left.get(left);
+  const rightDepth = seen.right.get(right);
+  if (leftDepth !== undefined || rightDepth !== undefined) return leftDepth === rightDepth;
+  seen.left.set(left, seen.left.size);
+  seen.right.set(right, seen.right.size);
+  try {
+    return contentsEqual(left, right, seen);
+  } finally {
+    seen.left.delete(left);
+    seen.right.delete(right);
+  }
+}
 
+function contentsEqual(left: object, right: object, seen: Seen): boolean {
   if (left instanceof Date && !Object.is(left.getTime(), (right as Date).getTime())) return false;
   if (left instanceof RegExp) {
     const other = right as RegExp;

@@ -9,6 +9,14 @@ const cycle = () => {
   node.next = node;
   return node;
 };
+// A loop of `length` nodes, each pointing at the next.
+const loop = (length: number) => {
+  const first: { next?: unknown } = {};
+  let last = first;
+  for (let i = 1; i < length; i++) last = last.next = {};
+  last.next = first;
+  return first;
+};
 const symbol = Symbol("key");
 const bytes = (...values: number[]) => new Uint8Array(values).buffer;
 const shared = (value: number) => {
@@ -17,6 +25,9 @@ const shared = (value: number) => {
   return buffer;
 };
 const [k1, k2, x, y, z] = [{ a: 1 }, { a: 1 }, { a: 1 }, { a: 1 }, { a: 2 }];
+// Matching the sets tries `one` against `two` first and refuses it; the pair
+// compared again after the sets must still differ.
+const [one, two, otherTwo, otherOne] = [{ v: 1 }, { v: 2 }, { v: 2 }, { v: 1 }];
 const pairs: [string, unknown, unknown][] = [
   ["equal numbers", 1, 1],
   ["NaN", Number.NaN, Number.NaN],
@@ -55,6 +66,9 @@ const pairs: [string, unknown, unknown][] = [
   ["rationals", new Rational(1n, 3n), new Rational(2n, 6n)],
   ["temporal dates", Temporal.PlainDate.from("2020-01-01"), Temporal.PlainDate.from("2020-01-01")],
   ["cycles", cycle(), cycle()],
+  ["cycles of different length", loop(1), loop(2)],
+  ["a pair refused while matching a set", [new Set([one, two]), one], [new Set([otherTwo, otherOne]), otherTwo]],
+  ["a pair refused while matching a map", [new Map([[one, 0], [two, 0]]), one], [new Map([[otherTwo, 0], [otherOne, 0]]), otherTwo]],
 ];
 
 describe("deepEqual", () => {
