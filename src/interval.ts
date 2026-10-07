@@ -6,7 +6,7 @@ import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./sche
 import { schemaAtPath } from "./schema.js";
 import type { Step } from "./ways.js";
 import { deepEqual } from "./equal.js";
-import { fixedLength, onTimeline, temporalKindOf, timelineOf, TIMELINE_RANGE } from "./temporal.js";
+import { DURATION_LIMIT, fixedLength, onTimeline, takesUnit, temporalKindOf, timelineOf, TIMELINE_RANGE } from "./temporal.js";
 
 interface Interval {
   readonly low: Rational;
@@ -31,13 +31,23 @@ export function provesTemporal(schema: AnySchema, value: unknown, scope: AnySche
   if (!["date", "time", "datetime", "instant"].includes(schema.kind) || kindOf(value, scope) !== schema.kind) return false;
   if (schema.kind === "time") {
     // Any time of day meets a time schema without bounds; one with bounds is not read here.
-    return schema.invariants.length === 0;
+    return schema.invariants.length === 0 && movesTime(value, scope, steps);
   }
   const range = interval(value, scope, steps);
   if (!range || !onTimeline(range.kind)) return false;
   const held = TIMELINE_RANGE[range.kind];
   if (range.low.comparedTo(held.low) < 0 || range.high.comparedTo(held.high) > 0) return false;
   return schema.invariants.every(rule => satisfied(rule, range));
+}
+// Whether a time of day is moved only by whole clock units Temporal takes as a
+// duration, so the move wraps rather than throws.
+function movesTime(value: unknown, scope: AnySchema, steps: readonly Step[]): boolean {
+  const node = nodeOf(value);
+  if (node?.kind !== "temporal") return true;
+  if (node.operator === "between" || !takesUnit("time", node.unit) || !movesTime(node.left, scope, steps)) return false;
+  const amount = interval(node.right, scope, steps), unit = fixedLength(node.unit)!;
+  if (amount?.kind !== "number" || !amount.integral) return false;
+  return max(amount.high, amount.low.times(new Rational(-1n))).times(unit).comparedTo(DURATION_LIMIT) < 0;
 }
 function kindOf(value: unknown, scope: AnySchema): string | undefined {
   if (isTerm(value)) {
@@ -127,9 +137,13 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     // Only a unit of fixed length moves a value along the timeline by a fixed amount.
     const unit = fixedLength(node.unit);
     const left = interval(node.left, scope, steps), right = interval(node.right, scope, steps);
-    if (!unit || !left || !right || !onTimeline(left.kind)) return undefined;
+    if (!unit || !left || !right || !onTimeline(left.kind) || !takesUnit(left.kind, node.unit)) return undefined;
     if (node.operator === "between") {
       if (right.kind !== left.kind) return undefined;
+      // Temporal rounds a count of weeks by placing the start up to a week past
+      // the end, so the end must leave a week of room within the range held.
+      const held = TIMELINE_RANGE[left.kind];
+      if (node.unit === "weeks" && (right.low.comparedTo(held.low.plus(unit)) < 0 || right.high.comparedTo(held.high.minus(unit)) > 0)) return undefined;
       // Whole units from start to end, the part of a unit dropped toward zero.
       const whole = (span: Rational) => new Rational(span.numerator / (span.denominator * unit.numerator));
       return exactNumber({ kind: "number", integral: true, low: whole(right.low.minus(left.high)), high: whole(right.high.minus(left.low)) });
