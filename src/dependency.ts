@@ -1,4 +1,4 @@
-import { snapshotValue } from "./data.js";
+import { isPromiseLike, snapshotValue } from "./data.js";
 import { deepEqual } from "./equal.js";
 import { isCaseOnly, SpecificationError } from "./behavior.js";
 import type { Rule } from "./rule.js";
@@ -53,6 +53,16 @@ export type Requirements = Readonly<Record<string, AnyDependency>>;
 export type Resolved<R> = {
   readonly [K in keyof R]: R[K] extends FunctionDependency<infer Input, infer Output>
     ? (input: Input) => Output
+    : R[K] extends ValueDependency<infer Output>
+      ? Output
+      : never;
+};
+
+// What a caller supplies for the dependencies: a function dependency may
+// answer a promise, which a model's `call` awaits.
+export type Supplied<R> = {
+  readonly [K in keyof R]: R[K] extends FunctionDependency<infer Input, infer Output>
+    ? (input: Input) => Output | PromiseLike<Output>
     : R[K] extends ValueDependency<infer Output>
       ? Output
       : never;
@@ -276,9 +286,15 @@ export function invokeDependency(name: string, declared: AnyDependency | undefin
   const input = declared.input.parse(value);
   if (!input.success) throw new SpecificationError(`Invalid dependency ${name} input: ${input.issues[0]!.message}`);
   const argument = snapshotValue(input.value);
-  const output = declared.output.parse(supplied(argument));
-  if (!output.success) throw new SpecificationError(`Invalid dependency ${name} result: ${output.issues[0]!.message}`);
-  const broken = declared.injected && brokenBy(declared.injected.behavior, argument, output.value);
-  if (broken) throw new SpecificationError(`Dependency ${name} breaks ensures ${broken}`);
-  return snapshotValue(output.value);
+  const answered = (value: unknown) => {
+    const output = declared.output.parse(value);
+    if (!output.success) throw new SpecificationError(`Invalid dependency ${name} result: ${output.issues[0]!.message}`);
+    const broken = declared.injected && brokenBy(declared.injected.behavior, argument, output.value);
+    if (broken) throw new SpecificationError(`Dependency ${name} breaks ensures ${broken}`);
+    return snapshotValue(output.value);
+  };
+  // A dependency may answer a promise, as one that reads a database does; its
+  // answer is checked once it settles.
+  const answer = (supplied as (input: unknown) => unknown)(argument);
+  return isPromiseLike(answer) ? Promise.resolve(answer).then(answered) : answered(answer);
 }

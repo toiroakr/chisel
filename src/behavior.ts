@@ -1,7 +1,7 @@
 import { invokeDependency } from "./dependency.js";
-import { DATA, snapshotValue } from "./data.js";
+import { DATA, isPromiseLike, snapshotValue } from "./data.js";
 import { interpret, childrenOf, modelDependencyIssue, nodeOf } from "./model.js";
-import type { Requirements, Resolved } from "./dependency.js";
+import type { Requirements, Resolved, Supplied } from "./dependency.js";
 import type {
   AnyVariantsSchema,
   EnumSchema,
@@ -157,6 +157,10 @@ export type BehaviorEffect<B> = B extends { readonly effects: infer Effect }
   : never;
 export type BehaviorDeps<B> = B extends { readonly requires: infer Requires }
   ? Resolved<Requires>
+  : never;
+// The dependencies a caller hands `perform`: a function may answer a promise.
+export type SuppliedDeps<B> = B extends { readonly requires: infer Requires }
+  ? Supplied<Requires>
   : never;
 
 export type ImplementationCases<B extends AnyBehavior> = {
@@ -597,7 +601,7 @@ export interface ArmTaken {
 export async function perform<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
-  deps?: BehaviorDeps<B>,
+  deps?: SuppliedDeps<B>,
 ): Promise<Execution<BehaviorResult<B>, BehaviorEffect<B>>> {
   return (await runTraced(implementation, input, deps)).execution;
 }
@@ -605,7 +609,7 @@ export async function perform<B extends AnyBehavior>(
 export async function runTraced<B extends AnyBehavior>(
   implementation: Implementation<B>,
   input: BehaviorInput<B>,
-  deps?: BehaviorDeps<B>,
+  deps?: SuppliedDeps<B>,
 ): Promise<{
   readonly execution: Execution<BehaviorResult<B>, BehaviorEffect<B>>;
   readonly arms: readonly ArmTaken[];
@@ -653,7 +657,7 @@ export async function runTraced<B extends AnyBehavior>(
   const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput.value) : parsedInput.value;
   const execution =
     selected.kind === "rules"
-      ? decide(
+      ? await decide(
           selected,
           decisionInput,
           deps,
@@ -662,7 +666,7 @@ export async function runTraced<B extends AnyBehavior>(
           (distinction, outcome) => steps.push({ distinction, outcome }),
           definition,
         )
-      : await selected.run(parsedInput.value as never, deps as never);
+      : await selected.run(parsedInput.value as never, answeringValues(definition, deps) as never);
   return {
     execution: validated(definition, decisionInput, execution),
     arms,
@@ -734,7 +738,7 @@ export function traceSync(
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
   try {
-    decide(
+    const execution = decide(
       decision,
       decision.expression !== undefined ? snapshotValue(parsed.value) : parsed.value,
       deps,
@@ -743,6 +747,9 @@ export function traceSync(
       (distinction, outcome) => steps.push({ distinction, outcome }),
       implementation.behavior,
     );
+    // A dependency that answers a promise ends the trace where it is called:
+    // the comparisons and the way so far are what can be read synchronously.
+    if (isPromiseLike(execution)) Promise.resolve(execution).catch(() => undefined);
   } catch {
     // Not undefined: the way is settled before a handler runs, so a handler
     // that needs a stand-in generate does not have leaves the way intact.
@@ -767,7 +774,7 @@ function decide<Result, Effect>(
   observe: ComparisonObserver,
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
   definition: AnyBehavior,
-): Execution<Result, Effect> {
+): Execution<Result, Effect> | Promise<Execution<Result, Effect>> {
   let resolved = Object.keys(definition.requires).length === 0 ? undefined : deps;
   if (decision.expression !== undefined) {
     const issue = modelDependencyIssue(decision.expression, definition, [tagOf(definition.input, input)!]);
@@ -784,11 +791,12 @@ function decide<Result, Effect>(
     resolved = values;
   }
   const scope = withDeps(input, resolved);
+  if (decision.expression === undefined) deps = answeringValues(definition, deps);
   if (decision.expression !== undefined) {
     return interpret(decision.expression, scope, { observe, distinguish,
       invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
-    }) as Execution<Result, Effect>;
+    }) as Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
   }
   for (const [index, candidate] of decision.guards.entries()) {
     if (!holds(candidate.condition, scope, observe, distinguish)) {
@@ -809,6 +817,33 @@ function decide<Result, Effect>(
   arms.push({ decision: decision.id, guard: decision.guards.length, arm: tag as string });
   distinguish(otherwise as Match<unknown, unknown, unknown>, tag as string);
   return selected(input, deps);
+}
+
+// An action's own code reads a function dependency's answer as a value
+// (`BehaviorDeps`), so only a model's `call` awaits one: a promise handed to
+// such code is refused rather than read as if it were the answer. The function
+// is read as the handler would read it (a method of a class instance too) and
+// called on the dependencies supplied, so a method reading `this` still works.
+// Every declared dependency is read that way, a value one too, since a copy of
+// the object's own keys drops a getter or a property of its class.
+function answeringValues(definition: AnyBehavior, deps: unknown): unknown {
+  if (typeof deps !== "object" || deps === null) return deps;
+  const wrapped: Record<string, unknown> = { ...deps };
+  for (const [name, dependency] of Object.entries(definition.requires)) {
+    if (!(name in deps)) continue;
+    const supplied = (deps as Record<string, unknown>)[name];
+    if (dependency.takes === "nothing" || typeof supplied !== "function") {
+      wrapped[name] = supplied;
+      continue;
+    }
+    wrapped[name] = (...args: unknown[]) => {
+      const answer: unknown = Reflect.apply(supplied, deps, args);
+      if (!isPromiseLike(answer)) return answer;
+      Promise.resolve(answer).catch(() => undefined);
+      throw new SpecificationError(`Dependency ${name} answered a promise, which only a model's call awaits`);
+    };
+  }
+  return wrapped;
 }
 
 function formatIssues(
