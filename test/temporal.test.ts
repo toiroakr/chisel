@@ -183,3 +183,32 @@ describe("a move by an amount a dependency answers", () => {
     expect(execution).toStrictEqual({ result: { outcome: "ok", due: date("2020-02-02") }, effects: [] });
   });
 });
+
+describe("what the review found", () => {
+  it("counts days between dates of two calendars, as verify proves it, and leaves months to Temporal", async () => {
+    const span = c.object({ from: c.date().min(date("2000-01-01")).max(date("2001-01-01")), to: c.date().min(date("2000-01-01")).max(date("2001-01-01")) });
+    const days = answering(span, c.int(), r => c.between(r.from, r.to, "days"));
+    expect(c.verify(days.implementation).status).toBe("verified");
+    expect(await days.run({ from: date("2000-01-01"), to: date("2000-02-01").withCalendar("japanese") })).toBe(31);
+    const months = answering(span, c.int(), r => c.between(r.from, r.to, "months"));
+    await expect(months.run({ from: date("2000-01-01"), to: date("2000-02-01").withCalendar("japanese") })).rejects.toThrow(RangeError);
+  });
+
+  it("leaves a move unproved when its amount may lie past the safe integers", () => {
+    // A call keeps the counterexample search out, so the proof alone decides.
+    const shift = c.behavior("shift", {
+      input: c.variants("kind", { given: c.object({ at: c.time() }) }),
+      result: c.variants("outcome", { ok: c.object({ at: c.time(), n: c.int().min(0).max(1) }) }),
+      effects: c.variants("type", {}),
+      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+    });
+    const shifting = c.implement(shift, {
+      cases: {
+        given: c.model("shift", (given, deps) =>
+          c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), got =>
+            ({ result: { outcome: "ok" as const, at: c.plus(given.at, 2 ** 53, "milliseconds"), n: got.n }, effects: [] }) as never)),
+      },
+    });
+    expect(c.verify(shifting).status).not.toBe("verified");
+  });
+});

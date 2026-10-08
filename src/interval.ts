@@ -46,8 +46,12 @@ function movesTime(value: unknown, scope: AnySchema, steps: readonly Step[]): bo
   if (node?.kind !== "temporal") return true;
   if (node.operator === "between" || !takesUnit("time", node.unit) || !movesTime(node.left, scope, steps)) return false;
   const amount = interval(node.right, scope, steps), unit = fixedLength(node.unit)!;
-  if (amount?.kind !== "number" || !amount.integral) return false;
+  if (amount?.kind !== "number" || !amount.integral || !safeInteger(amount)) return false;
   return max(amount.high, amount.low.times(new Rational(-1n))).times(unit).comparedTo(DURATION_LIMIT) < 0;
+}
+// moveTemporal takes an amount only as a safe integer.
+function safeInteger(range: Interval): boolean {
+  return range.low.comparedTo(fractionOf(Number.MIN_SAFE_INTEGER)) >= 0 && range.high.comparedTo(fractionOf(Number.MAX_SAFE_INTEGER)) <= 0;
 }
 function kindOf(value: unknown, scope: AnySchema): string | undefined {
   if (isTerm(value)) {
@@ -148,7 +152,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
       const whole = (span: Rational) => new Rational(span.numerator / (span.denominator * unit.numerator));
       return exactNumber({ kind: "number", integral: true, low: whole(right.low.minus(left.high)), high: whole(right.high.minus(left.low)) });
     }
-    if (right.kind !== "number" || !right.integral) return undefined;
+    if (right.kind !== "number" || !right.integral || !safeInteger(right)) return undefined;
     const sign = new Rational(node.operator === "plus" ? 1n : -1n);
     const a = right.low.times(unit).times(sign), b = right.high.times(unit).times(sign);
     const low = left.low.plus(min(a, b)), high = left.high.plus(max(a, b));

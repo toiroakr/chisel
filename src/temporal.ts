@@ -57,6 +57,14 @@ export function countBetween(start: unknown, end: unknown, unit: string): number
   const kind = temporalKindOf(start);
   if (!kind || temporalKindOf(end) !== kind) throw new Error("between expects two values of one temporal type");
   const checked = checkedUnit(kind, unit, "between");
+  // A unit of fixed length counts alike in every calendar, so two dates or
+  // date-times are read in the ISO calendar for it: Temporal refuses to count
+  // between two calendars, which no schema rules out. Months and years differ
+  // between calendars and are counted as Temporal counts them.
+  if ((kind === "date" || kind === "datetime") && fixedLength(checked) !== undefined) {
+    start = (start as TemporalTypes.PlainDate).withCalendar("iso8601");
+    end = (end as TemporalTypes.PlainDate).withCalendar("iso8601");
+  }
   const duration = (start as TemporalTypes.PlainDate).until(end as never, { largestUnit: checked as never, smallestUnit: checked as never, roundingMode: "trunc" });
   return (duration as unknown as Record<TemporalUnit, number>)[checked];
 }
