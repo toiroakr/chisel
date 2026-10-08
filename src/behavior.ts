@@ -749,7 +749,12 @@ export function traceSync(
     );
     // A dependency that answers a promise ends the trace where it is called:
     // the comparisons and the way so far are what can be read synchronously.
-    if (isPromiseLike(execution)) Promise.resolve(execution).catch(() => undefined);
+    // The evaluation still goes on once the promise settles and would keep
+    // recording into these lists, so the trace hands out copies of them.
+    if (isPromiseLike(execution)) {
+      Promise.resolve(execution).catch(() => undefined);
+      return { comparisons: [...comparisons], way: { decision: decision.id, steps: [...steps] } };
+    }
   } catch {
     // Not undefined: the way is settled before a handler runs, so a handler
     // that needs a stand-in generate does not have leaves the way intact.

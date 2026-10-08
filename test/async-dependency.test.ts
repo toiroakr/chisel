@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
+import { traceSync } from "../src/behavior.js";
 
 const stock = c.behavior("stock", {
   input: c.variants("kind", { ask: c.object({ item: c.string() }) }),
@@ -102,6 +103,14 @@ describe("a dependency that answers a promise", () => {
     await expect(c.perform(implementation, { kind: "go", at: 2 }, { bounded: async ({ at }) => at - 1 })).rejects.toThrow(
       "Dependency bounded breaks ensures at least what was asked",
     );
+  });
+
+  it("ends a synchronous trace where it is called, and the trace stays as it was handed out", async () => {
+    const traced = traceSync(placing, { kind: "place", items: ["a", "b"] }, { stock: async () => ({ outcome: "missing" }) });
+    const handed = { comparisons: traced.comparisons.length, steps: traced.way!.steps.length };
+    await later(undefined);
+    await later(undefined);
+    expect({ comparisons: traced.comparisons.length, steps: traced.way!.steps.length }).toStrictEqual(handed);
   });
 
   it("leaves checking a specification with fakes as it was", async () => {
