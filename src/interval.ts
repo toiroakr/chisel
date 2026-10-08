@@ -20,7 +20,7 @@ const zero = new Rational(0n);
 // A bound a rule compares with, as a number or as a place on the timeline. A
 // date, date-time or instant is read only against a range of its own kind, and
 // a number only against a number: Temporal compares a date with a date-time by
-// the date alone, and an instant with nothing else.
+// the date alone, and an instant with a zoned date-time, which is not placed here.
 function boundOf(value: unknown, kind: string): Rational | undefined {
   const temporal = temporalKindOf(value);
   if (onTimeline(kind) || temporal) return temporal === kind ? timelineOf(value) : undefined;
