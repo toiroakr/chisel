@@ -212,6 +212,11 @@ describe("what the review found", () => {
     expect(c.verify(shifting).status).not.toBe("verified");
   });
 
+  it("refuses an overflow Temporal does not take when the model is built, rather than verify a move every run throws on", () => {
+    expect(() => c.plus(c.date().placeholder() as never, 1, "days", { overflow: "balance" as never })).toThrow(/overflow of "constrain" or "reject", not balance/);
+    expect(() => c.minus(c.date().placeholder() as never, 1, "days", { overflow: "Reject" as never })).toThrow(/not Reject/);
+  });
+
   it("leaves a time of day unproved when an optional around it may leave it out", async () => {
     // A call keeps the counterexample search out, so the proof alone decides.
     const lateness = c.behavior("lateness", {
