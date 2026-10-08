@@ -556,4 +556,40 @@ describe("a transformed comparison of an enum", () => {
     const witnesses = witnessesOf({ steps: [{ distinction: request.level.$uppercase().$ne("HIGH") as CompareRule, outcome: true }] }, scope);
     expect([...witnesses!]).toStrictEqual([[{ path: ["level"], value: "Low" }], [{ path: ["level"], value: "Mid" }]]);
   });
+
+  it("is read in an invariant relating finite positions", async () => {
+    // Only a High level may come with other B, so no row takes B and Low.
+    const related = c.behavior("related", {
+      input: c.variants("kind", {
+        request: c
+          .object({ name: c.string(), level: c.enum(["Low", "High"]), other: c.enum(["A", "B"]) })
+          .refine(request => request.level.$lowercase().$eq("high").$or(request.other.$eq("A"))),
+      }),
+      result: c.variants("outcome", { a: c.object({}), b: c.object({}), named: c.object({}), unnamed: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const answer = (outcome: "a" | "b" | "named" | "unnamed") => () => ({ result: { outcome }, effects: [] });
+    const implementation = c.implement(related, {
+      cases: {
+        request: c.action("related", {
+          guards: request => [
+            request.other.$eq("B").$else(answer("a")),
+            request.level.$eq("Low").$else(answer("b")),
+            request.name.$length().$gt(0).$else(answer("unnamed")),
+          ],
+          run: answer("named"),
+        }),
+      },
+    });
+    const report = await c.check(
+      c.spec("related", {
+        implementation,
+        examples: c.examples(related, {
+          a: { given: { kind: "request", name: "x", level: "Low", other: "A" }, expect: answer("a")() },
+          b: { given: { kind: "request", name: "x", level: "High", other: "B" }, expect: answer("b")() },
+        }),
+      }),
+    );
+    expect(statuses(report)).toStrictEqual(["no row owed", "no row owed", "met", "met"]);
+  });
 });
