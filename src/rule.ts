@@ -475,7 +475,8 @@ function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | u
   const written = writeAt(value, path, current => rewrite(current, measure, target));
   if (operator === "==" && !holds(rule, written)) {
     // A rule that the string reads the same transformed, `uppercase($) == $`, is
-    // kept by the transformed value itself, which no transform changes again.
+    // kept by the transformed value itself, which the transforms mostly leave
+    // as it is (not "ß" from "ẞ": see readingAs), so it is kept only where it holds.
     const { transforms, reading } = partsOfMeasure(measure);
     if (reading === "value" && transforms.length > 0) {
       const kept = writeAt(value, path, current => transformed(current, transforms));
@@ -636,11 +637,19 @@ export function transformed(value: unknown, transforms: readonly Transform[]): u
   return transforms.reduce((text, transform) => TRANSFORMS[transform](text), value);
 }
 
-// Whether the transforms leave a string as it reads, compared as text is: "İ"
-// lowercases to "i̇" and uppercases back to "I" with a combining dot, which
-// reads as "İ" though it is not the same code points.
-export function leftAsItReads(value: unknown, transforms: readonly Transform[]): value is string {
-  return typeof value === "string" && compareText(transformed(value, transforms) as string, value) === 0;
+// A string the transforms read as `target`, compared as text is ("İ" lowercases
+// to "i̇" and uppercases back to "I" with a combining dot, which reads as "İ"),
+// or undefined where none does. Mostly the target itself, which they then leave
+// as it is; but "ẞ" uppercases to itself and lowercases to "ß", which uppercases
+// to "SS", so a "ß" that a lowercase after an uppercase gives back is read only
+// from "ẞ". No other code point is changed again by the transforms that gave it.
+export function readingAs(target: unknown, transforms: readonly Transform[]): string | undefined {
+  if (typeof target !== "string") {
+    return undefined;
+  }
+  return [target, target.replaceAll("ß", "ẞ")].find(
+    candidate => compareText(transformed(candidate, transforms) as string, target) === 0,
+  );
 }
 
 // What `measure` reads of a value found at a term's path.
@@ -650,16 +659,15 @@ export function measured(value: unknown, measure: Measure): unknown {
   return reading === "length" ? sizeOf(read) : read;
 }
 
-// A value whose `measure` reads `target`, written on the current value. Each
-// transform gives back a string it then leaves as it is, so a target the
-// transforms leave alone is written as it is, and one they change is not
-// written at all, since no value reads back as it. A length is written by
+// A value whose `measure` reads `target`, written on the current value: a string
+// the transforms read as the target (readingAs), or, where none does, nothing
+// written at all. A length is written by
 // resizing the transformed value, or by a string of `_` where resizing leaves
 // whitespace at an end that `trim` would take off.
 export function rewrite(current: unknown, measure: Measure, target: unknown, empty?: () => unknown): unknown {
   const { transforms, reading } = partsOfMeasure(measure);
   if (reading === "value") {
-    return transforms.length === 0 || leftAsItReads(target, transforms) ? target : current;
+    return transforms.length === 0 ? target : (readingAs(target, transforms) ?? current);
   }
   if (transforms.length === 0 || typeof current !== "string") {
     return resize(current, target as number, empty);

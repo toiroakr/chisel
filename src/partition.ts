@@ -25,7 +25,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed, sizeOf, leftAsItReads } from "./rule.js";
+import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed, sizeOf, readingAs } from "./rule.js";
 import { compareText } from "./text.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 
@@ -459,8 +459,8 @@ function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["
     });
 }
 
-// A transformed string reads only as what its transforms give back, which they
-// then leave as it is: no string uppercases to "abc". It is stepped past a bound
+// A transformed string reads only as what its transforms give back (readingAs
+// in src/rule.ts): no string uppercases to "abc". It is stepped past a bound
 // as it reads: the value the string carrier steps to is transformed again, and
 // where that moves it back across the bound ("Ba" steps down to "B", which
 // lowercases to "b", above "Ba"), the empty string stands below the bound and a
@@ -469,7 +469,7 @@ function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["
 function transformedStringCarrier(transforms: ReturnType<typeof partsOfMeasure>["transforms"]): Carrier {
   return {
     ...stringCarrier,
-    produces: value => leftAsItReads(value, transforms),
+    produces: value => readingAs(value, transforms) !== undefined,
     past: (value, direction) => {
       const moved = stringCarrier.past?.(value, direction);
       const candidates = [

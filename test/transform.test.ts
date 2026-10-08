@@ -691,3 +691,38 @@ describe("a transformed comparison of an enum", () => {
     expect(statuses(report)).toStrictEqual(["no row owed", "no row owed", "met", "met"]);
   });
 });
+
+describe("a bound only a capital sharp s reads as", () => {
+  // "ẞ" uppercases to itself and lowercases to "ß", which uppercases to "SS":
+  // "ß" is read back from "ẞ" though the transforms do not leave "ß" as it is.
+  const coded = (code: ReturnType<typeof c.string>) =>
+    c.behavior("coded", {
+      input: c.variants("kind", { request: c.object({ code }) }),
+      result: c.variants("outcome", { yes: c.object({}), no: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+  const yes = { result: { outcome: "yes" as const }, effects: [] };
+  const no = { result: { outcome: "no" as const }, effects: [] };
+
+  it("is admitted by an invariant equal to it", async () => {
+    const definition = coded(c.string().refine(value => value.$uppercase().$lowercase().$eq("ß")));
+    expect(definition.input.parse({ kind: "request", code: "ẞ" }).success).toBe(true);
+    const implementation = c.implement(definition, { cases: { request: c.model("yes", () => yes) } });
+    const examples = c.examples(definition, { sharp: { given: { kind: "request", code: "ẞ" }, expect: yes } });
+    const report = await c.check(c.spec("coded", { implementation, examples }));
+    expect(report.modelIssues).toStrictEqual([]);
+  });
+
+  it("owes a row to the arm of a guard equal to it, and writes one there", async () => {
+    const definition = coded(c.string());
+    const implementation = c.implement(definition, {
+      cases: {
+        request: c.action("sharp", { guards: request => [request.code.$uppercase().$lowercase().$eq("ß").$else(() => no)], run: () => yes }),
+      },
+    });
+    const rows = c.examples(definition, { other: { given: { kind: "request", code: "x" }, expect: no } });
+    const arms = (await c.check(c.spec("coded", { implementation, examples: rows }))).measures.arms;
+    expect(arms.status === "complete" && arms.arms.map(arm => arm.status)).toStrictEqual(["gap", "met"]);
+    expect(c.generate(rows, implementation).rows.map(row => row.given)).toContainEqual({ kind: "request", code: "ẞ" });
+  });
+});
