@@ -472,7 +472,19 @@ function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | u
       : operator === "<"
         ? move(bound, -1)
         : bound;
-  return writeAt(value, path, current => rewrite(current, measure, target));
+  const written = writeAt(value, path, current => rewrite(current, measure, target));
+  if (operator === "==" && !holds(rule, written)) {
+    // A rule that the string reads the same transformed, `uppercase($) == $`, is
+    // kept by the transformed value itself, which no transform changes again.
+    const { transforms, reading } = partsOfMeasure(measure);
+    if (reading === "value" && transforms.length > 0) {
+      const kept = writeAt(value, path, current => transformed(current, transforms));
+      if (holds(rule, kept)) {
+        return kept;
+      }
+    }
+  }
+  return written;
 }
 
 export type ElementLabels = Readonly<Record<string, string>>;
