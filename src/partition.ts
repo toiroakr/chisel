@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import { int64Carrier, rationalCarrier } from "./border.js";
 import type {
   AnySchema,
@@ -435,7 +435,7 @@ export function writeExactly(
 ): unknown {
   const written = position.write(given, measure, coordinate);
   return partsOfMeasure(measure).transforms.length === 0 ||
-    position.valuesIn(written).some(value => value !== undefined && isDeepStrictEqual(measured(value, measure), coordinate))
+    position.valuesIn(written).some(value => value !== undefined && deepEqual(measured(value, measure), coordinate))
     ? written
     : undefined;
 }
