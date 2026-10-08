@@ -205,7 +205,7 @@ describe("what the review found", () => {
     const shifting = c.implement(shift, {
       cases: {
         given: c.model("shift", (given, deps) =>
-          c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), got =>
+          c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), (got: any) =>
             ({ result: { outcome: "ok" as const, at: c.plus(given.at, 2 ** 53, "milliseconds"), n: got.n }, effects: [] }) as never)),
       },
     });
@@ -215,6 +215,36 @@ describe("what the review found", () => {
   it("refuses an overflow Temporal does not take when the model is built, rather than verify a move every run throws on", () => {
     expect(() => c.plus(c.date().placeholder() as never, 1, "days", { overflow: "balance" as never })).toThrow(/overflow of "constrain" or "reject", not balance/);
     expect(() => c.minus(c.date().placeholder() as never, 1, "days", { overflow: "Reject" as never })).toThrow(/not Reject/);
+  });
+
+  // A call keeps the counterexample search out, so the proof alone decides.
+  const proving = (result: AnySchema, build: (given: any) => unknown) => {
+    const definition = c.behavior("proving", {
+      input: c.variants("kind", { given: c.object({ at: c.date().min(date("2000-01-01")).max(date("2000-12-31")), t: c.time(), i: c.instant().min(instant("2000-01-01T00:00:00Z")).max(instant("2000-12-31T00:00:00Z")) }) }),
+      result: c.variants("outcome", { ok: c.object({ value: result as never, n: c.int().min(0).max(1) }) }),
+      effects: c.variants("type", {}),
+      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+    });
+    const implementation = c.implement(definition, {
+      cases: { given: c.model("proving", (given: any, deps: any) => c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), (got: any) =>
+        ({ result: { outcome: "ok" as const, value: build(given) as never, n: got.n }, effects: [] }) as never)) },
+    } as never);
+    const given = { kind: "given" as const, at: date("2000-12-31"), t: time("10:00"), i: instant("2000-06-01T00:00:00Z") };
+    return { verify: () => c.verify(implementation).status, run: () => c.perform(implementation, given, { n: () => ({ n: 0 }) }) };
+  };
+
+  it("leaves a unit named like an object's own property unproved rather than throw", async () => {
+    const move = c.plus as (...args: unknown[]) => unknown;
+    for (const [result, build] of [
+      [c.date(), (given: any) => move(given.at, 1, "constructor")],
+      [c.date(), (given: any) => move(given.at, 1, "__proto__")],
+      [c.time(), (given: any) => move(given.t, 1, "toString")],
+      [c.int(), (given: any) => c.between(given.at, given.at, "hasOwnProperty" as never)],
+    ] as const) {
+      const unit = proving(result, build);
+      expect(unit.verify()).not.toBe("verified");
+      await expect(unit.run()).rejects.toThrow(/cannot count/);
+    }
   });
 
   it("leaves a time of day unproved when an optional around it may leave it out", async () => {
@@ -228,7 +258,7 @@ describe("what the review found", () => {
     const implementation = c.implement(lateness, {
       cases: {
         given: c.model("lateness", (given, deps) =>
-          c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), got =>
+          c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), (got: any) =>
             ({ result: { outcome: "ok" as const, at: given.slot.at, moved: c.plus(given.slot.at, 1, "hours"), n: got.n }, effects: [] }) as never)),
       },
     });
