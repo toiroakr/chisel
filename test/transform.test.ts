@@ -256,13 +256,13 @@ describe("generating rows at a transformed coordinate", () => {
     }
   });
 
-  it("names a point no value reads back as, rather than offering a row away from it", () => {
+  it("owes no row at a point no value reads back as", () => {
     const definition = coded(c.string());
     const implementation = guarded(definition, code => code.$lowercase().$eq("ABC"));
     const rows = c.examples(definition, { other: { given: { kind: "request", code: "xyz" }, expect: { result: { outcome: "no" as const }, effects: [] } } });
     const generated = c.generate(rows, implementation);
     expect(generated.rows.filter(row => row.name.includes('ON (= "ABC")'))).toStrictEqual([]);
-    expect(generated.notComposed.some(label => label.includes('ON (= "ABC")'))).toBe(true);
+    expect(generated.notComposed.filter(label => label.includes('ON (= "ABC")'))).toStrictEqual([]);
   });
 });
 
@@ -346,5 +346,86 @@ describe("a match on a transformed value", () => {
         cases: { request: c.action("by level", { run: c.match(request => request.level.$lowercase(), { High: yes, Low: yes }) }) },
       }),
     ).toThrow(new c.SpecificationError("match in by level selects lowercase($.level), not the value of a field"));
+  });
+});
+
+describe("a bound no transformed value reads as", () => {
+  // No string uppercases to "abc" or lowercases to "ABC" or "Ba".
+  const coded = (code: ReturnType<typeof c.string>) =>
+    c.behavior("coded", {
+      input: c.variants("kind", { request: c.object({ code }) }),
+      result: c.variants("outcome", { yes: c.object({}), no: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+  const yes = { result: { outcome: "yes" as const }, effects: [] };
+  const no = { result: { outcome: "no" as const }, effects: [] };
+  const guarded = (condition: (code: c.TermOf<string>) => c.Condition) => {
+    const definition = coded(c.string());
+    return {
+      definition,
+      implementation: c.implement(definition, {
+        cases: { request: c.action("guarded", { guards: request => [condition(request.code).$else(() => no)], run: () => yes }) },
+      }),
+    };
+  };
+  const pointsOf = (report: c.AdequacyReport) =>
+    report.borders.flatMap(border => border.points.map(point => [point.role, point.relation, point.status]));
+
+  it("has no point at the bound of an invariant, and owes the rows the others do", async () => {
+    const definition = c.behavior("coded", {
+      input: c.variants("kind", { request: c.object({ code: c.string().refine(value => value.$uppercase().$lte("abc")) }) }),
+      result: c.variants("outcome", { yes: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const implementation = c.implement(definition, { cases: { request: c.model("yes", () => yes) } });
+    const rows = c.examples(definition, { capital: { given: { kind: "request", code: "A" }, expect: yes } });
+    const report = await c.check(c.spec("coded", { implementation, examples: rows }));
+    expect(pointsOf(report)).toStrictEqual([
+      ["ON", 'none: no value reads as "abc"', "no point"],
+      ["OFF", "neighbour not named", "not named"],
+      ["IN", '< "abc"', "met"],
+      ["OUT", '> "abc"', "excluded"],
+    ]);
+    expect(report.verdict).toBe("satisfied");
+    expect(c.generate(rows, implementation)).toStrictEqual({ rows: [], notComposed: [] });
+  });
+
+  it("reports an invariant equal to such a bound as admitting no value", async () => {
+    const definition = coded(c.string().refine(value => value.$lowercase().$eq("ABC")));
+    const implementation = c.implement(definition, { cases: { request: c.model("yes", () => yes) } });
+    const report = await c.check(c.spec("coded", { implementation, examples: c.examples(definition, {}) }));
+    expect(report.modelIssues).toStrictEqual([
+      '@request.code: 不変条件を満たす値がありません (invariant lowercase($) == "ABC")',
+    ]);
+  });
+
+  it("owes no row to the arm of a guard equal to such a bound", async () => {
+    const { definition, implementation } = guarded(code => code.$lowercase().$eq("ABC"));
+    const report = await c.check(
+      c.spec("coded", { implementation, examples: c.examples(definition, { other: { given: { kind: "request", code: "xyz" }, expect: no } }) }),
+    );
+    expect(report.measures.arms).toStrictEqual({
+      status: "complete",
+      arms: [
+        { decision: "guarded", guard: 'lowercase($.code) == "ABC"', arm: "holds", status: "no row owed", reason: "ガードの条件がこの値について両立しない" },
+        { decision: "guarded", guard: 'lowercase($.code) == "ABC"', arm: "else", status: "met" },
+      ],
+    });
+    expect(pointsOf(report)[0]).toStrictEqual(["ON", 'none: no value reads as "ABC"', "no point"]);
+  });
+
+  it("finds a value below the bound where stepping down reads above it", async () => {
+    // "Ba" steps down to "B", which lowercases to "b", above "Ba"; "" lies below it.
+    const { definition, implementation } = guarded(code => code.$lowercase().$lt("Ba"));
+    const rows = c.examples(definition, { other: { given: { kind: "request", code: "x" }, expect: no } });
+    const report = await c.check(c.spec("coded", { implementation, examples: rows }));
+    expect(pointsOf(report)).toStrictEqual([
+      ["ON", "neighbour not named", "not named"],
+      ["OFF", 'none: no value reads as "Ba"', "no point"],
+      ["IN", '< "Ba"', "gap"],
+      ["OUT", '> "Ba"', "met"],
+    ]);
+    const below = c.generate(rows, implementation).rows.filter(row => row.name.includes('IN (< "Ba")'));
+    expect(below.map(row => (row.given as { code: string }).code.toLowerCase() < "Ba")).toStrictEqual([true]);
   });
 });

@@ -409,17 +409,26 @@ function writer(focus: Focus, empty?: () => unknown): Position["write"] {
     focus.update(given, current => rewrite(current, measure, coordinate, empty));
 }
 
-// A transformed string is stepped past a bound as it reads: the value the
-// string carrier steps to is transformed again, and dropped where that moves it
-// back across the bound, so a witness is one the transforms leave as it is.
+// A transformed string reads only as what its transforms give back, which they
+// then leave as it is: no string uppercases to "abc". It is stepped past a bound
+// as it reads: the value the string carrier steps to is transformed again, and
+// where that moves it back across the bound ("Ba" steps down to "B", which
+// lowercases to "b", above "Ba"), the empty string stands below the bound and a
+// string of the highest code point, one longer than the bound, above it; the
+// transforms leave both as they are.
 function transformedStringCarrier(transforms: ReturnType<typeof partsOfMeasure>["transforms"]): Carrier {
   return {
     ...stringCarrier,
+    produces: value => typeof value === "string" && transformed(value, transforms) === value,
     past: (value, direction) => {
       const moved = stringCarrier.past?.(value, direction);
-      if (moved === undefined) return undefined;
-      const read = transformed(moved, transforms);
-      return Math.sign(stringCarrier.compare(read, value)) === direction ? read : undefined;
+      const candidates = [
+        moved === undefined ? undefined : transformed(moved, transforms),
+        direction === -1 ? "" : "\u{10FFFF}".repeat([...(value as string)].length + 1),
+      ];
+      return candidates.find(
+        read => read !== undefined && Math.sign(stringCarrier.compare(read, value)) === direction,
+      );
     },
   };
 }

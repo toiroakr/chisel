@@ -579,7 +579,9 @@ function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval
       unequal.push(bound);
     }
   }
+  // A value nothing reads as is never held: lowercase($) == "ABC" never holds.
   const within = (value: unknown) =>
+    carrier.produces?.(value) !== false &&
     above(value, lower, carrier) &&
     below(value, upper, carrier) &&
     unequal.every(refused => carrier.compare(value, refused) !== 0);
