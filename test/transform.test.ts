@@ -333,6 +333,42 @@ describe("a border between a string's length and its transformed length", () => 
   });
 });
 
+describe("a line beside a border between a string's length and its transformed length", () => {
+  it("offers a row only at the input it names", async () => {
+    const definition = c.behavior("padded", {
+      input: c.variants("kind", { request: c.object({ code: c.string() }) }),
+      result: c.variants("outcome", { yes: c.object({}), no: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const yes = { result: { outcome: "yes" as const }, effects: [] };
+    const no = { result: { outcome: "no" as const }, effects: [] };
+    const implementation = c.implement(definition, {
+      cases: {
+        request: c.action("few spaces", {
+          guards: request => [request.code.$length().$minus(request.code.$trim().$length()).$lte(1).$else(() => no)],
+          run: () => yes,
+        }),
+      },
+    });
+    // Every row has one letter, so `length($.code) <= 2` parts them as well as the guard does.
+    const rows = c.examples(definition, {
+      none: { given: { kind: "request", code: "X" }, expect: yes },
+      one: { given: { kind: "request", code: " X" }, expect: yes },
+      two: { given: { kind: "request", code: "  X" }, expect: no },
+      three: { given: { kind: "request", code: "   X" }, expect: no },
+    });
+    const report = await c.check(c.spec("padded", { implementation, examples: rows }));
+    const beside = report.borders.flatMap(border => (border.beside?.status === "not told" ? [border.beside] : []));
+    expect(beside.length).toBe(1);
+    // Writing the trimmed length moves the length too: the row stands where both read as named.
+    const [length, trimmed] = beside[0]!.input!.split(", ").map(part => Number(part.split(" = ")[1]));
+    const offered = c.generate(rows, implementation).rows.filter(row => row.name.includes("隣の線"));
+    expect(offered.length).toBe(1);
+    const code = (offered[0]!.given as { code: string }).code;
+    expect([[...code].length, code.trim().length]).toStrictEqual([length, trimmed]);
+  });
+});
+
 describe("a match on a transformed value", () => {
   it("is refused, since no case is written for the value it reads", () => {
     const definition = c.behavior("levelled", {

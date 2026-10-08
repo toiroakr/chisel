@@ -1790,10 +1790,17 @@ function besideOf(
         rows[parting.from]!.given,
       );
       const deps = rows[parting.from]!.deps;
+      // Writing one part can move another that reads the same field, as
+      // `length($.code)` and `length(trim($.code))` both read $.code, so the
+      // row is kept only where it reaches the comparison at the parting itself.
       const reaches =
         given !== undefined &&
         definition.input.parse(given).success &&
-        comparisonsReached(implementation, given, deps).some(item => item.rule === drawn.comparison);
+        comparisonsReached(implementation, given, deps).some(
+          item =>
+            item.rule === drawn.comparison &&
+            parts.every((part, index) => part.valueOf(item.scope) === parting.values[index]),
+        );
       if (!reaches) {
         return [];
       }
