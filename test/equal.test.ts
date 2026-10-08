@@ -25,6 +25,8 @@ const shared = (value: number) => {
   new Uint8Array(buffer)[0] = value;
   return buffer;
 };
+// Two views of one buffer at different offsets: bytes 1, 2 at 0 and at 4, 2, 3 at 1.
+const offsets = new Uint8Array([1, 2, 3, 4, 1, 2]).buffer;
 const [k1, k2, x, y, z] = [{ a: 1 }, { a: 1 }, { a: 1 }, { a: 1 }, { a: 2 }];
 // Matching the sets tries `one` against `two` first and refuses it; the pair
 // compared again after the sets must still differ.
@@ -62,6 +64,31 @@ const pairs: [string, unknown, unknown][] = [
   ["different map values", new Map([["a", 1]]), new Map([["a", 2]])],
   ["symbol keys", { [symbol]: 1 }, { [symbol]: 2 }],
   ["errors", new Error("a"), new Error("b")],
+  ["equal errors", new Error("a"), new Error("a")],
+  ["errors of different names", Object.defineProperty(new Error("a"), "name", { value: "Refused" }), new Error("a")],
+  ["errors holding different keys", Object.assign(new Error("a"), { code: 1 }), Object.assign(new Error("a"), { code: 2 })],
+  ["regular expressions at different indexes", Object.assign(/a/g, { lastIndex: 1 }), /a/g],
+  ["different patterns", /a/, /b/],
+  ["equal boxed strings", new String("a"), new String("a")],
+  ["boxed strings", new String("a"), new String("b")],
+  ["boxed booleans", new Boolean(true), new Boolean(false)],
+  ["boxed bigints", Object(1n), Object(2n)],
+  ["boxed symbols", Object(Symbol.iterator), Object(Symbol.asyncIterator)],
+  ["boxed zeros", new Number(0), new Number(-0)],
+  ["a boxed and a bare number", new Number(1), 1],
+  ["boxed strings holding different keys", Object.assign(new String("a"), { x: 1 }), new String("a")],
+  ["typed arrays of different types", new Uint8Array([1]), new Int8Array([1])],
+  ["float zeros", new Float64Array([0]), new Float64Array([-0])],
+  ["views at different offsets holding the same bytes", new Uint8Array(offsets, 0, 2), new Uint8Array(offsets, 4, 2)],
+  ["views at different offsets", new Uint8Array(offsets, 0, 2), new Uint8Array(offsets, 1, 2)],
+  ["data views holding the same bytes", new DataView(offsets, 0, 2), new DataView(offsets, 4, 2)],
+  ["different data views", new DataView(offsets, 0, 2), new DataView(offsets, 2, 2)],
+  ["typed arrays holding different keys", Object.assign(new Uint8Array([1]), { x: 1 }), new Uint8Array([1])],
+  ["typed arrays holding different symbols", Object.assign(new Uint8Array([1]), { [symbol]: 1 }), new Uint8Array([1])],
+  ["dates holding different keys", Object.assign(new Date(0), { x: 1 }), new Date(0)],
+  ["invalid dates", new Date(Number.NaN), new Date(Number.NaN)],
+  ["a non-enumerable symbol", Object.defineProperty({}, symbol, { value: 1, enumerable: false }), {}],
+  ["two symbols of one description", { [Symbol("a")]: 1 }, { [Symbol("a")]: 1 }],
   ["equal decimals", new Decimal("1.50"), new Decimal("1.5")],
   ["different decimals", new Decimal(1), new Decimal(2)],
   ["rationals", new Rational(1n, 3n), new Rational(2n, 6n)],
