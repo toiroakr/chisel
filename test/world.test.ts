@@ -1,0 +1,666 @@
+import { Decimal } from "decimal.js";
+import { describe, expect, it, vi } from "vitest";
+import * as c from "../src/index.js";
+
+// Purchase orders, each DRAFT, APPROVED or ISSUED; an issued one receives.
+const Planned = c.object({ id: c.string(), quantity: c.int().min(1).max(10) });
+const Issued = c.object({ id: c.string(), quantity: c.int().min(1).max(10), received: c.int().min(0) });
+const Order = c.variants("status", { DRAFT: Planned, APPROVED: Planned, ISSUED: Issued });
+const Orders = c.object({ orders: c.array(Order) });
+type OrdersState = c.Infer<typeof Orders>;
+type OrderValue = c.Infer<typeof Order>;
+
+const answers = c.variants("outcome", { ok: c.object({ order: Order }), refused: c.object({}) });
+type Answer = c.Execution<c.Infer<typeof answers>, never>;
+const refused: Answer = { result: { outcome: "refused" }, effects: [] };
+
+const create = c.behavior("create", {
+  input: c.variants("kind", { create: c.object({ id: c.string(), quantity: c.int().min(1).max(10) }) }),
+  result: answers,
+  effects: c.variants("type", {}),
+});
+const creating = c.implement(create, {
+  cases: { create: c.model("a new order is a draft", r => ({ result: { outcome: "ok" as const, order: { status: "DRAFT" as const, id: r.id, quantity: r.quantity } }, effects: [] })) },
+});
+
+const approve = c.behavior("approve", { input: Order, result: answers, effects: c.variants("type", {}) });
+const approving = c.implement(approve, {
+  cases: {
+    DRAFT: c.model("a draft is approved", r => ({ result: { outcome: "ok" as const, order: { status: "APPROVED" as const, id: r.id, quantity: r.quantity } }, effects: [] })),
+    $default: c.model("only a draft is approved", () => refused),
+  },
+});
+
+const issue = c.behavior("issue", { input: Order, result: answers, effects: c.variants("type", {}) });
+const issuing = c.implement(issue, {
+  cases: {
+    APPROVED: c.model("an approved order is issued", r => ({ result: { outcome: "ok" as const, order: { status: "ISSUED" as const, id: r.id, quantity: r.quantity, received: 0 } }, effects: [] })),
+    $default: c.model("only an approved order is issued", () => refused),
+  },
+});
+
+// Receiving and changing the quantity both act on an order and a number.
+const receive = c.behavior("receive", {
+  input: c.variants("status", {
+    DRAFT: c.object({ order: Planned, quantity: c.int().min(1).max(10) }),
+    APPROVED: c.object({ order: Planned, quantity: c.int().min(1).max(10) }),
+    ISSUED: c.object({ order: Issued, quantity: c.int().min(1).max(10) }),
+  }),
+  result: answers,
+  effects: c.variants("type", {}),
+});
+const changeQuantity = c.behavior("change quantity", {
+  input: c.variants("status", {
+    DRAFT: c.object({ order: Planned, to: c.int().min(1).max(10) }),
+    APPROVED: c.object({ order: Planned, to: c.int().min(1).max(10) }),
+    ISSUED: c.object({ order: Issued, to: c.int().min(1).max(10) }),
+  }),
+  result: answers,
+  effects: c.variants("type", {}),
+});
+const receiving = c.implement(receive, {
+  cases: {
+    ISSUED: c.model("receives no more than is open", r =>
+      c.choose<Answer>(
+        r.order.received.$plus(r.quantity).$lte(r.order.quantity),
+        { result: { outcome: "ok", order: { status: "ISSUED", id: r.order.id, quantity: r.order.quantity, received: c.arithmetic("add", r.order.received, r.quantity) } }, effects: [] },
+        refused,
+      )),
+    $default: c.model("only an issued order receives", () => refused),
+  },
+});
+// Its guard looks at the new quantity alone, not at what is received.
+const changingAnyQuantity = c.implement(changeQuantity, {
+  cases: {
+    ISSUED: c.model("takes any quantity", r => ({ result: { outcome: "ok" as const, order: { status: "ISSUED" as const, id: r.order.id, quantity: r.to, received: r.order.received } }, effects: [] })),
+    $default: c.model("only an issued order changes", () => refused),
+  },
+});
+const changingAboveReceived = c.implement(changeQuantity, {
+  cases: {
+    ISSUED: c.model("takes a quantity no less than received", r =>
+      c.choose<Answer>(
+        r.to.$gte(r.order.received),
+        { result: { outcome: "ok", order: { status: "ISSUED", id: r.order.id, quantity: r.to, received: r.order.received } }, effects: [] },
+        refused,
+      )),
+    $default: c.model("only an issued order changes", () => refused),
+  },
+});
+
+// Each operation acts on one order: the world hands it an order and takes its answer back.
+const replaced = (state: OrdersState, execution: { readonly result: unknown }): OrdersState => {
+  const result = execution.result as c.Infer<typeof answers>;
+  return result.outcome === "ok" ? { orders: state.orders.map(order => (order.id === result.order.id ? result.order : order)) } : state;
+};
+const onOrder = (implementation: c.AnyImplementation, field?: string): c.Operation<OrdersState> => ({
+  implementation,
+  input: (state, draw) => {
+    const order = draw.pick(state.orders);
+    if (order === undefined) return undefined;
+    if (field === undefined) return order;
+    const { status, ...rest } = order;
+    return { status, order: rest, [field]: draw.int(1, 10) };
+  },
+  next: replaced,
+});
+const operations = (change: c.AnyImplementation): readonly c.Operation<OrdersState>[] => [
+  {
+    implementation: creating,
+    input: (state, draw) => ({ kind: "create", id: `po-${state.orders.length + 1}`, quantity: draw.int(1, 10) }),
+    next: (state, execution) => {
+      const result = execution.result as c.Infer<typeof answers>;
+      return result.outcome === "ok" ? { orders: [...state.orders, result.order] } : state;
+    },
+  },
+  onOrder(approving),
+  onOrder(issuing),
+  onOrder(receiving, "quantity"),
+  onOrder(change, "to"),
+];
+
+const neverOverReceived = c.invariant<OrdersState>("no order receives more than it ordered", state =>
+  state.orders.$all(order => (order as unknown as c.TermOf<c.Infer<typeof Issued>>).received.$lte((order as unknown as c.TermOf<OrderValue & { quantity: number }>).quantity)),
+);
+
+describe("a world's invariants", () => {
+  it("finds the operations whose guards together reach a state no single guard rules out", async () => {
+    const report = await c.explore(
+      c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAnyQuantity), invariants: [neverOverReceived] }),
+      { runs: 200, steps: 20 },
+    );
+    expect(report.status).toBe("broken");
+    expect(report.counterexample!.invariant).toBe("no order receives more than it ordered");
+    // Shortened to the steps that matter: one order, created, approved, issued, received, then cut below what it received.
+    expect(report.counterexample!.steps.map(step => step.operation)).toStrictEqual(["create", "approve", "issue", "receive", "change quantity"]);
+    const last = report.counterexample!.steps.at(-1)!.after as OrdersState;
+    expect(last.orders).toHaveLength(1);
+  });
+
+  it("holds when the guards keep it, and says how often each operation ran and moved the state", async () => {
+    const report = await c.explore(
+      c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), invariants: [neverOverReceived] }),
+      { runs: 100, steps: 20 },
+    );
+    expect(report.status).toBe("held");
+    for (const operation of report.operations) {
+      expect(operation.ran).toBeGreaterThan(0);
+      expect(operation.moved).toBeGreaterThan(0);
+      expect(operation.pending).toBe(0);
+    }
+  });
+
+  it("checks a transition between the state before an operation and after it", async () => {
+    const shrinking = c.transition<OrdersState>("no order is lost", (before, after) => after.orders.$length().$gte(before.orders.$length()));
+    const drop = c.behavior("drop", { input: Order, result: answers, effects: c.variants("type", {}) });
+    const dropping = c.implement(drop, { cases: { $default: c.model("drops the order", r => ({ result: { outcome: "ok" as const, order: r as never }, effects: [] })) } } as never);
+    const report = await c.explore(
+      c.world("purchasing", {
+        state: Orders,
+        initial: [{ orders: [{ status: "DRAFT", id: "po-1", quantity: 1 }] }],
+        operations: [{ implementation: dropping, input: (state, draw) => draw.pick(state.orders), next: (state, _execution, input) => ({ orders: state.orders.filter(order => order !== input) }) }],
+        transitions: [shrinking],
+      }),
+    );
+    expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "no order is lost" } });
+  });
+
+  it("pairs each record before and after by what names it, as TLA+ quantifies over orders[id] and orders'[id]", async () => {
+    const issuedStaysIssued = c.transition<OrderValue>("an issued order stays issued", { each: "orders", by: "id" }, (before, after) =>
+      before.status.$ne("ISSUED").$or(after.status.$eq("ISSUED")),
+    );
+    const reopen = c.behavior("reopen", { input: Order, result: answers, effects: c.variants("type", {}) });
+    // Sends an issued order back to a draft.
+    const reopening = c.implement(reopen, {
+      cases: {
+        ISSUED: c.model("reopens", r => ({ result: { outcome: "ok" as const, order: { status: "DRAFT" as const, id: r.id, quantity: r.quantity } }, effects: [] })),
+        $default: c.model("only an issued order reopens", () => refused),
+      },
+    });
+    const broken = await c.explore(
+      c.world("purchasing", {
+        state: Orders,
+        initial: [{ orders: [] }],
+        operations: [...operations(changingAboveReceived), onOrder(reopening)],
+        transitions: [issuedStaysIssued],
+      }),
+      { runs: 200, steps: 20 },
+    );
+    expect(broken.status).toBe("broken");
+    expect(broken.counterexample!.invariant).toBe("an issued order stays issued");
+    expect(broken.counterexample!.reason).toMatch(/^reopen moved orders po-\d+ in a way an issued order stays issued does not allow$/);
+    expect(broken.counterexample!.steps.map(step => step.operation)).toStrictEqual(["create", "approve", "issue", "reopen"]);
+
+    const held = await c.explore(
+      c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), transitions: [issuedStaysIssued] }),
+      { runs: 50, steps: 20 },
+    );
+    expect(held.status).toBe("held");
+  });
+
+  it("does not hold a step that leaves the state as it was to a transition, as [][P]_vars does not", async () => {
+    // Every step that moves the state adds an order; issuing a draft is refused and moves nothing.
+    const growing = c.transition<OrdersState>("a step that moves the state adds an order", (before, after) =>
+      after.orders.$length().$gt(before.orders.$length()),
+    );
+    const report = await c.explore(
+      c.world("purchasing", {
+        state: Orders,
+        initial: [{ orders: [] }],
+        operations: [operations(changingAboveReceived)[0]!, onOrder(issuing)],
+        transitions: [growing],
+      }),
+      { runs: 20, steps: 10 },
+    );
+    expect(report.status).toBe("held");
+    expect(report.operations[1]).toMatchObject({ name: "issue", moved: 0 });
+    expect(report.operations[1]!.ran).toBeGreaterThan(0);
+  });
+
+  it("refuses to pair an array's elements without a field to match them by", async () => {
+    const unmatched = c.transition<OrderValue>("an issued order stays issued", { each: "orders" }, (before, after) => before.status.$ne("ISSUED").$or(after.status.$eq("ISSUED")));
+    await expect(
+      c.explore(c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), transitions: [unmatched] })),
+    ).rejects.toThrow("Transition an issued order stays issued pairs the elements of orders but names no field to match them by");
+  });
+
+  // The first item goes down; a transition pairing by key must see it.
+  const lowering = (Key: c.Schema<unknown>) => {
+    const lower = c.behavior("lower", {
+      input: c.variants("kind", { lower: c.object({ v: c.int() }) }),
+      result: c.variants("outcome", { ok: c.object({ v: c.int() }) }),
+      effects: c.variants("type", {}),
+    });
+    const Item = c.object({ key: Key, v: c.int() });
+    const State = c.object({ items: c.array(Item) });
+    return (initial: readonly c.Infer<typeof State>[]) => c.world("items", {
+      state: State,
+      initial,
+      operations: [{
+        implementation: c.implement(lower, { cases: { lower: c.model("one less", r => ({ result: { outcome: "ok" as const, v: c.arithmetic("subtract", r.v, 1) }, effects: [] })) } }),
+        input: state => ({ kind: "lower", v: state.items[0]!.v }),
+        next: (state, execution) => ({ items: [{ ...state.items[0]!, v: (execution.result as { v: number }).v }, ...state.items.slice(1)] }),
+      }],
+      transitions: [c.transition<c.Infer<typeof Item>>("never lowers", { each: "items", by: "key" }, (before, after) => after.v.$gte(before.v))],
+    });
+  };
+
+  it("does not pair two records with one key", async () => {
+    const report = await c.explore(lowering(c.string())([{ items: [{ key: "a", v: 1 }, { key: "a", v: 5 }] }]), { runs: 1, steps: 1 });
+    expect(report).toMatchObject({
+      status: "broken",
+      counterexample: { invariant: "never lowers", reason: "lower moved a state where items holds two records named a, so never lowers cannot pair them" },
+    });
+  });
+
+  it("pairs records by a key that is an object by its value", async () => {
+    const report = await c.explore(lowering(c.object({ n: c.int() }))([{ items: [{ key: { n: 1 }, v: 1 }, { key: { n: 2 }, v: 5 }] }]), { runs: 1, steps: 1 });
+    expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "never lowers", reason: "lower moved items { n: 1 } in a way never lowers does not allow" } });
+  });
+
+  it("takes an invariant written as a model expression", async () => {
+    const counted = c.invariant<OrdersState>("at most five orders", state =>
+      c.bind(c.int(), c.fold(Order, c.int(), state.orders, 0, count => c.arithmetic("add", count, 1)), count => c.choose(count.$lte(5), true, false)),
+    );
+    const report = await c.explore(
+      c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), invariants: [counted] }),
+      { runs: 20, steps: 20 },
+    );
+    expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "at most five orders" } });
+    expect(report.counterexample!.steps.filter(step => step.operation === "create")).toHaveLength(6);
+  });
+
+  it("hands an operation over the whole world the state at a field", async () => {
+    const Count = c.object({ count: c.int().min(0) });
+    const count = c.behavior("count", {
+      input: c.variants("kind", { add: c.object({ state: Count, by: c.int().min(0).max(3) }) }),
+      result: c.variants("outcome", { ok: c.object({ state: Count }) }),
+      effects: c.variants("type", {}),
+    });
+    const adding = c.implement(count, {
+      cases: { add: c.model("adds", r => ({ result: { outcome: "ok" as const, state: { count: c.arithmetic("add", r.state.count, r.by) } }, effects: [] })) },
+    });
+    const report = await c.explore(
+      c.world("counter", {
+        state: Count,
+        initial: [{ count: 0 }],
+        operations: [{ implementation: adding, state: "state" }],
+        invariants: [c.invariant<c.Infer<typeof Count>>("below twenty", state => state.count.$lt(20))],
+      }),
+      { runs: 5, steps: 30 },
+    );
+    expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "below twenty" } });
+  });
+
+  it("checks an explicit null at the state's field as the next state, rather than as the state left as it was", async () => {
+    const Count = c.object({ count: c.int().min(0) });
+    const clear = c.behavior("clear", {
+      input: c.variants("kind", { clear: c.object({ state: Count }) }),
+      result: c.variants("outcome", { cleared: c.object({ state: c.literal(null) }) }),
+      effects: c.variants("type", {}),
+    });
+    const clearing = c.implement(clear, { cases: { clear: c.model("clears", () => ({ result: { outcome: "cleared" as const, state: null }, effects: [] })) } });
+    const report = await c.explore(
+      c.world("counter", {
+        state: Count,
+        initial: [{ count: 0 }],
+        operations: [{ implementation: clearing, state: "state" }],
+        invariants: [c.invariant<c.Infer<typeof Count>>("not negative", state => state.count.$gte(0))],
+      }),
+      { runs: 1, steps: 1 },
+    );
+    expect(report).toMatchObject({ status: "broken", counterexample: { reason: "clear left a value that is not a state: $: Expected an object" } });
+    expect(report.counterexample!.steps).toMatchObject([{ before: { count: 0 }, after: null }]);
+  });
+
+  it("draws the same walks from the same seed", async () => {
+    const declaration = c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAnyQuantity), invariants: [neverOverReceived] });
+    expect(await c.explore(declaration, { seed: 3 })).toStrictEqual(await c.explore(declaration, { seed: 3 }));
+  });
+
+  it("shortens a walk whose operation draws until a value suits the state, though the numbers it drew run out", async () => {
+    const Ids = c.object({ ids: c.array(c.int()) });
+    type IdsState = c.Infer<typeof Ids>;
+    const act = c.behavior("act", {
+      input: c.variants("kind", { add: c.object({ id: c.int() }), remove: c.object({ id: c.int() }) }),
+      result: c.variants("outcome", { ok: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const acting = c.implement(act, { cases: { $default: c.model("acts", () => ({ result: { outcome: "ok" as const }, effects: [] })) } } as never);
+    const report = await c.explore(
+      c.world("ids", {
+        state: Ids,
+        initial: [{ ids: [] }],
+        operations: [
+          {
+            name: "add",
+            implementation: acting,
+            // Draws until an id not yet taken; dropping a step that removed an id
+            // leaves it taken in the replay, past the numbers the step drew.
+            input: (state, draw) => {
+              if (state.ids.length >= 2) return undefined;
+              for (let attempt = 0; attempt < 1000; attempt++) {
+                const id = draw.int(1, 2);
+                if (!state.ids.includes(id)) return { kind: "add", id };
+              }
+              throw new Error("no free id in 1000 draws");
+            },
+            next: (state, _execution, input) => ({ ids: [...state.ids, (input as { id: number }).id] }),
+          },
+          { name: "remove", implementation: acting, input: state => (state.ids.length === 0 ? undefined : { kind: "remove", id: state.ids[0]! }), next: state => ({ ids: state.ids.slice(1) }) },
+        ],
+        invariants: [c.invariant<IdsState>("fewer than two", state => state.ids.$length().$lt(2))],
+      }),
+      { runs: 5, steps: 10, seed: 2 },
+    );
+    expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "fewer than two" } });
+    expect(report.counterexample!.steps.map(step => step.operation)).toStrictEqual(["add", "add"]);
+  });
+
+  it("draws an integer between bounds that are not integers, and refuses bounds with none between them", async () => {
+    const Count = c.object({ count: c.int().min(0) });
+    const tick = c.behavior("tick", {
+      input: c.variants("kind", { tick: c.object({}) }),
+      result: c.variants("outcome", { ok: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const ticking = c.implement(tick, { cases: { tick: c.model("ticks", () => ({ result: { outcome: "ok" as const }, effects: [] })) } });
+    const drawn = new Set<number>();
+    const declaration = (min: number, max: number) => c.world("counter", {
+      state: Count,
+      initial: [{ count: 0 }],
+      operations: [{ implementation: ticking, input: (_, draw) => { drawn.add(draw.int(min, max)); return { kind: "tick" }; }, next: state => state }],
+      invariants: [c.invariant<c.Infer<typeof Count>>("not negative", state => state.count.$gte(0))],
+    });
+    await c.explore(declaration(0.5, 2.5), { runs: 1, steps: 50 });
+    expect([...drawn].sort()).toStrictEqual([1, 2]);
+    await expect(c.explore(declaration(3, 1), { runs: 1, steps: 1 })).rejects.toThrow("draw.int has no integer from 3 to 1");
+    await expect(c.explore(declaration(1.2, 1.8), { runs: 1, steps: 1 })).rejects.toThrow("draw.int has no integer from 1.2 to 1.8");
+  });
+
+  it("draws no value of a sum with no case, rather than failing", async () => {
+    const Count = c.object({ count: c.int().min(0) });
+    const tick = c.behavior("tick", {
+      input: c.variants("kind", { tick: c.object({}) }),
+      result: c.variants("outcome", { ok: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const ticking = c.implement(tick, { cases: { tick: c.model("ticks", () => ({ result: { outcome: "ok" as const }, effects: [] })) } });
+    const drawn: unknown[] = [];
+    const report = await c.explore(
+      c.world("counter", {
+        state: Count,
+        initial: [{ count: 0 }],
+        operations: [{
+          implementation: ticking,
+          input: (_, draw) => {
+            drawn.push(draw.value(c.variants("type", {})), draw.value(c.object({ effect: c.variants("type", {}).optional() })));
+            return { kind: "tick" };
+          },
+          next: state => state,
+        }],
+        invariants: [c.invariant<c.Infer<typeof Count>>("not negative", state => state.count.$gte(0))],
+      }),
+      { runs: 1, steps: 1 },
+    );
+    expect(report.status).toBe("held");
+    expect(drawn).toStrictEqual([undefined, {}]);
+  });
+
+  it("does not count a next state that differs only by an optional field written as undefined as moved", async () => {
+    const Noted = c.object({ count: c.int().min(0), note: c.string().optional() });
+    const tick = c.behavior("tick", {
+      input: c.variants("kind", { tick: c.object({}) }),
+      result: c.variants("outcome", { ok: c.object({ note: c.string().optional() }) }),
+      effects: c.variants("type", {}),
+    });
+    const ticking = c.implement(tick, { cases: { tick: c.model("ticks", () => ({ result: { outcome: "ok" as const }, effects: [] })) } });
+    const report = await c.explore(
+      c.world("counter", {
+        state: Noted,
+        initial: [{ count: 0 }],
+        operations: [{
+          implementation: ticking,
+          input: () => ({ kind: "tick" }),
+          // As a JavaScript `next` might, writing the note it did not get as undefined.
+          next: (state, execution) => ({ ...state, note: (execution.result as { note?: string }).note }) as c.Infer<typeof Noted>,
+        }],
+        invariants: [c.invariant<c.Infer<typeof Noted>>("not negative", state => state.count.$gte(0))],
+      }),
+      { runs: 1, steps: 3 },
+    );
+    expect(report.operations).toStrictEqual([{ name: "tick", ran: 3, moved: 0, skipped: 0, pending: 0 }]);
+  });
+
+  it("reports a starting state that breaks an invariant", async () => {
+    const report = await c.explore(
+      c.world("purchasing", {
+        state: Orders,
+        initial: [{ orders: [{ status: "ISSUED", id: "po-1", quantity: 1, received: 2 }] }],
+        operations: operations(changingAboveReceived),
+        invariants: [neverOverReceived],
+      }),
+    );
+    expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "no order receives more than it ordered", steps: [] } });
+  });
+
+  it("checks every starting state, not only those a walk happens to start from", async () => {
+    const declaration = c.world("purchasing", {
+      state: Orders,
+      initial: [{ orders: [] }, { orders: [{ status: "ISSUED", id: "po-1", quantity: 1, received: 2 }] }],
+      operations: operations(changingAboveReceived),
+      invariants: [neverOverReceived],
+    });
+    // Seed 0 starts its one walk from the first state, which holds.
+    const report = await c.explore(declaration, { runs: 1, steps: 1, seed: 0 });
+    expect(report).toMatchObject({
+      status: "broken", runs: 0,
+      counterexample: { invariant: "no order receives more than it ordered", start: declaration.initial[1], steps: [] },
+    });
+  });
+
+  describe("an operation whose next changes the state it is handed", () => {
+    const Count = c.object({ count: c.int().min(0) });
+    type CountState = c.Infer<typeof Count>;
+    const tick = c.behavior("tick", {
+      input: c.variants("kind", { tick: c.object({}) }),
+      result: c.variants("outcome", { ok: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const ticking = c.implement(tick, { cases: { tick: c.model("ticks", () => ({ result: { outcome: "ok" as const }, effects: [] })) } });
+    const incrementing: c.Operation<CountState> = {
+      implementation: ticking,
+      input: () => ({ kind: "tick" }),
+      next: state => { (state as { count: number }).count++; return state; },
+    };
+
+    it("keeps the state before the step, so a transition sees what it was", async () => {
+      const report = await c.explore(
+        c.world("counter", {
+          state: Count,
+          initial: [{ count: 0 }],
+          operations: [incrementing],
+          transitions: [c.transition<CountState>("never grows", (before, after) => after.count.$lte(before.count))],
+        }),
+        { runs: 1, steps: 1 },
+      );
+      expect(report).toMatchObject({ status: "broken", counterexample: { invariant: "never grows", start: { count: 0 } } });
+      expect(report.counterexample!.steps).toMatchObject([{ before: { count: 0 }, after: { count: 1 } }]);
+    });
+
+    it("starts every walk and every replay from the starting state as declared", async () => {
+      const declaration = c.world("counter", {
+        state: Count,
+        initial: [{ count: 0 }],
+        operations: [incrementing],
+        invariants: [c.invariant<CountState>("below three", state => state.count.$lt(3))],
+      });
+      const report = await c.explore(declaration, { runs: 3, steps: 3 });
+      expect(declaration.initial).toStrictEqual([{ count: 0 }]);
+      // Shortening replays from the start, so it keeps the three steps that reach three.
+      expect(report).toMatchObject({ status: "broken", runs: 1, operations: [{ ran: 3, moved: 3 }], counterexample: { invariant: "below three", start: { count: 0 } } });
+      expect(report.counterexample!.steps.map(step => step.before)).toStrictEqual([{ count: 0 }, { count: 1 }, { count: 2 }]);
+    });
+
+    it("hands a copy of a decimal too, so changing its digits in place leaves the state before as it was", async () => {
+      const Amount = c.object({ n: c.decimal(0) });
+      type AmountState = c.Infer<typeof Amount>;
+      const raising: c.Operation<AmountState> = {
+        implementation: ticking,
+        input: () => ({ kind: "tick" }),
+        // decimal.js keeps a value's digits in `d`; this raises 1 to 2 in place.
+        next: state => { (state.n as unknown as { d: number[] }).d[0]!++; return state; },
+      };
+      const declaration = c.world("amount", {
+        state: Amount,
+        initial: [{ n: new Decimal(1) }],
+        operations: [raising],
+        transitions: [c.transition<AmountState>("never grows", (before, after) => after.n.$lte(before.n))],
+      });
+      const report = await c.explore(declaration, { runs: 1, steps: 1 });
+      expect(report).toMatchObject({ status: "broken", operations: [{ moved: 1 }], counterexample: { invariant: "never grows" } });
+      expect(String(declaration.initial[0]!.n)).toBe("1");
+      expect(report.counterexample!.steps.map(step => [String((step.before as AmountState).n), String((step.after as AmountState).n)])).toStrictEqual([["1", "2"]]);
+    });
+  });
+});
+
+describe("what a walk leaves unchecked", () => {
+  it("is undetermined when an operation never ran, since the walks said nothing about it", async () => {
+    // Nothing creates an order, so approving never has one to act on.
+    const report = await c.explore(
+      c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: [onOrder(approving)], invariants: [neverOverReceived] }),
+      { runs: 5, steps: 5 },
+    );
+    expect(report).toMatchObject({ status: "undetermined", operations: [{ name: "approve", ran: 0, skipped: 25 }] });
+    expect(report.reason).toBe("approve never ran: it had nothing to act on in any state reached");
+  });
+
+  it("tells an operation no step chose from one that had nothing to act on", async () => {
+    const report = await c.explore(
+      c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), invariants: [neverOverReceived] }),
+      { runs: 1, steps: 1 },
+    );
+    expect(report.status).toBe("undetermined");
+    const unchosen = report.operations.filter(operation => operation.ran === 0 && operation.skipped === 0);
+    expect(unchosen.length).toBeGreaterThan(0);
+    for (const operation of unchosen) expect(report.reason).toContain(`${operation.name} never ran: no step chose it in 1 step`);
+    expect(report.reason).not.toMatch(/nothing to act on/);
+  });
+
+  it("counts a case still todo as pending, not as a broken invariant", async () => {
+    const pendingApproval = c.implement(approve, { cases: { DRAFT: c.todo("approval rules"), $default: c.model("only a draft is approved", () => refused) } });
+    const report = await c.explore(
+      c.world("purchasing", {
+        state: Orders,
+        initial: [{ orders: [{ status: "DRAFT", id: "po-1", quantity: 1 }] }],
+        operations: [onOrder(pendingApproval)],
+        invariants: [neverOverReceived],
+      }),
+      { runs: 3, steps: 3 },
+    );
+    expect(report.status).toBe("undetermined");
+    expect(report.operations[0]).toMatchObject({ ran: 0, pending: 9 });
+    expect(report.reason).toMatch(/^approve could not be run: /);
+  });
+
+  it("skips a whole-world operation at once when no input case takes the state at its field", async () => {
+    const Count = c.object({ count: c.int().min(0) });
+    const add = c.behavior("add", {
+      input: c.variants("kind", { add: c.object({ state: c.object({ count: c.int().min(0).max(3) }), by: c.int().min(1).max(5) }) }),
+      result: c.variants("outcome", { ok: c.object({ state: Count }) }),
+      effects: c.variants("type", {}),
+    });
+    const adding = c.implement(add, {
+      cases: { add: c.model("adds", r => ({ result: { outcome: "ok" as const, state: { count: c.arithmetic("add", r.state.count, r.by) } }, effects: [] })) },
+    });
+    const parse = vi.spyOn(add.input, "parse");
+    const report = await c.explore(
+      c.world("counting", { state: Count, initial: [{ count: 4 }], operations: [{ implementation: adding, state: "state" }], invariants: [c.invariant<c.Infer<typeof Count>>("not negative", state => state.count.$gte(0))] }),
+      { runs: 2, steps: 5 },
+    );
+    expect(report.operations[0]).toMatchObject({ ran: 0, skipped: 10 });
+    // A count of 4 is no state the case takes, so no input is drawn for it, let alone 200 per step.
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("refuses runs or steps that are not a positive integer, and a seed the random source cannot tell apart", async () => {
+    const declaration = c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), invariants: [neverOverReceived] });
+    await expect(c.explore(declaration, { runs: 0 })).rejects.toThrow("runs must be a positive integer, but was 0");
+    await expect(c.explore(declaration, { steps: Number.NaN })).rejects.toThrow("steps must be a positive integer, but was NaN");
+    // Seeds the random source reads alike would draw the same walks under different names.
+    await expect(c.explore(declaration, { seed: Number.NaN })).rejects.toThrow("seed must be an integer from 0 to 4294967295, but was NaN");
+    await expect(c.explore(declaration, { seed: 1.5 })).rejects.toThrow("seed must be an integer from 0 to 4294967295, but was 1.5");
+    await expect(c.explore(declaration, { seed: -1 })).rejects.toThrow("seed must be an integer from 0 to 4294967295, but was -1");
+    await expect(c.explore(declaration, { seed: 2 ** 32 })).rejects.toThrow("seed must be an integer from 0 to 4294967295, but was 4294967296");
+  });
+});
+
+describe("declaring a world", () => {
+  const base = { state: Orders, initial: [{ orders: [] }] as OrdersState[], operations: operations(changingAboveReceived), invariants: [neverOverReceived] };
+  it("refuses a transition pairing records the state does not hold where it looks", () => {
+    const pairing = (each: string, by: string) => c.transition<OrderValue>("an issued order stays issued", { each, by }, (before, after) => before.status.$ne("ISSUED").$or(after.status.$eq("ISSUED")));
+    expect(() => c.world("w", { ...base, transitions: [pairing("order", "id")] })).toThrow("World w: transition an issued order stays issued pairs records at order, where the state holds no array or record");
+    expect(() => c.world("w", { ...base, transitions: [pairing("orders", "ID")] })).toThrow("World w: transition an issued order stays issued pairs the records at orders by ID, which they do not declare");
+    expect(() => c.world("w", { ...base, transitions: [pairing("orders", "id"), pairing("orders", "status")].map((item, index) => ({ ...item, name: `${index}` })) })).not.toThrow();
+  });
+
+  it("refuses a world with no starting state, no operation or no invariant", () => {
+    expect(() => c.world("w", { ...base, initial: [] })).toThrow("World w starts from no state");
+    expect(() => c.world("w", { ...base, operations: [] })).toThrow("World w names no operation");
+    expect(() => c.world("w", { ...base, invariants: [] })).toThrow("World w states no invariant");
+  });
+  it("refuses an invariant named twice, a starting state that is not a state, and an operation that takes no state", () => {
+    expect(() => c.world("w", { ...base, invariants: [neverOverReceived, neverOverReceived] })).toThrow("World w names invariant no order receives more than it ordered more than once");
+    expect(() => c.world("w", { ...base, initial: [{ orders: [{ status: "DRAFT", id: "po-1", quantity: 0 }] }] })).toThrow(/World w starting state 1 is not a state/);
+    expect(() => c.world("w", { ...base, operations: [{ implementation: approving, state: "orders" }] })).toThrow("approve takes no orders in any input case, so it cannot be handed the state");
+  });
+  it("refuses a whole-world operation whose result never holds the state, which would leave every walk where it started", () => {
+    const Counter = c.object({ n: c.int().min(0).max(100) });
+    const step = c.behavior("step", {
+      input: c.variants("kind", { go: c.object({ state: Counter }) }),
+      result: c.variants("outcome", { ok: c.object({ next: Counter }) }),
+      effects: c.variants("type", {}),
+    });
+    const stepping = c.implement(step, {
+      cases: { go: c.model("jumps", r => ({ result: { outcome: "ok" as const, next: { n: c.arithmetic("add", r.state.n, 50) } }, effects: [] })) },
+    });
+    const small = c.invariant<c.Infer<typeof Counter>>("small", state => state.n.$lte(5));
+    expect(() => c.world("w", { state: Counter, initial: [{ n: 0 }], operations: [{ implementation: stepping, state: "state" }], invariants: [small] }))
+      .toThrow("step answers no state in any result case, so it cannot hand back the next state");
+  });
+
+  it("takes the next state from a result sum's discriminant when the operation names it", async () => {
+    const Status = c.enum(["open", "closed"]);
+    const toggle = c.behavior("toggle", {
+      input: c.variants("kind", { go: c.object({ status: Status }) }),
+      result: c.variants("status", { open: c.object({}), closed: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const closing = c.implement(toggle, {
+      cases: { go: c.model("closes", () => ({ result: { status: "closed" as const }, effects: [] })) },
+    });
+    const staysOpen = c.invariant<"open" | "closed">("staysOpen", status => status.$eq("open"));
+    const report = await c.explore(c.world("door", { state: Status, initial: ["open"], operations: [{ implementation: closing, state: "status" }], invariants: [staysOpen] }));
+    expect(report.status).toBe("broken");
+  });
+
+  it("hands the state to the input case its discriminant names when the operation names the discriminant", async () => {
+    const Status = c.enum(["open", "closed"]);
+    const close = c.behavior("close", {
+      input: c.variants("status", { open: c.object({}), closed: c.object({}) }),
+      result: c.variants("status", { closed: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const closing = c.implement(close, {
+      cases: {
+        open: c.model("closes", () => ({ result: { status: "closed" as const }, effects: [] })),
+        closed: c.model("stays", () => ({ result: { status: "closed" as const }, effects: [] })),
+      },
+    });
+    const staysOpen = c.invariant<"open" | "closed">("staysOpen", status => status.$eq("open"));
+    const report = await c.explore(c.world("door", { state: Status, initial: ["open"], operations: [{ implementation: closing, state: "status" }], invariants: [staysOpen] }));
+    expect(report.status).toBe("broken");
+    expect(report.counterexample?.steps[0]?.input).toStrictEqual({ status: "open" });
+  });
+});
