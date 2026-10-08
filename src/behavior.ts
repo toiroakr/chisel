@@ -824,12 +824,18 @@ function decide<Result, Effect>(
 // such code is refused rather than read as if it were the answer. The function
 // is read as the handler would read it (a method of a class instance too) and
 // called on the dependencies supplied, so a method reading `this` still works.
+// Every declared dependency is read that way, a value one too, since a copy of
+// the object's own keys drops a getter or a property of its class.
 function answeringValues(definition: AnyBehavior, deps: unknown): unknown {
   if (typeof deps !== "object" || deps === null) return deps;
   const wrapped: Record<string, unknown> = { ...deps };
   for (const [name, dependency] of Object.entries(definition.requires)) {
+    if (!(name in deps)) continue;
     const supplied = (deps as Record<string, unknown>)[name];
-    if (dependency.takes === "nothing" || typeof supplied !== "function") continue;
+    if (dependency.takes === "nothing" || typeof supplied !== "function") {
+      wrapped[name] = supplied;
+      continue;
+    }
     wrapped[name] = (...args: unknown[]) => {
       const answer: unknown = Reflect.apply(supplied, deps, args);
       if (!isPromiseLike(answer)) return answer;

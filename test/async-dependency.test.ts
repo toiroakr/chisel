@@ -162,4 +162,23 @@ describe("a dependency that answers a promise", () => {
     expect((await c.perform(handled, { kind: "place", items: ["plum"] }, new Shelf({ apple: 3 }))).result).toStrictEqual({ outcome: "short" });
     expect((await c.perform(handled, { kind: "place", items: ["apple"] }, shelf)).result).toStrictEqual({ outcome: "placed", quantities: [1] });
   });
+
+  it("hands an action's own code a value dependency a class supplies as a getter, as its guards read it", async () => {
+    const quote = c.behavior("quote", {
+      input: c.variants("kind", { quote: c.object({ amount: c.int().min(0).max(1000) }) }),
+      result: c.variants("outcome", { ok: c.object({ limit: c.int() }), over: c.object({}) }),
+      effects: c.variants("type", {}),
+      requires: { limit: c.dependency(c.int()) },
+    });
+    const quoting = c.implement(quote, {
+      cases: {
+        quote: c.action("quote", {
+          guards: (request, deps) => [request.amount.$lte(deps.limit).$else(() => ({ result: { outcome: "over" as const }, effects: [] }))],
+          run: (_request, deps) => ({ result: { outcome: "ok" as const, limit: deps.limit }, effects: [] }),
+        }),
+      },
+    });
+    class Settings { get limit() { return 500; } }
+    expect(await c.perform(quoting, { kind: "quote", amount: 100 }, new Settings())).toStrictEqual({ result: { outcome: "ok", limit: 500 }, effects: [] });
+  });
 });
