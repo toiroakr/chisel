@@ -56,7 +56,8 @@ function safeInteger(range: Interval): boolean {
 function kindOf(value: unknown, scope: AnySchema): string | undefined {
   if (isTerm(value)) {
     const term = termData(value);
-    return term.kind === "position" && term.measure === "value" ? schemaAtPath(scope, term.path)?.kind : undefined;
+    // A value an optional around it may leave out is no value of its type.
+    return term.kind === "position" && term.measure === "value" && !optionalAlong(scope, term.path) ? schemaAtPath(scope, term.path)?.kind : undefined;
   }
   const node = nodeOf(value);
   if (node?.kind === "construct") return node.schema.kind;
