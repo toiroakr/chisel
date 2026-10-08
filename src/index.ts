@@ -171,7 +171,8 @@ export type { JsonValue } from "./codec.js";
 export { PAIR_LIMIT } from "./pairs.js";
 export type { PairObligation, PairMeasure } from "./pairs.js";
 
-export { model, bind, matchValue, map, fold, call, choose, construct, concat, arithmetic, quotient } from "./model.js";
+export { model, bind, matchValue, map, fold, call, choose, construct, concat, arithmetic, quotient, plus, minus, between } from "./model.js";
+export type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
 export type { Expression, Template } from "./model.js";
 
 export { verify } from "./proof.js";
