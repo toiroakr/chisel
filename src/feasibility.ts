@@ -248,7 +248,10 @@ export function feasibilityOf(
       return { kind: "infeasible", reason: contradicts };
     }
     intervals.set(key, typeof settled === "object" ? settled : undefined);
-    unsettled ||= settled === undefined && group.constraints.length > 1;
+    // A range read but found to hold no value the transforms give back is
+    // undecided however many of its bounds the way wrote, and how many the
+    // position's own invariants did.
+    unsettled ||= settled === "undecided" || (settled === undefined && group.constraints.length > 1);
   }
   const joint = jointAssignment([...groups.values()], scope, combinations);
   if (joint === "none") {
@@ -513,7 +516,9 @@ function sharesValue(left: readonly string[], right: readonly string[]): boolean
   return left.slice(0, length).every((key, index) => key === right[index]);
 }
 
-function settle(group: Group, scope: AnySchema): Interval | boolean | undefined {
+// Undefined where the group cannot be read, "undecided" where it is read but
+// no value is found in its range (see ordered).
+function settle(group: Group, scope: AnySchema): Interval | boolean | "undecided" | undefined {
   const { path, measure } = group;
   const domain = measure === "value" ? finiteDomainAt(scope, path) : undefined;
   if (domain !== undefined) {
@@ -538,7 +543,7 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
         ? []
         : [{ operator: normalized.operator, bound: normalized.bound }];
     });
-  return ordered([...group.constraints, ...invariants], carrier);
+  return ordered([...group.constraints, ...invariants], carrier) ?? "undecided";
 }
 
 // The values of a finite domain the position's own invariants keep, the way its

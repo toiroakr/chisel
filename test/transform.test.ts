@@ -726,3 +726,29 @@ describe("a bound only a capital sharp s reads as", () => {
     expect(c.generate(rows, implementation).rows.map(row => row.given)).toContainEqual({ kind: "request", code: "ẞ" });
   });
 });
+
+describe("a transformed range a field's own invariant bounds", () => {
+  it("is left undecided where no value lies in it, as one two guards bound is", async () => {
+    // No lowercased string lies from "A" to "Z": the invariant bounds it from below.
+    const definition = c.behavior("coded", {
+      input: c.variants("kind", { request: c.object({ code: c.string().refine(value => value.$lowercase().$gte("A")) }) }),
+      result: c.variants("outcome", { yes: c.object({}), no: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const no = { result: { outcome: "no" as const }, effects: [] };
+    const implementation = c.implement(definition, {
+      cases: {
+        request: c.action("ranged", {
+          guards: request => [request.code.$lowercase().$lte("Z").$else(() => no)],
+          run: () => ({ result: { outcome: "yes" as const }, effects: [] }),
+        }),
+      },
+    });
+    const rows = c.examples(definition, { letters: { given: { kind: "request", code: "abc" }, expect: no } });
+    const report = await c.check(c.spec("coded", { implementation, examples: rows }));
+    expect(report.measures.arms.status === "complete" && report.measures.arms.arms.map(arm => arm.status)).toStrictEqual([
+      "undecided",
+      "met",
+    ]);
+  });
+});
