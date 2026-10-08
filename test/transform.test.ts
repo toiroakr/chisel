@@ -752,3 +752,28 @@ describe("a transformed range a field's own invariant bounds", () => {
     ]);
   });
 });
+
+describe("two invariants relating one pair of fields by different measures", () => {
+  it("do not refuse each other's points, since they bound different differences", async () => {
+    // length(a) >= length(b) and length(trim(a)) <= length(b): " x" and "x" stand
+    // inside the first, "  x" and "xx" inside the second.
+    const definition = c.behavior("paired", {
+      input: c.variants("kind", {
+        request: c
+          .object({ a: c.string(), b: c.string() })
+          .refine(request => request.a.$length().$gte(request.b.$length()))
+          .refine(request => request.a.$trim().$length().$lte(request.b.$length())),
+      }),
+      result: c.variants("outcome", { yes: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    expect(definition.input.parse({ kind: "request", a: " x", b: "x" }).success).toBe(true);
+    expect(definition.input.parse({ kind: "request", a: "  x", b: "xx" }).success).toBe(true);
+    const yes = { result: { outcome: "yes" as const }, effects: [] };
+    const implementation = c.implement(definition, { cases: { request: c.model("yes", () => yes) } });
+    const examples = c.examples(definition, { same: { given: { kind: "request", a: "x", b: "x" }, expect: yes } });
+    const report = await c.check(c.spec("paired", { implementation, examples }));
+    expect(report.borders.map(border => border.points.find(point => point.role === "IN")?.status)).toStrictEqual(["gap", "gap"]);
+    expect(report.verdict).toBe("not_satisfied");
+  });
+});

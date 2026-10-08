@@ -295,10 +295,19 @@ function objectFramesIn(frame: Frame): readonly Frame[] {
 // Not left to bordersOf, which excludes a point another bound on the same
 // measure refuses: each comparison of two positions is drawn on a difference of
 // its own, so the bounds on one difference never meet there.
+// A pair is its positions and what each side measures: length($.a) − length($.b)
+// and length(trim($.a)) − length($.b) are different differences of one pair.
+function pairSidesOf(drawn: GuardBorder): readonly string[] {
+  const measures = [drawn.comparison.left, drawn.comparison.right].map(operand =>
+    isTerm(operand) ? positionData(operand as Term<unknown>)?.measure : undefined,
+  );
+  return (drawn.reads ?? []).map((segments, index) => JSON.stringify([segments, measures[index]]));
+}
+
 function withoutPairRefusedPoints(border: GuardBorder, all: readonly GuardBorder[]): GuardBorder {
-  const [first, second] = (border.reads ?? []).map(segments => JSON.stringify(segments));
+  const [first, second] = pairSidesOf(border);
   const others = all.flatMap(other => {
-    const [otherFirst, otherSecond] = (other.reads ?? []).map(segments => JSON.stringify(segments));
+    const [otherFirst, otherSecond] = pairSidesOf(other);
     if (other === border || first === undefined || !comparesTwoPositions(border) || !comparesTwoPositions(other)) {
       return [];
     }
