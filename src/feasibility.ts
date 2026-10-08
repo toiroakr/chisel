@@ -4,7 +4,7 @@ import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, LinearTermData, Measure, Operator, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths, counts } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths, counts, partsOfMeasure, positionTerm } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
@@ -202,9 +202,9 @@ export function feasibilityOf(
     }
     bucket.push({ identity, outcome: step.outcome });
     outcomes.set(key, bucket);
-    const placed = placedConstraintOf(step);
+    const placed = placedConstraintOf(step, scope);
     if (placed !== undefined) {
-      groups.get(groupFor(placed.path, placed.measure))!.constraints.push(placed.constraint);
+      groups.get(groupFor(placed.path, placed.measure))!.constraints.push(...placed.constraints);
       continue;
     }
     const { distinction, outcome } = step;
@@ -335,13 +335,14 @@ export function feasibilityOf(
     : { kind: "feasible" };
 }
 
-// The constraint a step puts on one coordinate: a match, or a comparison with a constant.
+// The constraints a step puts on one coordinate: a match, or a comparison with a constant.
 function placedConstraintOf(
   step: Step,
-): { readonly path: readonly string[]; readonly measure: Measure; readonly constraint: Constraint } | undefined {
+  scope: AnySchema,
+): { readonly path: readonly string[]; readonly measure: Measure; readonly constraints: readonly Constraint[] } | undefined {
   const { distinction, outcome } = step;
   if (distinction.kind === "match") {
-    return { path: positionOf(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
+    return { path: positionOf(distinction.on).path, measure: "value", constraints: [{ operator: "==", bound: outcome }] };
   }
   if (distinction.kind !== "compare") {
     return undefined;
@@ -350,15 +351,25 @@ function placedConstraintOf(
   if (normalized === undefined) {
     return undefined;
   }
-  const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
-  return {
-    path: positionOf(term).path,
-    measure: normalized.measure,
-    constraint: {
-      operator: outcome === true ? normalized.operator : negated[normalized.operator],
-      bound: normalized.bound,
-    },
+  const path = positionOf((isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>).path;
+  const constraint: Constraint = {
+    operator: outcome === true ? normalized.operator : negated[normalized.operator],
+    bound: normalized.bound,
   };
+  // A transformed read of a finite position, `lowercase($.level)` of an enum,
+  // is read off each of its values: the step refuses the values whose reading
+  // the constraint does not keep, so it is settled with the value's own steps.
+  const { transforms, reading } = partsOfMeasure(normalized.measure);
+  const domain = transforms.length > 0 && reading === "value" ? finiteDomainAt(scope, path) : undefined;
+  if (domain !== undefined) {
+    const kept: Rule = { kind: "compare", left: positionTerm([], normalized.measure), operator: constraint.operator, right: constraint.bound };
+    return {
+      path,
+      measure: "value",
+      constraints: domain.filter(value => !holds(kept, value)).map(value => ({ operator: "!=", bound: value })),
+    };
+  }
+  return { path, measure: normalized.measure, constraints: [constraint] };
 }
 
 function stepIdentity(step: Step): unknown {
@@ -713,16 +724,18 @@ export function witnessesOf(
     groups.get(key)!.constraints.push(constraint);
   };
   for (const step of way.steps) {
-    const placed = placedConstraintOf(step);
+    const placed = placedConstraintOf(step, scope);
     if (
       placed === undefined ||
       placed.measure !== "value" ||
-      (placed.constraint.operator !== "==" && placed.constraint.operator !== "!=") ||
+      placed.constraints.some(constraint => constraint.operator !== "==" && constraint.operator !== "!=") ||
       finiteDomainAt(scope, placed.path) === undefined
     ) {
       return undefined;
     }
-    constrain(placed.path, placed.constraint);
+    for (const constraint of placed.constraints) {
+      constrain(placed.path, constraint);
+    }
   }
   if (inputCase !== undefined && groups.has(JSON.stringify([inputCase.discriminant]))) {
     constrain([inputCase.discriminant], { operator: "==", bound: inputCase.tag });
@@ -1197,7 +1210,10 @@ function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): read
             return false;
           }
           paths.push(data.path);
-          return data.measure === "value";
+          // A transformed value is read off each value of the domain as the guard
+          // reads it (`lowercase($.level)` of each case of an enum); a string
+          // has no domain, so its transformed read stays out of the plan.
+          return !counts(data.measure);
         });
       case "not":
         return collect(rule.rule);
