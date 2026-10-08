@@ -539,6 +539,21 @@ describe("a bound no transformed value reads as", () => {
     const below = c.generate(rows, implementation).rows.filter(row => row.name.includes('IN (< "Ba")'));
     expect(below.map(row => (row.given as { code: string }).code.toLowerCase() < "Ba")).toStrictEqual([true]);
   });
+
+  it("leaves a range between two bounds undecided where it finds no value in it", async () => {
+    // Every string from "A" to "Z" starts with an uppercase letter, which no
+    // lowercased string holds, so the arm is no gap a row could fill.
+    const { definition, implementation } = guarded(code => code.$lowercase().$gte("A").$and(code.$lowercase().$lte("Z")));
+    const rows = c.examples(definition, {
+      empty: { given: { kind: "request", code: "" }, expect: no },
+      letters: { given: { kind: "request", code: "abc" }, expect: no },
+    });
+    const report = await c.check(c.spec("coded", { implementation, examples: rows }));
+    expect(report.measures.arms.status === "complete" && report.measures.arms.arms.map(arm => arm.status)).toStrictEqual([
+      "undecided",
+      "met",
+    ]);
+  });
 });
 
 describe("a transformed comparison of an enum", () => {

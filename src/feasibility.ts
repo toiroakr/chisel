@@ -571,7 +571,7 @@ function finite(domain: readonly unknown[], constraints: readonly Constraint[]):
   );
 }
 
-function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval | false {
+function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval | false | undefined {
   let lower: Edge | undefined =
     carrier.floor === undefined ? undefined : { value: carrier.floor.value, inclusive: true };
   let upper: Edge | undefined =
@@ -609,7 +609,22 @@ function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval
   const { step } = carrier;
   if (step === undefined) {
     const order = carrier.compare(lower.value, upper.value);
-    return order < 0 || (order === 0 && within(lower.value)) ? interval : false;
+    if (!(order < 0 || (order === 0 && within(lower.value)))) {
+      return false;
+    }
+    if (carrier.produces === undefined) {
+      return interval;
+    }
+    // A transformed string reads only as what its transforms give back, and a
+    // range may hold none of them (no lowercased string lies from "A" to "Z"):
+    // it is settled only where a value is found in it.
+    const found = [
+      lower.inclusive ? lower.value : undefined,
+      carrier.past?.(lower.value, 1),
+      upper.inclusive ? upper.value : undefined,
+      carrier.past?.(upper.value, -1),
+    ].some(value => value !== undefined && within(value));
+    return found ? interval : undefined;
   }
   let candidate = lower.inclusive ? lower.value : step(lower.value, 1);
   for (let tried = 0; tried <= unequal.length; tried += 1) {
