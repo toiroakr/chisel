@@ -25,7 +25,8 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed, sizeOf } from "./rule.js";
+import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed, sizeOf, leftAsItReads } from "./rule.js";
+import { compareText } from "./text.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -453,7 +454,7 @@ function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["
       return (
         lengths
           .map(length => written + " ".repeat(length - size))
-          .find(padded => kept.holds(padded) && deepEqual(measured(padded, measure), read)) ?? written
+          .find(padded => kept.holds(padded) && readsAs(measured(padded, measure), read)) ?? written
       );
     });
 }
@@ -468,7 +469,7 @@ function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["
 function transformedStringCarrier(transforms: ReturnType<typeof partsOfMeasure>["transforms"]): Carrier {
   return {
     ...stringCarrier,
-    produces: value => typeof value === "string" && transformed(value, transforms) === value,
+    produces: value => leftAsItReads(value, transforms),
     past: (value, direction) => {
       const moved = stringCarrier.past?.(value, direction);
       const candidates = [
@@ -482,6 +483,13 @@ function transformedStringCarrier(transforms: ReturnType<typeof partsOfMeasure>[
   };
 }
 
+// Whether a coordinate read reads as the one asked for: strings as text is compared.
+function readsAs(read: unknown, coordinate: unknown): boolean {
+  return typeof read === "string" && typeof coordinate === "string"
+    ? compareText(read, coordinate) === 0
+    : deepEqual(read, coordinate);
+}
+
 // Writes a coordinate at a position, or gives undefined where a transformed
 // measure cannot read back as it: no value lowercases to "ABC". A measure with
 // no transform is written as before.
@@ -493,7 +501,7 @@ export function writeExactly(
 ): unknown {
   const written = position.write(given, measure, coordinate);
   return partsOfMeasure(measure).transforms.length === 0 ||
-    position.valuesIn(written).some(value => value !== undefined && deepEqual(measured(value, measure), coordinate))
+    position.valuesIn(written).some(value => value !== undefined && readsAs(measured(value, measure), coordinate))
     ? written
     : undefined;
 }

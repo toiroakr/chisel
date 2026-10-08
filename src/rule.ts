@@ -636,6 +636,13 @@ export function transformed(value: unknown, transforms: readonly Transform[]): u
   return transforms.reduce((text, transform) => TRANSFORMS[transform](text), value);
 }
 
+// Whether the transforms leave a string as it reads, compared as text is: "İ"
+// lowercases to "i̇" and uppercases back to "I" with a combining dot, which
+// reads as "İ" though it is not the same code points.
+export function leftAsItReads(value: unknown, transforms: readonly Transform[]): value is string {
+  return typeof value === "string" && compareText(transformed(value, transforms) as string, value) === 0;
+}
+
 // What `measure` reads of a value found at a term's path.
 export function measured(value: unknown, measure: Measure): unknown {
   const { transforms, reading } = partsOfMeasure(measure);
@@ -652,7 +659,7 @@ export function measured(value: unknown, measure: Measure): unknown {
 export function rewrite(current: unknown, measure: Measure, target: unknown, empty?: () => unknown): unknown {
   const { transforms, reading } = partsOfMeasure(measure);
   if (reading === "value") {
-    return transforms.length === 0 || transformed(target, transforms) === target ? target : current;
+    return transforms.length === 0 || leftAsItReads(target, transforms) ? target : current;
   }
   if (transforms.length === 0 || typeof current !== "string") {
     return resize(current, target as number, empty);
