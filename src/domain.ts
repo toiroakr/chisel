@@ -1,6 +1,6 @@
 import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { Decimal } from "decimal.js";
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, DecimalSchema } from "./schema.js";
 import { bordersOf } from "./border.js";
 import { carrierOf } from "./partition.js";
@@ -37,7 +37,7 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
         if (!parsed.success) continue;
         const key = JSON.stringify(parsed.value, (_, value) => typeof value === "bigint" ? `${value}n` : value) ?? "undefined";
         const bucket = buckets.get(key) ?? [];
-        if (bucket.some(other => isDeepStrictEqual(other, parsed.value))) continue;
+        if (bucket.some(other => deepEqual(other, parsed.value))) continue;
         bucket.push(parsed.value);
         buckets.set(key, bucket);
         unique.push(parsed.value);

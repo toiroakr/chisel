@@ -5,7 +5,7 @@ import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData } fr
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
 import type { Step } from "./ways.js";
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 
 interface Interval {
   readonly low: Rational;
@@ -74,7 +74,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     for (const item of rules) {
       if (item.rule.kind !== "compare" || !isTerm(item.rule.left) || isTerm(item.rule.right)) continue;
       const left = positionData(item.rule.left);
-      if (!left || left.measure !== term.measure || !isDeepStrictEqual([...item.prefix, ...left.path], term.path)) continue;
+      if (!left || left.measure !== term.measure || !deepEqual([...item.prefix, ...left.path], term.path)) continue;
       let bound: Rational;
       try { bound = fractionOf(item.rule.right as number); } catch { continue; }
       const operator = item.holds ? item.rule.operator : inverse[item.rule.operator];

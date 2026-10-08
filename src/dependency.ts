@@ -1,5 +1,5 @@
 import { snapshotValue } from "./data.js";
-import { isDeepStrictEqual } from "node:util";
+import { deepEqual } from "./equal.js";
 import { isCaseOnly, SpecificationError } from "./behavior.js";
 import type { Rule } from "./rule.js";
 import { holds } from "./rule.js";
@@ -156,7 +156,7 @@ export class FakeMiss extends Error {
 
 export function answerFrom(table: FakeTable): (input: unknown) => unknown {
   return input => {
-    const row = table.rows.find(([asked]) => isDeepStrictEqual(asked, input));
+    const row = table.rows.find(([asked]) => deepEqual(asked, input));
     if (row !== undefined) {
       return row[1];
     }
@@ -216,7 +216,7 @@ export function fakeIssuesOf(
           issue: `Fake ${name} row ${index + 1} breaks ensures ${broken} of ${declared.injected!.behavior.name}`,
         });
       }
-      const earlier = table.rows.findIndex(([other]) => isDeepStrictEqual(other, asked));
+      const earlier = table.rows.findIndex(([other]) => deepEqual(other, asked));
       if (earlier < index) {
         issues.push({
           table,
@@ -258,10 +258,10 @@ export function fakeWarningsOf(requires: Requirements, tables: readonly FakeTabl
         .filter(
           row =>
             row.expect.kind !== "todo" &&
-            isDeepStrictEqual(row.given, asked) &&
+            deepEqual(row.given, asked) &&
             !(isCaseOnly(row.expect.result)
               ? isVariantsSchema(behavior.result) && tagOf(behavior.result, answer) === row.expect.result.case
-              : isDeepStrictEqual(row.expect.result, answer)),
+              : deepEqual(row.expect.result, answer)),
         )
         .map(
           row =>
