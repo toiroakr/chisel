@@ -228,6 +228,24 @@ describe("writing a transformed coordinate", () => {
     const request = c.object({ level: c.enum(["Low", "High"]) }).refine(value => value.level.$lowercase().$eq("high"));
     expect(request.placeholder()).toStrictEqual({ level: "High" });
   });
+
+  it("stands in for a string its transform leaves as it is with the transformed placeholder", () => {
+    const code = c.string().refine(value => value.$uppercase().$eq(value));
+    expect(code.placeholder("code")).toBe("<CODE>");
+    const request = c.object({ code: c.string() }).refine(value => value.code.$trim().$lowercase().$eq(value.code));
+    expect(request.parse(request.placeholder())).toStrictEqual({ success: true, value: { code: "<code>" } });
+    const upper = c.object({ code: c.string() }).refine(value => value.code.$uppercase().$eq(value.code));
+    expect(upper.placeholder()).toStrictEqual({ code: "<CODE>" });
+
+    const lookup = c.behavior("lookup", {
+      input: c.variants("type", { go: c.object({ code: code }), other: c.object({}) }),
+      result: c.variants("type", { ok: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const generated = c.generate(lookup);
+    expect(generated.rows.map(row => row.given)).toStrictEqual([{ type: "go", code: "<CODE>" }, { type: "other" }]);
+    expect(generated.notComposed).toStrictEqual([]);
+  });
 });
 
 describe("proving a transformed value", () => {
