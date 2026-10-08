@@ -773,8 +773,8 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
   return undefined;
 }
 
-// A rule over finite positions: each comparison reads one of them against a
-// constant with == or !=, combined with and/or/not. Its positions, or
+// A rule over finite positions: each comparison reads one of them, or what
+// its transforms make of it, against a constant with == or !=, combined with and/or/not. Its positions, or
 // undefined when any part of it reads something else.
 function finitePathsOf(
   rule: Rule,
@@ -790,13 +790,15 @@ function finitePathsOf(
         }
         const paths = sides.map(side => [...prefix, ...side!.path]);
         return (rule.operator === "==" || rule.operator === "!=") &&
-          sides.every(side => side!.measure === "value") &&
+          sides.every(side => !counts(side!.measure)) &&
           paths.every(path => finiteDomainAt(scope, path) !== undefined)
           ? paths
           : undefined;
       }
       const normalized = normalize(rule);
-      if (normalized === undefined || normalized.measure !== "value") {
+      // A transformed value, `lowercase($.level)`, is read off each value the
+      // combinations try, as the invariant is held with `holds`.
+      if (normalized === undefined || counts(normalized.measure)) {
         return undefined;
       }
       if (normalized.operator !== "==" && normalized.operator !== "!=") {
