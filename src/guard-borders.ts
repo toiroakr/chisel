@@ -819,7 +819,7 @@ function betweenExpression(
       // Moving a part that another reads too, as `length(trim($.code))` reads
       // `$.code`, moves both, so the row is kept only where it stands at the point.
       const shared = parts.some(
-        part => part !== moving && !part.standsIn && isDeepStrictEqual(part.segments, moving.segments),
+        part => part !== moving && !part.standsIn && deepEqual(part.segments, moving.segments),
       );
       return !shared ||
         parts.reduce<number | undefined>((total, part) => {
@@ -949,7 +949,7 @@ function between(
       const written = moved.write(given, moving.measure, base + sign * (coordinate as number));
       // Moving one side of `length(trim($.code)) < length($.code)` moves the
       // other too, so the row is kept only where it stands at the point.
-      if (fixed.standsIn || !isDeepStrictEqual(fixed.segments, moving.segments)) {
+      if (fixed.standsIn || !deepEqual(fixed.segments, moving.segments)) {
         return written;
       }
       const [a, b] = [first, second].map(side => measured(at(side.segments)?.valuesIn(written)[0], side.measure));
