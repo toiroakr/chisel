@@ -1,13 +1,21 @@
-// Strict deep equality, as Node's `util.isDeepStrictEqual` decides it for the
-// values Chisel compares: primitives by `Object.is`, then objects of one
-// prototype and one tag by their own enumerable keys, arrays with their holes,
-// dates by time, regular expressions by source and flags, boxed primitives by
-// value, typed arrays and array buffers by byte, and maps and sets regardless of order. It
-// needs no Node module, so the runtime runs where only Web APIs exist.
+// Strict deep equality, as Node's `util.isDeepStrictEqual` decides it:
+// primitives by `Object.is`, then objects of one prototype and one tag by their
+// own enumerable keys, arrays with their holes, dates by time, regular
+// expressions by source, flags and index, boxed primitives by value, URLs by
+// text, errors by message, name, cause and errors, typed arrays and array
+// buffers by byte, maps and sets regardless of order, and weak maps, weak sets
+// and promises only when they are the same one. It needs no Node module, so the
+// runtime runs where only Web APIs exist.
+//
+// Not only schema-read values reach it: a fake table's rows are compared as
+// written, and with the value a handler asks, before any schema reads them, so
+// a URL there is a value of `{ href: string }`.
 //
 // Unlike Node, it compares Temporal values by what they hold: they keep it in
 // internal slots, no own key, so `isDeepStrictEqual` took every two dates as
-// equal and an example expecting the wrong date passed.
+// equal and an example expecting the wrong date passed. It also takes two
+// objects of different prototypes as different where Node, finding one
+// constructor, takes them as equal.
 export function deepEqual(left: unknown, right: unknown): boolean {
   return equal(left, right, { left: new Map(), right: new Map() });
 }
@@ -38,33 +46,79 @@ function equal(left: unknown, right: unknown, seen: Seen): boolean {
   }
 }
 
+// What a built-in's own method reads of a value, or `none` where the value lacks
+// the internal slot it reads: a built-in is told by that slot, as Node tells
+// it, not by its prototype, so one of another realm is read and an object that
+// only inherits a built-in's prototype (`Object.create(Date.prototype)`) is not
+// read as one. Its tag picks the method, so a plain object costs no throw.
+const none = Symbol("none");
+function slot(read: (this: unknown) => unknown, value: object): unknown {
+  try {
+    return read.call(value);
+  } catch {
+    return none;
+  }
+}
+const getter = (prototype: object, key: string) =>
+  Object.getOwnPropertyDescriptor(prototype, key)!.get as (this: unknown) => unknown;
+// Methods answering a primitive that must be equal, by tag.
+const readers: Readonly<Record<string, (this: unknown) => unknown>> = {
+  "[object Date]": Date.prototype.getTime,
+  "[object RegExp]": function (this: unknown) {
+    const source = getter(RegExp.prototype, "source").call(this);
+    const pattern = this as RegExp;
+    return `${pattern.lastIndex}/${pattern.flags}/${source as string}`;
+  },
+  "[object Number]": Number.prototype.valueOf,
+  "[object String]": String.prototype.valueOf,
+  "[object Boolean]": Boolean.prototype.valueOf,
+  "[object BigInt]": BigInt.prototype.valueOf,
+  "[object Symbol]": Symbol.prototype.valueOf,
+  ...(typeof URL === "undefined" ? {} : { "[object URL]": getter(URL.prototype, "href") }),
+};
+const weak: Readonly<Record<string, (this: unknown) => unknown>> = {
+  "[object WeakMap]": function (this: unknown) { return WeakMap.prototype.has.call(this as WeakMap<object, unknown>, {}); },
+  "[object WeakSet]": function (this: unknown) { return WeakSet.prototype.has.call(this as WeakSet<object>, {}); },
+};
+const buffers: Readonly<Record<string, (this: unknown) => unknown>> = {
+  "[object ArrayBuffer]": getter(ArrayBuffer.prototype, "byteLength"),
+  ...(typeof SharedArrayBuffer === "undefined" ? {} : { "[object SharedArrayBuffer]": getter(SharedArrayBuffer.prototype, "byteLength") }),
+};
+
 function contentsEqual(left: object, right: object, seen: Seen): boolean {
+  const tag = Object.prototype.toString.call(left);
   // Its string names the value with its calendar and time zone, as `equals` compares them.
-  if (Object.prototype.toString.call(left).startsWith("[object Temporal.") && String(left) !== String(right)) return false;
-  if (left instanceof Date && !Object.is(left.getTime(), (right as Date).getTime())) return false;
-  if (left instanceof RegExp) {
-    const other = right as RegExp;
-    if (left.source !== other.source || left.flags !== other.flags || left.lastIndex !== other.lastIndex) return false;
-  }
-  if (left instanceof Error) {
-    const other = right as Error;
-    if (left.message !== other.message || left.name !== other.name) return false;
-  }
-  for (const box of [Number, String, Boolean, BigInt, Symbol] as const) {
-    if (left instanceof box && !Object.is(left.valueOf(), (right as typeof left).valueOf())) return false;
+  const text = function (this: unknown) { return String(this); };
+  if (tag.startsWith("[object Temporal.") && slot(text, left) !== slot(text, right)) return false;
+  const read = readers[tag];
+  if (read !== undefined && !Object.is(slot(read, left), slot(read, right))) return false;
+  // What they hold cannot be read, so only the same one is equal.
+  if (tag === "[object Promise]" || (weak[tag] !== undefined && slot(weak[tag], left) !== none)) return false;
+  if (tag === "[object Error]") {
+    const [a, b] = [left as Error & { errors?: unknown }, right as Error & { errors?: unknown }];
+    if (a.message !== b.message || a.name !== b.name) return false;
+    for (const key of ["cause", "errors"] as const) {
+      if (Object.hasOwn(a, key) !== Object.hasOwn(b, key) || (Object.hasOwn(a, key) && !equal(a[key], b[key], seen))) return false;
+    }
   }
   if (ArrayBuffer.isView(left)) {
     const a = new Uint8Array(left.buffer, left.byteOffset, left.byteLength);
     const b = new Uint8Array((right as ArrayBufferView).buffer, (right as ArrayBufferView).byteOffset, (right as ArrayBufferView).byteLength);
     if (a.length !== b.length || a.some((byte, i) => byte !== b[i])) return false;
   }
-  if (left instanceof ArrayBuffer || (typeof SharedArrayBuffer !== "undefined" && left instanceof SharedArrayBuffer)) {
-    const a = new Uint8Array(left);
+  if (buffers[tag] !== undefined && slot(buffers[tag], left) !== none) {
+    const a = new Uint8Array(left as ArrayBufferLike);
     const b = new Uint8Array(right as ArrayBufferLike);
     if (a.length !== b.length || a.some((byte, i) => byte !== b[i])) return false;
   }
-  if (left instanceof Map && !mapsEqual(left, right as Map<unknown, unknown>, seen)) return false;
-  if (left instanceof Set && !setsEqual(left, right as Set<unknown>, seen)) return false;
+  if (tag === "[object Map]" || tag === "[object Set]") {
+    const size = getter(tag === "[object Map]" ? Map.prototype : Set.prototype, "size");
+    const [a, b] = [slot(size, left) !== none, slot(size, right) !== none];
+    if (a !== b) return false;
+    if (a && !(tag === "[object Map]"
+      ? mapsEqual(left as Map<unknown, unknown>, right as Map<unknown, unknown>, seen)
+      : setsEqual(left as Set<unknown>, right as Set<unknown>, seen))) return false;
+  }
   if (Array.isArray(left) && left.length !== (right as unknown[]).length) return false;
 
   const keys = ownEnumerableKeys(left);

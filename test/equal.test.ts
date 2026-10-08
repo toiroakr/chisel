@@ -1,8 +1,9 @@
 import { Decimal } from "decimal.js";
 import { isDeepStrictEqual } from "node:util";
+import { createContext, runInContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { deepEqual } from "../src/equal.js";
-import { behavior, date, examples, object, test, variants } from "../src/index.js";
+import { behavior, check, date, dependency, examples, fake, implement, int, object, spec, string, test, variants } from "../src/index.js";
 import { Rational } from "../src/exact.js";
 
 const cycle = () => {
@@ -31,6 +32,9 @@ const [k1, k2, x, y, z] = [{ a: 1 }, { a: 1 }, { a: 1 }, { a: 1 }, { a: 2 }];
 // Matching the sets tries `one` against `two` first and refuses it; the pair
 // compared again after the sets must still differ.
 const [one, two, otherTwo, otherOne] = [{ v: 1 }, { v: 2 }, { v: 2 }, { v: 1 }];
+// Values of another realm, as an iframe or a vm context makes them.
+const realm = createContext({});
+const foreign = (source: string): unknown => runInContext(source, realm);
 const pairs: [string, unknown, unknown][] = [
   ["equal numbers", 1, 1],
   ["NaN", Number.NaN, Number.NaN],
@@ -96,6 +100,30 @@ const pairs: [string, unknown, unknown][] = [
   ["cycles", cycle(), cycle()],
   ["cycles of different length", loop(1), loop(2)],
   ["a pair refused while matching a set", [new Set([one, two]), one], [new Set([otherTwo, otherOne]), otherTwo]],
+  ["urls", new URL("http://a/"), new URL("http://a")],
+  ["different urls", new URL("http://a/"), new URL("http://b/")],
+  ["errors of different causes", new Error("a", { cause: 1 }), new Error("a", { cause: 2 })],
+  ["errors of equal causes", new Error("a", { cause: { b: 1 } }), new Error("a", { cause: { b: 1 } })],
+  ["an error with a cause and one without", new Error("a", { cause: undefined }), new Error("a")],
+  ["aggregate errors of different errors", new AggregateError([1], "a"), new AggregateError([2], "a")],
+  ["weak maps", new WeakMap(), new WeakMap()],
+  ["weak sets", new WeakSet(), new WeakSet()],
+  ["promises", Promise.resolve(1), Promise.resolve(1)],
+  ["dates of another realm", foreign("new Date(0)"), foreign("new Date(1)")],
+  ["maps of another realm", foreign("new Map([[1, 1]])"), foreign("new Map([[1, 2]])")],
+  ["sets of another realm", foreign("new Set([1])"), foreign("new Set([2])")],
+  ["patterns of another realm", foreign("/a/"), foreign("/b/")],
+  ["errors of another realm", foreign("new Error('a')"), foreign("new Error('b')")],
+  ["boxed numbers of another realm", foreign("new Number(1)"), foreign("new Number(2)")],
+  ["array buffers of another realm", foreign("new Uint8Array([1]).buffer"), foreign("new Uint8Array([2]).buffer")],
+  ["objects inheriting a date's prototype", Object.create(Date.prototype), Object.create(Date.prototype)],
+  ["objects inheriting a map's prototype", Object.create(Map.prototype), Object.create(Map.prototype)],
+  ["a map and an object inheriting its prototype", new Map(), Object.create(Map.prototype)],
+  ["a date and an object inheriting its prototype", new Date(0), Object.create(Date.prototype)],
+  ["objects inheriting a set's prototype", Object.create(Set.prototype), Object.create(Set.prototype)],
+  ["objects inheriting a number's prototype", Object.create(Number.prototype), Object.create(Number.prototype)],
+  ["objects inheriting a pattern's prototype", Object.create(RegExp.prototype), Object.create(RegExp.prototype)],
+  ["objects inheriting an array buffer's prototype", Object.create(ArrayBuffer.prototype), Object.create(ArrayBuffer.prototype)],
   ["a pair refused while matching a map", [new Map([[one, 0], [two, 0]]), one], [new Map([[otherTwo, 0], [otherOne, 0]]), otherTwo]],
 ];
 
@@ -131,5 +159,29 @@ describe("deepEqual", () => {
     });
     const { failures } = await test(rows, async given => ({ result: { outcome: "ok" as const, due: given.at }, effects: [] }));
     expect(failures.map(failure => failure.name)).toStrictEqual(["wrong"]);
+  });
+
+  // A fake row is compared as written, before any schema reads it, and a URL
+  // is a value of `{ href: string }`: two of them must not stand for one.
+  it("answers a fake row keyed by a URL with its own answer", async () => {
+    const fetches = behavior("fetches", {
+      input: variants("kind", { asked: object({ to: string() }) }),
+      result: variants("outcome", { ok: object({ status: int() }) }),
+      effects: variants("type", {}),
+      requires: { fetch: dependency(object({ href: string() }), int()) },
+    });
+    const report = await check(spec("fetches", {
+      examples: examples(fetches, {
+        b: { given: { kind: "asked", to: "http://b/" }, expect: { result: { outcome: "ok", status: 2 }, effects: [] } },
+      }),
+      implementation: implement(fetches, {
+        cases: {
+          asked: { kind: "decision", id: "fetch", run: (given, deps) => ({ result: { outcome: "ok", status: deps.fetch(new URL(given.to)) }, effects: [] }) },
+        },
+        controls: {},
+      }),
+      fakes: [fake(fetches, "fetch", [[new URL("http://a/"), 1], [new URL("http://b/"), 2]])],
+    }));
+    expect([report.fakeIssues, report.failures]).toStrictEqual([[], []]);
   });
 });
