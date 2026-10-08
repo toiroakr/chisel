@@ -17,10 +17,13 @@ interface Interval {
   readonly scale?: number | undefined;
 }
 const zero = new Rational(0n);
-// A bound a rule compares with, as a number or as a place on the timeline.
-function boundOf(value: unknown): Rational | undefined {
-  const placed = timelineOf(value);
-  if (placed) return placed;
+// A bound a rule compares with, as a number or as a place on the timeline. A
+// date, date-time or instant is read only against a range of its own kind, and
+// a number only against a number: Temporal compares a date with a date-time by
+// the date alone, and an instant with nothing else.
+function boundOf(value: unknown, kind: string): Rational | undefined {
+  const temporal = temporalKindOf(value);
+  if (onTimeline(kind) || temporal) return temporal === kind ? timelineOf(value) : undefined;
   try { return fractionOf(value as number); } catch { return undefined; }
 }
 // Whether a date, time, date-time or instant meets its schema: a time of day
@@ -82,7 +85,7 @@ function satisfied(rule: Rule, range: Interval): boolean {
   if (rule.kind !== "compare" || !isTerm(rule.left)) return false;
   const position = positionData(rule.left);
   if (!position || position.path.length || position.measure !== "value" || isTerm(rule.right)) return false;
-  const bound = boundOf(rule.right);
+  const bound = boundOf(rule.right, range.kind);
   if (!bound) return false;
   const low = range.low.comparedTo(bound), high = range.high.comparedTo(bound);
   switch (rule.operator) {
@@ -125,7 +128,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
       if (item.rule.kind !== "compare" || !isTerm(item.rule.left) || isTerm(item.rule.right)) continue;
       const left = positionData(item.rule.left);
       if (!left || left.measure !== term.measure || !deepEqual([...item.prefix, ...left.path], term.path)) continue;
-      const bound = boundOf(item.rule.right);
+      const bound = boundOf(item.rule.right, timeline ? schema.kind : "number");
       if (!bound) continue;
       const operator = item.holds ? item.rule.operator : inverse[item.rule.operator];
       const next = integral && bound.denominator === 1n && (operator === "<" || operator === ">") ? bound.plus(new Rational(operator === "<" ? -1n : 1n)) : bound;
