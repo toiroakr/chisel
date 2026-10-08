@@ -292,7 +292,7 @@ export function interpret(template: unknown, scope: unknown, options: {
       return parsed.value;
     }
     if (node?.kind === "temporal") {
-      const left = read(node.left, current), right = read(node.right, current);
+      const left = yield* read(node.left, current), right = yield* read(node.right, current);
       return node.operator === "between" ? countBetween(left, right, node.unit) : moveTemporal(node.operator, left, right, node.unit, node.overflow);
     }
     if (node?.kind === "operation") {
