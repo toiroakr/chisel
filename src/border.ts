@@ -1,6 +1,6 @@
 import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { compareText } from "./text.js";
-import type { Operator, Rule, Term } from "./rule.js";
+import type { Measure, Operator, Rule, Term } from "./rule.js";
 import type { Decimal } from "decimal.js";
 import { decimalStep, describeRule, isDecimal, isTerm, termData, positionData } from "./rule.js";
 
@@ -18,7 +18,7 @@ export interface BorderPoint {
 
 export interface Border {
   readonly source: "invariant" | "guard" | "ensures";
-  readonly measure: "value" | "length";
+  readonly measure: Measure;
   readonly rule: string;
   readonly closed: boolean;
   readonly points: readonly BorderPoint[];
@@ -35,6 +35,10 @@ export interface Carrier {
   // admits. An equality with a value off the grid never reaches it: every place
   // a rule is written refuses one (holdsNoDecimal).
   readonly snap?: (bound: unknown, operator: Operator) => { readonly operator: Operator; readonly bound: unknown };
+  // Whether some value reads as this one. A transformed string reads only as
+  // what its transforms give back: no string uppercases to "abc", so a point
+  // placed exactly there has no value, and an equality with it never holds.
+  readonly produces?: (value: unknown) => boolean;
 }
 
 export const integerCarrier: Carrier = {
@@ -222,7 +226,8 @@ function withoutRefusedPoints(border: Border, others: readonly Drawn[]): Border 
 }
 
 export function emptiedBy(borders: readonly Border[]): readonly Border[] | undefined {
-  for (const measure of ["value", "length"] as const) {
+  // The value and its length first, as before transforms, then each transformed measure.
+  for (const measure of new Set<Measure>(["value", "length", ...borders.map(border => border.measure)])) {
     const invariants = borders.filter(
       border => border.source === "invariant" && border.measure === measure,
     );
@@ -395,7 +400,7 @@ function borderOf(
       rule: `${drawing.source} ${rule.name === undefined ? "" : `${rule.name}: `}${drawing.describe(rule)}`,
       closed,
       points: points.map((point, index) =>
-        reaching[index] === true ? noPointBelow(point.role, carrier) : point,
+        reaching[index] === true ? noPointBelow(point.role, carrier) : unread(point, carrier),
       ),
     },
     carrier,
@@ -455,7 +460,7 @@ function namedValueBorder(
     (edge !== undefined && floored.at(edge)) ||
     (edge === undefined && direction !== 0 && (direction === -1 ? floored.under(bound) : ceiled.over(bound)))
       ? noPointBelow(role, carrier)
-      : neighbour(role, edge, inside);
+      : unread(neighbour(role, edge, inside), carrier);
   const runOrNone = (role: PointRole, direction: 1 | -1, inside: boolean): BorderPoint =>
     direction === -1 ? (floored.under(below ?? bound) ? noPointBelow(role, carrier) : run(role, direction, inside))
       : ceiled.over(above ?? bound) ? noPointBelow(role, carrier) : run(role, direction, inside);
@@ -530,6 +535,18 @@ function noPointBelow(role: PointRole, carrier: Carrier): BorderPoint {
     status: "no point",
     contains: () => false,
   };
+}
+
+// A point placed exactly at a value nothing reads as has no row to stand at it.
+function unread(point: BorderPoint, carrier: Carrier): BorderPoint {
+  return point.region?.operator === "==" && carrier.produces?.(point.witness) === false
+    ? {
+        role: point.role,
+        relation: `none: no value reads as ${carrier.format(point.witness)}`,
+        status: "no point",
+        contains: () => false,
+      }
+    : point;
 }
 
 function inPoint(

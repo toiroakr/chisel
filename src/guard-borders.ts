@@ -12,7 +12,7 @@ import {
 } from "./border.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
-import { carrierOf, positionsOf } from "./partition.js";
+import { carrierOf, positionsOf, writeExactly } from "./partition.js";
 import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
 import {
   DEPS,
@@ -25,7 +25,6 @@ import {
   readOperand,
   selfTerm,
   shiftTerms,
-  sizeOf,
   stepInto,
   termData,
   termPaths,
@@ -36,6 +35,8 @@ import {
   withDeps,
   decimalOfUnits,
   decimalUnits,
+  counts,
+  measured,
 } from "./rule.js";
 import { enumOf, holdsNoDecimal, int, isVariantsSchema, object, offGridEquality, schemaAtPath } from "./schema.js";
 import type {
@@ -693,7 +694,10 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
     comparison: rule,
     border,
     coordinateOf: reached => readOperand(term, reached.scope),
-    compose: (given, coordinate) => at(positionSegments)?.write(given, measure, coordinate),
+    compose: (given, coordinate) => {
+      const position = at(positionSegments);
+      return position === undefined ? undefined : writeExactly(position, given, measure, coordinate);
+    },
   }));
 }
 
@@ -719,7 +723,7 @@ function betweenExpression(
       standsIn,
       path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
       segments: segmentsOf(frame, keys),
-      kind: part.measure === "length" ? "integer" : schema?.kind,
+      kind: counts(part.measure) ? "integer" : schema?.kind,
     };
   });
   const carrier = parts.every(part => part.kind === "integer")
@@ -794,20 +798,36 @@ function betweenExpression(
       if (moving === undefined || moved === undefined) {
         return undefined;
       }
+      const partValue = (part: (typeof parts)[number], scope: unknown): number | undefined => {
+        const value = part.standsIn
+          ? (readOperand(part.term, withDeps({}, deps)) as number | undefined)
+          : (at(part.segments)?.valuesIn(scope)[0] as number | undefined);
+        return value === undefined || part.standsIn || !counts(part.measure) ? value : (measured(value, part.measure) as number);
+      };
       let rest = constant;
       for (const part of parts) {
         if (part === moving) {
           continue;
         }
-        const value = part.standsIn
-          ? (readOperand(part.term, withDeps({}, deps)) as number | undefined)
-          : (at(part.segments)?.valuesIn(given)[0] as number | undefined);
+        const value = partValue(part, given);
         if (value === undefined) {
           return undefined;
         }
-        rest += part.coefficient * (part.measure === "length" && !part.standsIn ? sizeOf(value) : value);
+        rest += part.coefficient * value;
       }
-      return moved.write(given, moving.measure, ((coordinate as number) - rest) / moving.coefficient);
+      const written = moved.write(given, moving.measure, ((coordinate as number) - rest) / moving.coefficient);
+      // Moving a part that another reads too, as `length(trim($.code))` reads
+      // `$.code`, moves both, so the row is kept only where it stands at the point.
+      const shared = parts.some(
+        part => part !== moving && !part.standsIn && deepEqual(part.segments, moving.segments),
+      );
+      return !shared ||
+        parts.reduce<number | undefined>((total, part) => {
+          const value = partValue(part, written);
+          return total === undefined || value === undefined ? undefined : total + part.coefficient * value;
+        }, constant) === coordinate
+        ? written
+        : undefined;
     },
   }));
 }
@@ -831,7 +851,7 @@ function between(
       standsIn,
       path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
       segments: segmentsOf(frame, keys),
-      kind: measure === "length" ? "integer" : schema?.kind,
+      kind: counts(measure) ? "integer" : schema?.kind,
       scale: measure === "value" && schema?.kind === "decimal" ? (schema as DecimalSchema).scale : 0,
     };
   });
@@ -925,8 +945,15 @@ function between(
           : held.write(given, fixed.measure, counter);
       }
       const base =
-        fixed.measure === "length" && !fixed.standsIn ? sizeOf(other) : (other as number);
-      return moved.write(given, moving.measure, base + sign * (coordinate as number));
+        counts(fixed.measure) && !fixed.standsIn ? (measured(other, fixed.measure) as number) : (other as number);
+      const written = moved.write(given, moving.measure, base + sign * (coordinate as number));
+      // Moving one side of `length(trim($.code)) < length($.code)` moves the
+      // other too, so the row is kept only where it stands at the point.
+      if (fixed.standsIn || !deepEqual(fixed.segments, moving.segments)) {
+        return written;
+      }
+      const [a, b] = [first, second].map(side => measured(at(side.segments)?.valuesIn(written)[0], side.measure));
+      return typeof a === "number" && typeof b === "number" && a - b === coordinate ? written : undefined;
     },
   }));
 }
@@ -1055,7 +1082,7 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
       if (terms.some(term => positionData(term) === undefined)) {
         const kinds = differenceOf(rule).parts.map(part => {
           const { frame, keys } = locate(positionTerm(part.path, part.measure), frames);
-          return part.measure === "length" ? "integer" : schemaAt(frame.scope, keys)?.kind;
+          return counts(part.measure) ? "integer" : schemaAt(frame.scope, keys)?.kind;
         });
         return kinds.every(kind => kind === "integer" || kind === "number")
           ? []
@@ -1065,7 +1092,7 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
         const { frame, keys } = locate(term, frames);
         const schema = schemaAt(frame.scope, keys);
         // The length of an enum is not read: see carrierOf.
-        return positionOf(term).measure === "length" ? (schema?.kind === "enum" ? undefined : int()) : schema;
+        return counts(positionOf(term).measure) ? (schema?.kind === "enum" ? undefined : int()) : schema;
       });
       const sides = schemas.map(
         (schema): Side => ({

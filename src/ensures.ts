@@ -1,6 +1,6 @@
 import type { AnyBehavior, EnsuresClause } from "./behavior.js";
-import type { Rule, Term } from "./rule.js";
-import { conjuncts, describeRule, differenceOf, holds, isDecimal, isTerm, termData } from "./rule.js";
+import type { Measure, Rule, Term } from "./rule.js";
+import { conjuncts, describeRule, differenceOf, holds, isDecimal, isTerm, termData, counts } from "./rule.js";
 import type { AnySchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 
@@ -88,11 +88,11 @@ function kindOf(term: Term<unknown>, clause: EnsuresClause, definition: AnyBehav
 
 function kindAt(
   path: readonly string[],
-  measure: "value" | "length",
+  measure: Measure,
   clause: EnsuresClause,
   definition: AnyBehavior,
 ): string | undefined {
-  if (measure === "length") {
+  if (counts(measure)) {
     return "integer";
   }
   const [root, ...keys] = path;

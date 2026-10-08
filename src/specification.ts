@@ -55,7 +55,7 @@ import type { Beside } from "./beside.js";
 import type { Parting } from "./beside.js";
 import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
-import { coordinatesIn, excludedCases, positionsOf } from "./partition.js";
+import { coordinatesIn, excludedCases, positionsOf, writeExactly } from "./partition.js";
 import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
 import type { AnySchema, AnyVariantsSchema, Tags } from "./schema.js";
 
@@ -1057,9 +1057,14 @@ export function generate(
         );
         if (!standsAt) {
           const origin = originFor(position);
+          const given = writeExactly(position, origin, border.measure, point.witness);
+          if (given === undefined) {
+            notComposed.push(`${position.path} ${point.role} (${point.relation})`);
+            continue;
+          }
           offer({
             name: `${definition.name}: ${position.path} ${point.role} (${point.relation})`,
-            given: position.write(origin, border.measure, point.witness),
+            given,
             reason: `${position.path}の${point.role}点（${point.relation}）の期待結果を人間が決める必要があります`,
             ...withFrom(origin),
           }, origin);
@@ -1785,10 +1790,17 @@ function besideOf(
         rows[parting.from]!.given,
       );
       const deps = rows[parting.from]!.deps;
+      // Writing one part can move another that reads the same field, as
+      // `length($.code)` and `length(trim($.code))` both read $.code, so the
+      // row is kept only where it reaches the comparison at the parting itself.
       const reaches =
         given !== undefined &&
         definition.input.parse(given).success &&
-        comparisonsReached(implementation, given, deps).some(item => item.rule === drawn.comparison);
+        comparisonsReached(implementation, given, deps).some(
+          item =>
+            item.rule === drawn.comparison &&
+            parts.every((part, index) => part.valueOf(item.scope) === parting.values[index]),
+        );
       if (!reaches) {
         return [];
       }

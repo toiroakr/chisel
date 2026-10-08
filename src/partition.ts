@@ -1,3 +1,4 @@
+import { deepEqual } from "./equal.js";
 import { int64Carrier, rationalCarrier } from "./border.js";
 import type {
   AnySchema,
@@ -24,7 +25,8 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, conjuncts, holds, resize, sizeOf, stepInto } from "./rule.js";
+import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed, sizeOf, leftAsItReads } from "./rule.js";
+import { compareText } from "./text.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -65,7 +67,7 @@ export function coordinatesIn(
   return position
     .valuesIn(given)
     .filter(value => value !== undefined)
-    .map(value => (measure === "length" ? sizeOf(value) : value));
+    .map(value => measured(value, measure));
 }
 
 export interface UndividedPosition {
@@ -238,6 +240,10 @@ function positionAt(
         focus,
         value => (value === undefined ? "なし" : "あり"),
         className => (className === "なし" ? undefined : inner.placeholder(field)),
+        undefined,
+        // A guard reads the field, not what the optional holds, so its points
+        // are written here, kept to what the held string's invariants take.
+        keepingOf(inner, inherited, bordersOf(inner.invariants.flatMap(conjuncts), measure => carrierOf(inner, measure))),
       ),
       ...positionAt(
         inner,
@@ -353,6 +359,9 @@ function positionAt(
       ...underCases(schema, path, focus, reading, inherited),
     ];
   }
+  // What the field's own invariants keep, and the lengths their borders owe a
+  // row at, so a trimmed coordinate is written at a length they take.
+  const kept = keepingOf(schema, inherited, borders);
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
@@ -360,13 +369,13 @@ function positionAt(
       segments: path,
       borders,
       valuesIn: focus.reach,
-      write: writer(focus),
+      write: writer(focus, undefined, kept),
       instancesIn: given =>
         focus.instances(given).map(({ focus: located, trail }) => ({
           path: trail.join(""),
           segments: trail,
           valuesIn: located.reach,
-          write: writer(located),
+          write: writer(located, undefined, kept),
         })),
     },
   ];
@@ -403,18 +412,109 @@ function withOwnBorders(
   ];
 }
 
-function writer(focus: Focus, empty?: () => unknown): Position["write"] {
+interface Keeping {
+  readonly holds: (value: unknown) => boolean;
+  readonly lengths: readonly number[];
+}
+
+function keepingOf(schema: AnySchema, inherited: readonly Rule[], borders: readonly Border[]): Keeping | undefined {
+  return schema.kind === "string"
+    ? {
+        holds: value => schema.parse(value).success && inherited.every(rule => holds(rule, value)),
+        lengths: borders.flatMap(border =>
+          border.measure === "length"
+            ? border.points.flatMap(point => (typeof point.witness === "number" ? [point.witness] : []))
+            : [],
+        ),
+      }
+    : undefined;
+}
+
+function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["write"] {
   return (given, measure, coordinate) =>
-    focus.update(given, current =>
-      measure === "length" ? resize(current, coordinate as number, empty) : coordinate,
-    );
+    focus.update(given, current => {
+      const written = rewrite(current, measure, coordinate, empty);
+      // `trim` takes off the whitespace at the ends, so a string padded with it
+      // reads as the one written: where the field's own invariants refuse "" as
+      // the trimmed length 0, " " stands at it. The lengths tried are the one
+      // the string had and those its invariants owe a row at, shortest first.
+      if (
+        kept === undefined ||
+        typeof written !== "string" ||
+        !partsOfMeasure(measure).transforms.includes("trim") ||
+        kept.holds(written)
+      ) {
+        return written;
+      }
+      const read = measured(written, measure);
+      const size = sizeOf(written);
+      const lengths = [...new Set([...(typeof current === "string" ? [sizeOf(current)] : []), ...kept.lengths])]
+        .filter(length => length > size)
+        .sort((a, b) => a - b);
+      return (
+        lengths
+          .map(length => written + " ".repeat(length - size))
+          .find(padded => kept.holds(padded) && readsAs(measured(padded, measure), read)) ?? written
+      );
+    });
+}
+
+// A transformed string reads only as what its transforms give back, which they
+// then leave as it is: no string uppercases to "abc". It is stepped past a bound
+// as it reads: the value the string carrier steps to is transformed again, and
+// where that moves it back across the bound ("Ba" steps down to "B", which
+// lowercases to "b", above "Ba"), the empty string stands below the bound and a
+// string of the highest code point, one longer than the bound, above it; the
+// transforms leave both as they are.
+function transformedStringCarrier(transforms: ReturnType<typeof partsOfMeasure>["transforms"]): Carrier {
+  return {
+    ...stringCarrier,
+    produces: value => leftAsItReads(value, transforms),
+    past: (value, direction) => {
+      const moved = stringCarrier.past?.(value, direction);
+      const candidates = [
+        moved === undefined ? undefined : transformed(moved, transforms),
+        direction === -1 ? "" : "\u{10FFFF}".repeat([...(value as string)].length + 1),
+      ];
+      return candidates.find(
+        read => read !== undefined && Math.sign(stringCarrier.compare(read, value)) === direction,
+      );
+    },
+  };
+}
+
+// Whether a coordinate read reads as the one asked for: strings as text is compared.
+function readsAs(read: unknown, coordinate: unknown): boolean {
+  return typeof read === "string" && typeof coordinate === "string"
+    ? compareText(read, coordinate) === 0
+    : deepEqual(read, coordinate);
+}
+
+// Writes a coordinate at a position, or gives undefined where a transformed
+// measure cannot read back as it: no value lowercases to "ABC". A measure with
+// no transform is written as before.
+export function writeExactly(
+  position: Pick<Position, "write" | "valuesIn">,
+  given: unknown,
+  measure: Border["measure"],
+  coordinate: unknown,
+): unknown {
+  const written = position.write(given, measure, coordinate);
+  return partsOfMeasure(measure).transforms.length === 0 ||
+    position.valuesIn(written).some(value => value !== undefined && readsAs(measured(value, measure), coordinate))
+    ? written
+    : undefined;
 }
 
 export function carrierOf(schema: AnySchema, measure: Border["measure"]): Carrier | undefined {
   // An enum's lengths are those of its few values, not a range a row can step
   // through, so a rule on one draws no border.
-  if (measure === "length") {
+  if (counts(measure)) {
     return schema.kind === "enum" ? undefined : lengthCarrier;
+  }
+  const { transforms } = partsOfMeasure(measure);
+  if (transforms.length > 0) {
+    return schema.kind === "string" ? transformedStringCarrier(transforms) : undefined;
   }
   switch (schema.kind) {
     case "int64": return int64Carrier;
@@ -450,6 +550,7 @@ function divided(
     rules: [],
     sample: () => undefined,
   },
+  kept?: Keeping,
 ): DividedPosition {
   return {
     kind: "divided",
@@ -461,7 +562,7 @@ function divided(
     ),
     borders: [],
     valuesIn: focus.reach,
-    write: writer(focus),
+    write: writer(focus, undefined, kept),
     classify: given =>
       focus
         .reach(given)
@@ -473,7 +574,7 @@ function divided(
         path: trail.join(""),
           segments: trail,
         valuesIn: located.reach,
-        write: writer(located),
+        write: writer(located, undefined, kept),
         classify: inner =>
           located
             .reach(inner)

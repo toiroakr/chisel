@@ -3,8 +3,8 @@ import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
 import { inheritedAt } from "./guard-borders.js";
 import { carrierOf } from "./partition.js";
-import type { CompareRule, LinearTermData, Operator, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths } from "./rule.js";
+import type { CompareRule, LinearTermData, Measure, Operator, Rule, Term } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths, counts, partsOfMeasure, positionTerm } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
@@ -15,7 +15,6 @@ export type Feasibility =
   | { readonly kind: "infeasible"; readonly reason: string }
   | { readonly kind: "undecided"; readonly reason: string };
 
-type Measure = "value" | "length";
 
 interface Constraint {
   readonly operator: Operator;
@@ -203,9 +202,9 @@ export function feasibilityOf(
     }
     bucket.push({ identity, outcome: step.outcome });
     outcomes.set(key, bucket);
-    const placed = placedConstraintOf(step);
+    const placed = placedConstraintOf(step, scope);
     if (placed !== undefined) {
-      groups.get(groupFor(placed.path, placed.measure))!.constraints.push(placed.constraint);
+      groups.get(groupFor(placed.path, placed.measure))!.constraints.push(...placed.constraints);
       continue;
     }
     const { distinction, outcome } = step;
@@ -336,13 +335,14 @@ export function feasibilityOf(
     : { kind: "feasible" };
 }
 
-// The constraint a step puts on one coordinate: a match, or a comparison with a constant.
+// The constraints a step puts on one coordinate: a match, or a comparison with a constant.
 function placedConstraintOf(
   step: Step,
-): { readonly path: readonly string[]; readonly measure: Measure; readonly constraint: Constraint } | undefined {
+  scope: AnySchema,
+): { readonly path: readonly string[]; readonly measure: Measure; readonly constraints: readonly Constraint[] } | undefined {
   const { distinction, outcome } = step;
   if (distinction.kind === "match") {
-    return { path: positionOf(distinction.on).path, measure: "value", constraint: { operator: "==", bound: outcome } };
+    return { path: positionOf(distinction.on).path, measure: "value", constraints: [{ operator: "==", bound: outcome }] };
   }
   if (distinction.kind !== "compare") {
     return undefined;
@@ -351,15 +351,25 @@ function placedConstraintOf(
   if (normalized === undefined) {
     return undefined;
   }
-  const term = (isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>;
-  return {
-    path: positionOf(term).path,
-    measure: normalized.measure,
-    constraint: {
-      operator: outcome === true ? normalized.operator : negated[normalized.operator],
-      bound: normalized.bound,
-    },
+  const path = positionOf((isTerm(distinction.left) ? distinction.left : distinction.right) as Term<unknown>).path;
+  const constraint: Constraint = {
+    operator: outcome === true ? normalized.operator : negated[normalized.operator],
+    bound: normalized.bound,
   };
+  // A transformed read of a finite position, `lowercase($.level)` of an enum,
+  // is read off each of its values: the step refuses the values whose reading
+  // the constraint does not keep, so it is settled with the value's own steps.
+  const { transforms, reading } = partsOfMeasure(normalized.measure);
+  const domain = transforms.length > 0 && reading === "value" ? finiteDomainAt(scope, path) : undefined;
+  if (domain !== undefined) {
+    const kept: Rule = { kind: "compare", left: positionTerm([], normalized.measure), operator: constraint.operator, right: constraint.bound };
+    return {
+      path,
+      measure: "value",
+      constraints: domain.filter(value => !holds(kept, value)).map(value => ({ operator: "!=", bound: value })),
+    };
+  }
+  return { path, measure: normalized.measure, constraints: [constraint] };
 }
 
 function stepIdentity(step: Step): unknown {
@@ -455,7 +465,7 @@ function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | u
   }
   const form = differenceOf(rule);
   const kinds = form.parts.map(part =>
-    part.measure === "length" ? "integer" : schemaAtPath(scope, part.path)?.kind,
+    counts(part.measure) ? "integer" : schemaAtPath(scope, part.path)?.kind,
   );
   // A part that may be left out is not one: the comparison holds without it.
   return typeof form.constant === "number" &&
@@ -490,7 +500,7 @@ function relationOf(
 // the steps of a way do not carry.
 function differenceCarrierOf(sides: readonly Group[], scope: AnySchema): Carrier | undefined {
   const kinds = sides.map(side =>
-    side.measure === "length" ? "integer" : schemaAtPath(scope, side.path)?.kind,
+    counts(side.measure) ? "integer" : schemaAtPath(scope, side.path)?.kind,
   );
   if (kinds.every(kind => kind === "integer")) {
     return integerCarrier;
@@ -561,7 +571,34 @@ function finite(domain: readonly unknown[], constraints: readonly Constraint[]):
   );
 }
 
-function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval | false {
+// Strings lying between two bounds, nearest the lower first: the lower bound with
+// the lowest code point after it ("a" to "a!" holds "a\u0000"), and the bounds'
+// common prefix followed by each code point between theirs where they part ("Z"
+// to "a" holds "[" and "_"), so a range holding a transformed value is found.
+const BETWEEN_LIMIT = 256;
+function stringsBetween(lower: unknown, upper: unknown): string[] {
+  if (typeof lower !== "string" || typeof upper !== "string") {
+    return [];
+  }
+  const low = [...lower.normalize("NFC")];
+  const high = [...upper.normalize("NFC")];
+  let common = 0;
+  while (common < Math.min(low.length, high.length) && low[common] === high[common]) {
+    common += 1;
+  }
+  const prefix = low.slice(0, common).join("");
+  const from = common < low.length ? low[common]!.codePointAt(0)! + 1 : 0;
+  const to = common < high.length ? high[common]!.codePointAt(0)! : 0;
+  const parted: string[] = [];
+  for (let point = from; point < Math.min(to, from + BETWEEN_LIMIT); point += 1) {
+    if (point < 0xd800 || point > 0xdfff) {
+      parted.push(prefix + String.fromCodePoint(point));
+    }
+  }
+  return [`${lower}\u0000`, ...parted];
+}
+
+function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval | false | undefined {
   let lower: Edge | undefined =
     carrier.floor === undefined ? undefined : { value: carrier.floor.value, inclusive: true };
   let upper: Edge | undefined =
@@ -580,7 +617,9 @@ function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval
       unequal.push(bound);
     }
   }
+  // A value nothing reads as is never held: lowercase($) == "ABC" never holds.
   const within = (value: unknown) =>
+    carrier.produces?.(value) !== false &&
     above(value, lower, carrier) &&
     below(value, upper, carrier) &&
     unequal.every(refused => carrier.compare(value, refused) !== 0);
@@ -597,7 +636,23 @@ function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval
   const { step } = carrier;
   if (step === undefined) {
     const order = carrier.compare(lower.value, upper.value);
-    return order < 0 || (order === 0 && within(lower.value)) ? interval : false;
+    if (!(order < 0 || (order === 0 && within(lower.value)))) {
+      return false;
+    }
+    if (carrier.produces === undefined) {
+      return interval;
+    }
+    // A transformed string reads only as what its transforms give back, and a
+    // range may hold none of them (no lowercased string lies from "A" to "Z"):
+    // it is settled only where a value is found in it.
+    const found = [
+      lower.inclusive ? lower.value : undefined,
+      carrier.past?.(lower.value, 1),
+      upper.inclusive ? upper.value : undefined,
+      carrier.past?.(upper.value, -1),
+      ...stringsBetween(lower.value, upper.value),
+    ].some(value => value !== undefined && within(value));
+    return found ? interval : undefined;
   }
   let candidate = lower.inclusive ? lower.value : step(lower.value, 1);
   for (let tried = 0; tried <= unequal.length; tried += 1) {
@@ -712,16 +767,18 @@ export function witnessesOf(
     groups.get(key)!.constraints.push(constraint);
   };
   for (const step of way.steps) {
-    const placed = placedConstraintOf(step);
+    const placed = placedConstraintOf(step, scope);
     if (
       placed === undefined ||
       placed.measure !== "value" ||
-      (placed.constraint.operator !== "==" && placed.constraint.operator !== "!=") ||
+      placed.constraints.some(constraint => constraint.operator !== "==" && constraint.operator !== "!=") ||
       finiteDomainAt(scope, placed.path) === undefined
     ) {
       return undefined;
     }
-    constrain(placed.path, placed.constraint);
+    for (const constraint of placed.constraints) {
+      constrain(placed.path, constraint);
+    }
   }
   if (inputCase !== undefined && groups.has(JSON.stringify([inputCase.discriminant]))) {
     constrain([inputCase.discriminant], { operator: "==", bound: inputCase.tag });
@@ -759,8 +816,8 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
   return undefined;
 }
 
-// A rule over finite positions: each comparison reads one of them against a
-// constant with == or !=, combined with and/or/not. Its positions, or
+// A rule over finite positions: each comparison reads one of them, or what
+// its transforms make of it, against a constant with == or !=, combined with and/or/not. Its positions, or
 // undefined when any part of it reads something else.
 function finitePathsOf(
   rule: Rule,
@@ -776,13 +833,15 @@ function finitePathsOf(
         }
         const paths = sides.map(side => [...prefix, ...side!.path]);
         return (rule.operator === "==" || rule.operator === "!=") &&
-          sides.every(side => side!.measure === "value") &&
+          sides.every(side => !counts(side!.measure)) &&
           paths.every(path => finiteDomainAt(scope, path) !== undefined)
           ? paths
           : undefined;
       }
       const normalized = normalize(rule);
-      if (normalized === undefined || normalized.measure !== "value") {
+      // A transformed value, `lowercase($.level)`, is read off each value the
+      // combinations try, as the invariant is held with `holds`.
+      if (normalized === undefined || counts(normalized.measure)) {
         return undefined;
       }
       if (normalized.operator !== "==" && normalized.operator !== "!=") {
@@ -1196,7 +1255,10 @@ function decisionPaths(decision: RulesDecision<unknown, unknown, unknown>): read
             return false;
           }
           paths.push(data.path);
-          return data.measure === "value";
+          // A transformed value is read off each value of the domain as the guard
+          // reads it (`lowercase($.level)` of each case of an enum); a string
+          // has no domain, so its transformed read stays out of the plan.
+          return !counts(data.measure);
         });
       case "not":
         return collect(rule.rule);
