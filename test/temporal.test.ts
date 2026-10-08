@@ -233,6 +233,19 @@ describe("what the review found", () => {
     return { verify: () => c.verify(implementation).status, run: () => c.perform(implementation, given, { n: () => ({ n: 0 }) }) };
   };
 
+  it("leaves a bound of another type unproved, since Temporal compares it otherwise or not at all", async () => {
+    // PlainDate.compare reads only the date of a date-time: 2000-12-31 is not before 2000-12-31T12:00.
+    const before = proving(c.date().refine(v => v.$lt(datetime("2000-12-31T12:00") as never)), given => c.plus(given.at, 0, "days"));
+    expect(before.verify()).not.toBe("verified");
+    await expect(before.run()).rejects.toThrow(/Invariant violated/);
+    const count = proving(c.int().refine(v => v.$lte(date("2000-01-01") as never)), given => c.between(given.at, given.at, "days"));
+    expect(count.verify()).not.toBe("verified");
+    await expect(count.run()).rejects.toThrow(/Invariant violated/);
+    const late = proving(c.instant().refine(v => v.$gte(5 as never)), given => c.plus(given.i, 1, "hours"));
+    expect(late.verify()).not.toBe("verified");
+    await expect(late.run()).rejects.toThrow();
+  });
+
   it("leaves a unit named like an object's own property unproved rather than throw", async () => {
     const move = c.plus as (...args: unknown[]) => unknown;
     for (const [result, build] of [
