@@ -96,6 +96,32 @@ describe("a guard on a trimmed length", () => {
     expect(lengths).toContain(0);
     expect(lengths.some(length => length > 1)).toBe(true);
   });
+
+  it("stands at a trimmed length of 0 with whitespace where the reason may not be empty", () => {
+    const required = c.behavior("reject", {
+      input: c.variants("kind", { request: c.object({ reason: c.string().min(1) }) }),
+      result: c.variants("outcome", { rejected: c.object({}), reasonRequired: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const implementation = c.implement(required, {
+      cases: {
+        request: c.action("a reason must not be blank", {
+          guards: request => [
+            request.reason.$trim().$length().$gt(0).$else(() => ({ result: { outcome: "reasonRequired" as const }, effects: [] })),
+          ],
+          run: () => ({ result: { outcome: "rejected" as const }, effects: [] }),
+        }),
+      },
+    });
+    const rows = c.examples(required, {
+      "one letter": { given: { kind: "request", reason: "x" }, expect: { result: { outcome: "rejected" }, effects: [] } },
+    });
+    const generated = c.generate(rows, implementation);
+    expect(generated.notComposed).toStrictEqual([]);
+    expect(
+      generated.rows.filter(row => row.name.includes("OFF (= 0)")).map(row => row.given),
+    ).toStrictEqual([{ kind: "request", reason: " " }]);
+  });
 });
 
 // A code matched without regard to case or surrounding whitespace.

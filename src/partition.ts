@@ -25,7 +25,7 @@ import {
   stringCarrier,
 } from "./border.js";
 import type { Rule } from "./rule.js";
-import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed } from "./rule.js";
+import { boundTermPath, conjuncts, holds, stepInto, counts, measured, rewrite, partsOfMeasure, transformed, sizeOf } from "./rule.js";
 import { isVariantsSchema, tagOf } from "./schema.js";
 
 export type Position = DividedPosition | UndividedPosition;
@@ -354,6 +354,20 @@ function positionAt(
       ...underCases(schema, path, focus, reading, inherited),
     ];
   }
+  // What the field's own invariants keep, and the lengths their borders owe a
+  // row at, so a trimmed coordinate is written at a length they take.
+  const kept: Keeping | undefined =
+    schema.kind === "string"
+      ? {
+          holds: value =>
+            schema.parse(value).success && inherited.every(rule => holds(rule, value)),
+          lengths: borders.flatMap(border =>
+            border.measure === "length"
+              ? border.points.flatMap(point => (typeof point.witness === "number" ? [point.witness] : []))
+              : [],
+          ),
+        }
+      : undefined;
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
@@ -361,13 +375,13 @@ function positionAt(
       segments: path,
       borders,
       valuesIn: focus.reach,
-      write: writer(focus),
+      write: writer(focus, undefined, kept),
       instancesIn: given =>
         focus.instances(given).map(({ focus: located, trail }) => ({
           path: trail.join(""),
           segments: trail,
           valuesIn: located.reach,
-          write: writer(located),
+          write: writer(located, undefined, kept),
         })),
     },
   ];
@@ -404,9 +418,38 @@ function withOwnBorders(
   ];
 }
 
-function writer(focus: Focus, empty?: () => unknown): Position["write"] {
+interface Keeping {
+  readonly holds: (value: unknown) => boolean;
+  readonly lengths: readonly number[];
+}
+
+function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["write"] {
   return (given, measure, coordinate) =>
-    focus.update(given, current => rewrite(current, measure, coordinate, empty));
+    focus.update(given, current => {
+      const written = rewrite(current, measure, coordinate, empty);
+      // `trim` takes off the whitespace at the ends, so a string padded with it
+      // reads as the one written: where the field's own invariants refuse "" as
+      // the trimmed length 0, " " stands at it. The lengths tried are the one
+      // the string had and those its invariants owe a row at, shortest first.
+      if (
+        kept === undefined ||
+        typeof written !== "string" ||
+        !partsOfMeasure(measure).transforms.includes("trim") ||
+        kept.holds(written)
+      ) {
+        return written;
+      }
+      const read = measured(written, measure);
+      const size = sizeOf(written);
+      const lengths = [...new Set([...(typeof current === "string" ? [sizeOf(current)] : []), ...kept.lengths])]
+        .filter(length => length > size)
+        .sort((a, b) => a - b);
+      return (
+        lengths
+          .map(length => written + " ".repeat(length - size))
+          .find(padded => kept.holds(padded) && deepEqual(measured(padded, measure), read)) ?? written
+      );
+    });
 }
 
 // A transformed string reads only as what its transforms give back, which they
