@@ -575,6 +575,21 @@ describe("a bound no transformed value reads as", () => {
       ["gap", "met"],
     ]);
   });
+
+  it("reads a bound the transforms give back in another normal form as one they leave", async () => {
+    // "İ" lowercases to "i̇" and uppercases back to "I" with a combining dot,
+    // which reads as "İ" the way text is compared.
+    const capital = "İ";
+    const definition = coded(c.string().refine(value => value.$lowercase().$uppercase().$eq(capital)));
+    const implementation = c.implement(definition, { cases: { request: c.model("yes", () => yes) } });
+    const report = await c.check(c.spec("coded", { implementation, examples: c.examples(definition, {}) }));
+    expect(report.modelIssues).toStrictEqual([]);
+    const guard = guarded(code => code.$lowercase().$uppercase().$eq(capital));
+    const rows = c.examples(guard.definition, { other: { given: { kind: "request", code: "x" }, expect: no } });
+    const arms = (await c.check(c.spec("coded", { implementation: guard.implementation, examples: rows }))).measures.arms;
+    expect(arms.status === "complete" && arms.arms.map(arm => arm.status)).toStrictEqual(["gap", "met"]);
+    expect(c.generate(rows, guard.implementation).rows.map(row => row.given)).toContainEqual({ kind: "request", code: capital });
+  });
 });
 
 describe("a transformed comparison of an enum", () => {
