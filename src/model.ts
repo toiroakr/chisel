@@ -101,7 +101,10 @@ interface MoveOptions {
   readonly overflow?: Overflow;
 }
 function temporal<T>(operator: "plus" | "minus" | "between", left: unknown, right: unknown, unit: string, options: MoveOptions = {}): Expression<T> {
-  return expression({ kind: "temporal", operator, left, right, unit, overflow: options.overflow ?? "constrain" });
+  const overflow = options.overflow ?? "constrain";
+  // Refused here, as Temporal would refuse it on every run: the proof reads no overflow.
+  if (overflow !== "constrain" && overflow !== "reject") throw new Error(`${operator} takes an overflow of "constrain" or "reject", not ${String(overflow)}`);
+  return expression({ kind: "temporal", operator, left, right, unit, overflow });
 }
 // A date, time, date-time or instant moved later by a whole number of one unit.
 export function plus(value: Template<PlainDate>, amount: Template<number>, unit: CalendarUnit, options?: MoveOptions): Expression<PlainDate>;
