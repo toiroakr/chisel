@@ -554,6 +554,27 @@ describe("a bound no transformed value reads as", () => {
       "met",
     ]);
   });
+
+  it("settles a range between two bounds where a value lies only where they part", async () => {
+    // "_" lies between "Z" and "a" and lowercases to itself, as "a " lies
+    // between "a" and "a!", so the arm is a gap a row could fill.
+    const ranges: ((code: c.TermOf<string>) => c.Condition)[] = [
+      code => code.$lowercase().$gt("Z").$and(code.$lowercase().$lt("a")),
+      code => code.$lowercase().$gt("a").$and(code.$lowercase().$lt("a!")),
+    ];
+    const statuses = await Promise.all(
+      ranges.map(async range => {
+        const { definition, implementation } = guarded(range);
+        const rows = c.examples(definition, { tilde: { given: { kind: "request", code: "~" }, expect: no } });
+        const report = await c.check(c.spec("coded", { implementation, examples: rows }));
+        return report.measures.arms.status === "complete" && report.measures.arms.arms.map(arm => arm.status);
+      }),
+    );
+    expect(statuses).toStrictEqual([
+      ["gap", "met"],
+      ["gap", "met"],
+    ]);
+  });
 });
 
 describe("a transformed comparison of an enum", () => {

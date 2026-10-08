@@ -571,6 +571,33 @@ function finite(domain: readonly unknown[], constraints: readonly Constraint[]):
   );
 }
 
+// Strings lying between two bounds, nearest the lower first: the lower bound with
+// the lowest code point after it ("a" to "a!" holds "a\u0000"), and the bounds'
+// common prefix followed by each code point between theirs where they part ("Z"
+// to "a" holds "[" and "_"), so a range holding a transformed value is found.
+const BETWEEN_LIMIT = 256;
+function stringsBetween(lower: unknown, upper: unknown): string[] {
+  if (typeof lower !== "string" || typeof upper !== "string") {
+    return [];
+  }
+  const low = [...lower.normalize("NFC")];
+  const high = [...upper.normalize("NFC")];
+  let common = 0;
+  while (common < Math.min(low.length, high.length) && low[common] === high[common]) {
+    common += 1;
+  }
+  const prefix = low.slice(0, common).join("");
+  const from = common < low.length ? low[common]!.codePointAt(0)! + 1 : 0;
+  const to = common < high.length ? high[common]!.codePointAt(0)! : 0;
+  const parted: string[] = [];
+  for (let point = from; point < Math.min(to, from + BETWEEN_LIMIT); point += 1) {
+    if (point < 0xd800 || point > 0xdfff) {
+      parted.push(prefix + String.fromCodePoint(point));
+    }
+  }
+  return [`${lower}\u0000`, ...parted];
+}
+
 function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval | false | undefined {
   let lower: Edge | undefined =
     carrier.floor === undefined ? undefined : { value: carrier.floor.value, inclusive: true };
@@ -623,6 +650,7 @@ function ordered(constraints: readonly Constraint[], carrier: Carrier): Interval
       carrier.past?.(lower.value, 1),
       upper.inclusive ? upper.value : undefined,
       carrier.past?.(upper.value, -1),
+      ...stringsBetween(lower.value, upper.value),
     ].some(value => value !== undefined && within(value));
     return found ? interval : undefined;
   }
