@@ -21,17 +21,17 @@ const UNITS: Readonly<Record<TemporalKind, readonly TemporalUnit[]>> = {
   datetime: ["years", "months", "weeks", "days", "hours", "minutes", "seconds", "milliseconds"],
   instant: ["hours", "minutes", "seconds", "milliseconds"],
 };
-const TAGS: Readonly<Record<string, TemporalKind>> = {
-  "Temporal.PlainDate": "date",
-  "Temporal.PlainTime": "time",
-  "Temporal.PlainDateTime": "datetime",
-  "Temporal.Instant": "instant",
-};
+const TYPES = [["PlainDate", "date"], ["PlainTime", "time"], ["PlainDateTime", "datetime"], ["Instant", "instant"]] as const;
+const temporalGlobal = () => (globalThis as unknown as { Temporal?: typeof TemporalTypes }).Temporal;
 
 type Value = TemporalTypes.PlainDate | TemporalTypes.PlainTime | TemporalTypes.PlainDateTime | TemporalTypes.Instant;
 
+// A value of one of Temporal's own types, as the schemas take it: an object that
+// only calls itself one through Symbol.toStringTag is none.
 export function temporalKindOf(value: unknown): TemporalKind | undefined {
-  return typeof value === "object" && value !== null ? TAGS[Object.prototype.toString.call(value).slice(8, -1)] : undefined;
+  const temporal = temporalGlobal();
+  if (!temporal || typeof value !== "object" || value === null) return undefined;
+  return TYPES.find(([type]) => value instanceof temporal[type])?.[1];
 }
 
 export const takesUnit = (kind: TemporalKind, unit: string): boolean => (UNITS[kind] as readonly string[]).includes(unit);
@@ -102,15 +102,21 @@ export const TIMELINE_RANGE: Readonly<Record<"date" | "datetime" | "instant", { 
 // Temporal refuses a duration of 2^53 seconds or more, whatever it is added to.
 export const DURATION_LIMIT = new Rational(2n ** 53n * 1_000_000_000n);
 export function timelineOf(value: unknown): Rational | undefined {
-  const kind = temporalKindOf(value);
-  if (kind === "instant") return new Rational((value as TemporalTypes.Instant).epochNanoseconds);
-  // A date or a date-time is counted from its own fields, not through an
-  // instant in UTC, which Temporal refuses for the ones beyond the instants.
-  if (kind === "datetime") {
-    const at = value as TemporalTypes.PlainDateTime;
-    return new Rational(epochDays(at.toPlainDate()) * DAY + nanosecondOfDay(at.toPlainTime()));
+  const kind = temporalKindOf(value), temporal = temporalGlobal()!;
+  // Read from a copy of what the value holds, as compare reads it, rather than
+  // through methods a subclass may override.
+  try {
+    if (kind === "instant") return new Rational(temporal.Instant.from(value as TemporalTypes.Instant).epochNanoseconds);
+    // A date or a date-time is counted from its own fields, not through an
+    // instant in UTC, which Temporal refuses for the ones beyond the instants.
+    if (kind === "datetime") {
+      const at = temporal.PlainDateTime.from(value as TemporalTypes.PlainDateTime);
+      return new Rational(epochDays(at.toPlainDate()) * DAY + nanosecondOfDay(at.toPlainTime()));
+    }
+    if (kind === "date") return new Rational(epochDays(temporal.PlainDate.from(value as TemporalTypes.PlainDate)) * DAY);
+  } catch {
+    // An object of the type's prototype that holds no value is placed nowhere.
   }
-  if (kind === "date") return new Rational(epochDays(value as TemporalTypes.PlainDate) * DAY);
   return undefined;
 }
 function epochDays(date: TemporalTypes.PlainDate): bigint {

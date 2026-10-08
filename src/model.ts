@@ -9,7 +9,7 @@ import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
-import { countBetween, moveTemporal } from "./temporal.js";
+import { countBetween, moveTemporal, temporalKindOf } from "./temporal.js";
 
 const EXPRESSION = Symbol.for("chisel.expression");
 export interface Expression<T> {
@@ -215,6 +215,8 @@ function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaini
       if (!value.isWellFormed()) throw new Error("Model text must be well-formed Unicode");
       return value.normalize("NFC");
     }
+    // A copy of what a Temporal value holds, as inputs are copied: a subclass may override add or until.
+    if (temporalKindOf(value)) return snapshotValue(value);
     if (value && typeof value === "object" && !isDecimal(value) && !isRational(value) && !String(value.constructor?.name).startsWith("Plain") && value.constructor?.name !== "Instant") throw new Error("Unsupported model constant");
     return value;
   }

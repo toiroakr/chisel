@@ -278,4 +278,27 @@ describe("what the review found", () => {
     expect(c.verify(implementation).status).not.toBe("verified");
     await expect(c.perform(implementation, { kind: "given" }, { n: () => ({ n: 0 }) })).rejects.toThrow();
   });
+
+  it("moves a Temporal constant as Temporal does, not by a method a subclass overrides", async () => {
+    // A subclass is a Temporal.PlainDate to the schema, but its add answers what it likes.
+    class PlainShifty extends Temporal.PlainDate { override add() { return Temporal.PlainDate.from("1900-01-01"); } }
+    const moved = proving(c.date().min(date("2000-01-01")), () => c.plus(new PlainShifty(2000, 1, 1) as never, 1, "days"));
+    expect(moved.verify()).toBe("verified");
+    expect(String(((await moved.run()).result as { value: unknown }).value)).toBe("2000-01-02");
+  });
+
+  it("reads no constant that only calls itself a Temporal value", async () => {
+    class PlainLookalike { get [Symbol.toStringTag]() { return "Temporal.Instant"; } readonly epochNanoseconds = 0n; add() { return "not an instant"; } }
+    const moved = proving(c.instant(), () => c.plus(new PlainLookalike() as never, 1, "hours"));
+    expect(moved.verify()).not.toBe("verified");
+    await expect(moved.run()).rejects.toThrow();
+  });
+
+  it("reads a bound by the date it holds, not by a method a subclass overrides", async () => {
+    // The schema compares by the date held, 2000-01-01; withCalendar claims 2100-01-01.
+    class Distant extends Temporal.PlainDate { override withCalendar() { return Temporal.PlainDate.from("2100-01-01"); } }
+    const late = proving(c.date().max(new Distant(2000, 1, 1) as never), given => c.plus(given.at, 0, "days"));
+    expect(late.verify()).not.toBe("verified");
+    await expect(late.run()).rejects.toThrow(/Invariant violated/);
+  });
 });
