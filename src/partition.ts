@@ -239,6 +239,10 @@ function positionAt(
         focus,
         value => (value === undefined ? "なし" : "あり"),
         className => (className === "なし" ? undefined : inner.placeholder(field)),
+        undefined,
+        // A guard reads the field, not what the optional holds, so its points
+        // are written here, kept to what the held string's invariants take.
+        keepingOf(inner, inherited, bordersOf(inner.invariants.flatMap(conjuncts), measure => carrierOf(inner, measure))),
       ),
       ...positionAt(
         inner,
@@ -356,18 +360,7 @@ function positionAt(
   }
   // What the field's own invariants keep, and the lengths their borders owe a
   // row at, so a trimmed coordinate is written at a length they take.
-  const kept: Keeping | undefined =
-    schema.kind === "string"
-      ? {
-          holds: value =>
-            schema.parse(value).success && inherited.every(rule => holds(rule, value)),
-          lengths: borders.flatMap(border =>
-            border.measure === "length"
-              ? border.points.flatMap(point => (typeof point.witness === "number" ? [point.witness] : []))
-              : [],
-          ),
-        }
-      : undefined;
+  const kept = keepingOf(schema, inherited, borders);
   return [
     {
       kind: borders.length === 0 ? "not-derivable" : "bounded",
@@ -421,6 +414,19 @@ function withOwnBorders(
 interface Keeping {
   readonly holds: (value: unknown) => boolean;
   readonly lengths: readonly number[];
+}
+
+function keepingOf(schema: AnySchema, inherited: readonly Rule[], borders: readonly Border[]): Keeping | undefined {
+  return schema.kind === "string"
+    ? {
+        holds: value => schema.parse(value).success && inherited.every(rule => holds(rule, value)),
+        lengths: borders.flatMap(border =>
+          border.measure === "length"
+            ? border.points.flatMap(point => (typeof point.witness === "number" ? [point.witness] : []))
+            : [],
+        ),
+      }
+    : undefined;
 }
 
 function writer(focus: Focus, empty?: () => unknown, kept?: Keeping): Position["write"] {
@@ -536,6 +542,7 @@ function divided(
     rules: [],
     sample: () => undefined,
   },
+  kept?: Keeping,
 ): DividedPosition {
   return {
     kind: "divided",
@@ -547,7 +554,7 @@ function divided(
     ),
     borders: [],
     valuesIn: focus.reach,
-    write: writer(focus),
+    write: writer(focus, undefined, kept),
     classify: given =>
       focus
         .reach(given)
@@ -559,7 +566,7 @@ function divided(
         path: trail.join(""),
           segments: trail,
         valuesIn: located.reach,
-        write: writer(located),
+        write: writer(located, undefined, kept),
         classify: inner =>
           located
             .reach(inner)

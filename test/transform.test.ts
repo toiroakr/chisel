@@ -124,6 +124,35 @@ describe("a guard on a trimmed length", () => {
       generated.rows.filter(row => row.name.includes("OFF (= 0)")).map(row => row.given),
     ).toStrictEqual([{ kind: "request", reason: " " }]);
   });
+
+  it("stands at a trimmed length with whitespace where the reason may be left out", () => {
+    const optional = c.behavior("reject", {
+      input: c.variants("kind", { request: c.object({ reason: c.string().min(2).optional() }) }),
+      result: c.variants("outcome", { rejected: c.object({}), reasonRequired: c.object({}) }),
+      effects: c.variants("type", {}),
+    });
+    const implementation = c.implement(optional, {
+      cases: {
+        request: c.action("a reason must not be blank", {
+          guards: request => [
+            request.reason.$trim().$length().$gt(0).$else(() => ({ result: { outcome: "reasonRequired" as const }, effects: [] })),
+          ],
+          run: () => ({ result: { outcome: "rejected" as const }, effects: [] }),
+        }),
+      },
+    });
+    const rows = c.examples(optional, {
+      "three letters": { given: { kind: "request", reason: "abc" }, expect: { result: { outcome: "rejected" }, effects: [] } },
+    });
+    const generated = c.generate(rows, implementation);
+    expect(generated.notComposed).toStrictEqual([]);
+    expect(
+      generated.rows.filter(row => /ON \(= 1\)|OFF \(= 0\)/.test(row.name)).map(row => [row.name, row.given]),
+    ).toStrictEqual([
+      ["reject: @request.reason ON (= 1)", { kind: "request", reason: "a " }],
+      ["reject: @request.reason OFF (= 0)", { kind: "request", reason: "  " }],
+    ]);
+  });
 });
 
 // A code matched without regard to case or surrounding whitespace.
