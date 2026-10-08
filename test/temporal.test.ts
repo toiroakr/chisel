@@ -161,3 +161,25 @@ describe("proofs", () => {
     expect(await roomy.run({ from: date("-271821-04-19"), to: date("-271821-04-26") })).toBe(1);
   });
 });
+
+describe("a move by an amount a dependency answers", () => {
+  it("awaits the amount when the dependency answers a promise", async () => {
+    const due = c.behavior("due", {
+      input: c.variants("kind", { given: c.object({ at: c.date() }) }),
+      result: c.variants("outcome", { ok: c.object({ due: c.date() }) }),
+      effects: c.variants("type", {}),
+      requires: { lead: c.dependency(c.object({}), c.object({ days: c.int().min(0).max(30) })) },
+    });
+    const implementation = c.implement(due, {
+      cases: {
+        given: c.model("due", (given, deps) =>
+          c.bind(c.object({ days: c.int().min(0).max(30) }), c.call(deps.lead, {}), lead =>
+            ({ result: { outcome: "ok" as const, due: c.plus(given.at, lead.days, "days") as never }, effects: [] }))),
+      },
+    });
+    const execution = await c.perform(implementation, { kind: "given", at: date("2020-01-30") }, {
+      lead: async () => ({ days: 3 }),
+    });
+    expect(execution).toStrictEqual({ result: { outcome: "ok", due: date("2020-02-02") }, effects: [] });
+  });
+});
