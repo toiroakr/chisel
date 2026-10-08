@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
+import type { CompareRule } from "../src/rule.js";
 import { describeRule, holds, satisfy, selfTerm } from "../src/rule.js";
+import { witnessesOf } from "../src/feasibility.js";
 
 describe("transforms", () => {
   const text = selfTerm<string>();
@@ -489,5 +491,69 @@ describe("a bound no transformed value reads as", () => {
     ]);
     const below = c.generate(rows, implementation).rows.filter(row => row.name.includes('IN (< "Ba")'));
     expect(below.map(row => (row.given as { code: string }).code.toLowerCase() < "Ba")).toStrictEqual([true]);
+  });
+});
+
+describe("a transformed comparison of an enum", () => {
+  // No value of the enum lowercases to "high" and equals "Low".
+  const levelled = c.behavior("levelled", {
+    input: c.variants("kind", { request: c.object({ name: c.string(), level: c.enum(["Low", "High"]) }) }),
+    result: c.variants("outcome", { low: c.object({}), high: c.object({}), named: c.object({}), unnamed: c.object({}) }),
+    effects: c.variants("type", {}),
+  });
+  const answer = (outcome: "low" | "high" | "named" | "unnamed") => () => ({ result: { outcome }, effects: [] });
+  const rows = c.examples(levelled, {
+    low: { given: { kind: "request", name: "x", level: "Low" }, expect: answer("low")() },
+    high: { given: { kind: "request", name: "x", level: "High" }, expect: answer("high")() },
+  });
+  const statuses = (report: c.AdequacyReport) =>
+    report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : [];
+
+  it("is read off each of its values, so a way no value takes owes no row", async () => {
+    const implementation = c.implement(levelled, {
+      cases: {
+        request: c.action("by level", {
+          guards: request => [
+            request.level.$lowercase().$eq("high").$else(answer("low")),
+            request.level.$eq("Low").$else(answer("high")),
+          ],
+          run: answer("named"),
+        }),
+      },
+    });
+    const report = await c.check(c.spec("levelled", { implementation, examples: rows }));
+    expect(statuses(report)).toStrictEqual(["met", "met"]);
+    expect(report.measures.arms.status === "complete" && report.measures.arms.arms.map(arm => arm.status)).toStrictEqual([
+      "met",
+      "met",
+      "no row owed",
+      "met",
+    ]);
+    expect(c.generate(rows, implementation, { ways: true }).notComposed).toStrictEqual([]);
+  });
+
+  it("is settled with the value's own comparison where a guard reads something else too", async () => {
+    // The length of a string is no finite value, so the ways are not read off combinations.
+    const implementation = c.implement(levelled, {
+      cases: {
+        request: c.action("by level", {
+          guards: request => [
+            request.level.$lowercase().$eq("high").$else(answer("low")),
+            request.level.$eq("Low").$else(answer("high")),
+            request.name.$length().$gt(0).$else(answer("unnamed")),
+          ],
+          run: answer("named"),
+        }),
+      },
+    });
+    const report = await c.check(c.spec("levelled", { implementation, examples: rows }));
+    expect(statuses(report)).toStrictEqual(["no row owed", "no row owed", "met", "met"]);
+  });
+
+  it("is placed as the values the transforms read as the way asks", () => {
+    const request = selfTerm<{ level: "Low" | "High" | "Mid" }>();
+    const scope = c.object({ level: c.enum(["Low", "High", "Mid"]) });
+    const witnesses = witnessesOf({ steps: [{ distinction: request.level.$uppercase().$ne("HIGH") as CompareRule, outcome: true }] }, scope);
+    expect([...witnesses!]).toStrictEqual([[{ path: ["level"], value: "Low" }], [{ path: ["level"], value: "Mid" }]]);
   });
 });
