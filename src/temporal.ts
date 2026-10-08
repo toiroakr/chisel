@@ -84,7 +84,8 @@ const NANOSECONDS: Readonly<Partial<Record<TemporalUnit, bigint>>> = {
   weeks: 7n * DAY,
 };
 export const fixedLength = (unit: string): Rational | undefined => {
-  const length = NANOSECONDS[unit as TemporalUnit];
+  // Own units only: a unit an untyped caller names like "constructor" is no unit.
+  const length = Object.hasOwn(NANOSECONDS, unit) ? NANOSECONDS[unit as TemporalUnit] : undefined;
   return length === undefined ? undefined : new Rational(length);
 };
 export const onTimeline = (kind: string): kind is "date" | "datetime" | "instant" =>
