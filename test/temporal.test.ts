@@ -211,4 +211,23 @@ describe("what the review found", () => {
     });
     expect(c.verify(shifting).status).not.toBe("verified");
   });
+
+  it("leaves a time of day unproved when an optional around it may leave it out", async () => {
+    // A call keeps the counterexample search out, so the proof alone decides.
+    const lateness = c.behavior("lateness", {
+      input: c.variants("kind", { given: c.object({ slot: c.object({ at: c.time() }).optional() }) }),
+      result: c.variants("outcome", { ok: c.object({ at: c.time(), moved: c.time(), n: c.int().min(0).max(1) }) }),
+      effects: c.variants("type", {}),
+      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+    });
+    const implementation = c.implement(lateness, {
+      cases: {
+        given: c.model("lateness", (given, deps) =>
+          c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), got =>
+            ({ result: { outcome: "ok" as const, at: given.slot.at, moved: c.plus(given.slot.at, 1, "hours"), n: got.n }, effects: [] }) as never)),
+      },
+    });
+    expect(c.verify(implementation).status).not.toBe("verified");
+    await expect(c.perform(implementation, { kind: "given" }, { n: () => ({ n: 0 }) })).rejects.toThrow();
+  });
 });
