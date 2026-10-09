@@ -121,3 +121,8 @@ function nanosecondOfDay(time: TemporalTypes.PlainTime): bigint {
   return ((((BigInt(time.hour) * 60n + BigInt(time.minute)) * 60n + BigInt(time.second)) * 1000n + BigInt(time.millisecond)) * 1000n + BigInt(time.microsecond)) * 1000n + BigInt(time.nanosecond);
 }
 export type { Value as TemporalValue };
+
+export function temporalNeighbor(value: unknown, duration: object): unknown {
+  try { return (value as { add(duration: object): unknown }).add(duration); }
+  catch (error) { if (error instanceof RangeError) return undefined; throw error; }
+}

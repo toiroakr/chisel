@@ -1,3 +1,4 @@
+import { temporalNeighbor, timelineOf } from "./temporal.js";
 import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
@@ -985,7 +986,6 @@ interface Temporalish {
   add(duration: object): Temporalish;
   until(other: unknown, options: object): { total(unit: string): number };
   readonly epochNanoseconds?: bigint;
-  toZonedDateTime?(timeZone: string): { readonly epochNanoseconds: bigint };
   withCalendar?(calendar: string): Temporalish;
   readonly constructor: { compare(left: unknown, right: unknown): number; from(text: string): Temporalish };
 }
@@ -993,7 +993,7 @@ interface Temporalish {
 const MOMENTS: Readonly<Record<string, Moment>> = {
   instant: {
     read: value => (value as Temporalish).epochNanoseconds!,
-    shift: (value, amount) => (value as Temporalish).add({ nanoseconds: amount }),
+    shift: (value, amount) => temporalNeighbor(value, { nanoseconds: amount }),
   },
   date: {
     // Counted in the ISO calendar, since until refuses two dates in different
@@ -1003,13 +1003,12 @@ const MOMENTS: Readonly<Record<string, Moment>> = {
         .from("1970-01-01")
         .until((value as Temporalish).withCalendar!("iso8601"), { largestUnit: "days" })
         .total("days"),
-    shift: (value, amount) => (value as Temporalish).add({ days: amount }),
+    shift: (value, amount) => temporalNeighbor(value, { days: amount }),
   },
   datetime: {
-    // Read through UTC as an exact bigint: a total in nanoseconds since 1970 is
-    // past what a number holds exactly, and would round a one-nanosecond gap away.
-    read: value => (value as Temporalish).toZonedDateTime!("UTC").epochNanoseconds,
-    shift: (value, amount) => (value as Temporalish).add({ nanoseconds: amount }),
+    // A date-time can lie beyond the instant range, so it is not read through a UTC instant.
+    read: value => timelineOf(value)!.numerator,
+    shift: (value, amount) => temporalNeighbor(value, { nanoseconds: amount }),
   },
   time: {
     read: value =>
