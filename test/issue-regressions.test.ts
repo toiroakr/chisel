@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 
@@ -89,4 +90,17 @@ describe("issue regressions", () => {
         ({ result: { outcome: "ok" as const, v: c.arithmetic("add", given.x, 1) }, effects: [] }))) } });
     expect(c.verify(implementation).status).toBe("undetermined");
   });
+});
+
+it.each([new Decimal(1), 1, "1", 1n])("proves a decimal against its accepted bound %s", bound => {
+  const definition = c.behavior("decimal bound", {
+    input: c.variants("kind", { go: c.object({ amount: c.decimal(0).min(new Decimal(1)).max(new Decimal(3)) }) }),
+    result: c.decimal(0).min(bound as never),
+    effects: c.variants("type", {}),
+    requires: { n: c.dependency(c.int(), c.int()) },
+  });
+  const implementation = c.implement(definition, { cases: { go: c.model("decimal bound", (given, deps) =>
+    c.bind<number, c.Execution<Decimal, never>>(c.int(), c.call(deps.n, 0), () =>
+      ({ result: c.arithmetic("add", given.amount, new Decimal(0)), effects: [] }))) } });
+  expect(c.verify(implementation).status).toBe("verified");
 });

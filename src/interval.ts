@@ -27,7 +27,7 @@ function boundOf(value: unknown, kind: string): Rational | undefined {
   if (kind === "number" && typeof value !== "number") return undefined;
   if (kind === "bigint" && typeof value !== "bigint") return undefined;
   if (kind === "rational" && !isRational(value)) return undefined;
-  if (kind === "decimal" && !isDecimal(value) && typeof value !== "number" && typeof value !== "string") return undefined;
+  if (kind === "decimal" && !isDecimal(value) && typeof value !== "number" && typeof value !== "string" && typeof value !== "bigint") return undefined;
   try { return fractionOf(value as number); } catch { return undefined; }
 }
 // Whether a date, time, date-time or instant meets its schema: a time of day
