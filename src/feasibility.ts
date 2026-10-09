@@ -1,3 +1,4 @@
+import { compatibleBound } from "./interval.js";
 import { deepEqual } from "./equal.js";
 import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
@@ -538,7 +539,9 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
         ? []
         : [{ operator: normalized.operator, bound: normalized.bound }];
     });
-  return ordered([...group.constraints, ...invariants], carrier);
+  const constraints = [...group.constraints, ...invariants];
+  if (constraints.some(item => !compatibleBound(item.bound, counts(measure) ? "number" : schema.kind))) return undefined;
+  return ordered(constraints, carrier);
 }
 
 // The values of a finite domain the position's own invariants keep, the way its

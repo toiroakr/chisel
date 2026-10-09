@@ -1,4 +1,5 @@
-import { Rational, fractionOf, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Decimal } from "decimal.js";
+import { Rational, fractionOf, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { nodeOf } from "./model.js";
 import type { Rule, Operator } from "./rule.js";
 import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData, counts } from "./rule.js";
@@ -22,9 +23,22 @@ const zero = new Rational(0n);
 // a number only against a number: Temporal compares a date with a date-time by
 // the date alone, and an instant with nothing else.
 function boundOf(value: unknown, kind: string): Rational | undefined {
+  if (!compatibleBound(value, kind)) return undefined;
   const temporal = temporalKindOf(value);
   if (onTimeline(kind) || temporal) return temporal === kind ? timelineOf(value) : undefined;
   try { return fractionOf(value as number); } catch { return undefined; }
+}
+
+export function compatibleBound(value: unknown, kind: string): boolean {
+  if (onTimeline(kind)) return temporalKindOf(value) === kind;
+  if (kind === "number" || kind === "integer") return typeof value === "number" && Number.isFinite(value);
+  if (kind === "bigint" || kind === "int64") return typeof value === "bigint";
+  if (kind === "rational") return isRational(value);
+  if (kind === "decimal") {
+    if (!isDecimal(value) && typeof value !== "number" && typeof value !== "string" && typeof value !== "bigint") return false;
+    try { return new Decimal(value as Decimal.Value).isFinite(); } catch { return false; }
+  }
+  return true;
 }
 // Whether a date, time, date-time or instant meets its schema: a time of day
 // moved by clock units always does, since it wraps at midnight; a date,
@@ -115,6 +129,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     const schema = schemaAtPath(scope, term.path);
     if (!schema) return undefined;
     const timeline = term.measure === "value" && onTimeline(schema.kind) ? TIMELINE_RANGE[schema.kind] : undefined;
+    const kind = counts(term.measure) || schema.kind === "integer" ? "number" : schema.kind === "int64" ? "bigint" : schema.kind;
     const integral = !!timeline || counts(term.measure) || schema.kind === "integer" || schema.kind === "int64";
     let low: Rational | undefined = timeline ? timeline.low : counts(term.measure) ? zero : schema.kind === "int64" ? new Rational(INT64_MIN) : schema.kind === "integer" ? fractionOf(Number.MIN_SAFE_INTEGER) : undefined;
     let high: Rational | undefined = timeline ? timeline.high : counts(term.measure) ? fractionOf(Number.MAX_SAFE_INTEGER) : schema.kind === "int64" ? new Rational(INT64_MAX) : schema.kind === "integer" ? fractionOf(Number.MAX_SAFE_INTEGER) : undefined;
@@ -128,7 +143,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
       if (item.rule.kind !== "compare" || !isTerm(item.rule.left) || isTerm(item.rule.right)) continue;
       const left = positionData(item.rule.left);
       if (!left || left.measure !== term.measure || !deepEqual([...item.prefix, ...left.path], term.path)) continue;
-      const bound = boundOf(item.rule.right, timeline ? schema.kind : "number");
+      const bound = boundOf(item.rule.right, kind);
       if (!bound) continue;
       const operator = item.holds ? item.rule.operator : inverse[item.rule.operator];
       const next = integral && bound.denominator === 1n && (operator === "<" || operator === ">") ? bound.plus(new Rational(operator === "<" ? -1n : 1n)) : bound;
@@ -184,6 +199,7 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
   }
   const placed = timelineOf(value);
   if (placed) return { low: placed, high: placed, integral: true, kind: temporalKindOf(value) as "date" | "datetime" | "instant" };
+  if (typeof value !== "number" && typeof value !== "bigint" && !isDecimal(value) && !isRational(value)) return undefined;
   try {
     const bound = fractionOf(value as number);
     return { low: bound, high: bound, scale: isDecimal(value) ? value.decimalPlaces() : undefined, integral: bound.denominator === 1n, kind: typeof value === "number" ? "number" : typeof value === "bigint" ? "bigint" : isDecimal(value) ? "decimal" : "rational" };

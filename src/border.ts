@@ -1,7 +1,8 @@
+import { temporalNeighbor } from "./temporal.js";
 import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { compareText } from "./text.js";
 import type { Measure, Operator, Rule, Term } from "./rule.js";
-import type { Decimal } from "decimal.js";
+import { Decimal } from "decimal.js";
 import { decimalStep, describeRule, isDecimal, isTerm, termData, positionData } from "./rule.js";
 
 export type PointRole = "ON" | "OFF" | "IN" | "OUT";
@@ -66,13 +67,16 @@ export const lengthCarrier: Carrier = {
 // that grid is moved onto it first, so `>= 0.004` in cents draws the border of
 // `>= 0.01`, whose points are values a row can hold.
 export function decimalCarrier(scale: number): Carrier {
-  const step = decimalStep(scale);
+  const asDecimal = (value: unknown): Decimal => isDecimal(value) ? value : new Decimal(value as Decimal.Value);
+  const next = decimalStep(scale);
+  const step = (value: unknown, direction: 1 | -1) => next(asDecimal(value), direction);
   return {
-    compare: (left, right) => (left as Decimal).comparedTo(right as Decimal),
+    compare: (left, right) => asDecimal(left).comparedTo(right as Decimal),
     step,
     format: String,
     snap: (bound, operator) => {
-      if (!isDecimal(bound) || bound.decimalPlaces() <= scale) {
+      bound = asDecimal(bound);
+      if (isDecimal(bound) && bound.decimalPlaces() <= scale) {
         return { operator, bound };
       }
       switch (operator) {
@@ -115,8 +119,9 @@ export const instantCarrier: Carrier = {
     const difference = epochNanoseconds(left) - epochNanoseconds(right);
     return difference < 0n ? -1 : difference > 0n ? 1 : 0;
   },
-  step: (value, direction) =>
-    (value as { add(duration: object): unknown }).add({ nanoseconds: direction }),
+  step: (value, direction) => temporalNeighbor(value, { nanoseconds: direction }),
+  get floor() { return { value: temporalValue("Instant", "-271821-04-20T00:00Z"), reason: "an instant lies within Temporal's range" }; },
+  get ceiling() { return { value: temporalValue("Instant", "+275760-09-13T00:00Z"), reason: "an instant lies within Temporal's range" }; },
   format: String,
 };
 
@@ -129,13 +134,17 @@ const comparePlain = (left: unknown, right: unknown) => (left as Plain).construc
 
 export const dateCarrier: Carrier = {
   compare: comparePlain,
-  step: (value, direction) => (value as Plain).add({ days: direction }),
+  step: (value, direction) => temporalNeighbor(value, { days: direction }),
+  get floor() { return { value: temporalValue("PlainDate", "-271821-04-19"), reason: "a date lies within Temporal's range" }; },
+  get ceiling() { return { value: temporalValue("PlainDate", "+275760-09-13"), reason: "a date lies within Temporal's range" }; },
   format: String,
 };
 
 export const dateTimeCarrier: Carrier = {
   compare: comparePlain,
-  step: (value, direction) => (value as Plain).add({ nanoseconds: direction }),
+  step: (value, direction) => temporalNeighbor(value, { nanoseconds: direction }),
+  get floor() { return { value: temporalValue("PlainDateTime", "-271821-04-19T00:00:00.000000001"), reason: "a date-time lies within Temporal's range" }; },
+  get ceiling() { return { value: temporalValue("PlainDateTime", "+275760-09-13T23:59:59.999999999"), reason: "a date-time lies within Temporal's range" }; },
   format: String,
 };
 
@@ -159,8 +168,12 @@ export const timeCarrier: Carrier = {
 };
 
 function plainTime(text: string): unknown {
-  return (globalThis as unknown as { readonly Temporal: { readonly PlainTime: { from(text: string): unknown } } })
-    .Temporal.PlainTime.from(text);
+  return temporalValue("PlainTime", text);
+}
+
+function temporalValue(kind: "Instant" | "PlainDate" | "PlainDateTime" | "PlainTime", text: string): unknown {
+  return (globalThis as unknown as { readonly Temporal: Record<typeof kind, { from(text: string): unknown }> })
+    .Temporal[kind].from(text);
 }
 
 function epochNanoseconds(value: unknown): bigint {
@@ -209,7 +222,10 @@ export function bordersOf(
       ? withoutInPoint(current.border)
       : withAdmittedInWitness(current, others);
     return withoutRefusedPoints(border, sameMeasure);
-  });
+  }).map(border => ({
+    ...border,
+    points: border.points.map(point => ({ ...point, contains: value => value !== undefined && point.contains(value) })),
+  }));
 }
 
 function withoutRefusedPoints(border: Border, others: readonly Drawn[]): Border {
