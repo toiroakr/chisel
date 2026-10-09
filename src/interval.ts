@@ -22,13 +22,19 @@ const zero = new Rational(0n);
 // a number only against a number: Temporal compares a date with a date-time by
 // the date alone, and an instant with nothing else.
 function boundOf(value: unknown, kind: string): Rational | undefined {
+  if (!compatibleBound(value, kind)) return undefined;
   const temporal = temporalKindOf(value);
   if (onTimeline(kind) || temporal) return temporal === kind ? timelineOf(value) : undefined;
-  if (kind === "number" && typeof value !== "number") return undefined;
-  if (kind === "bigint" && typeof value !== "bigint") return undefined;
-  if (kind === "rational" && !isRational(value)) return undefined;
-  if (kind === "decimal" && !isDecimal(value) && typeof value !== "number" && typeof value !== "string" && typeof value !== "bigint") return undefined;
   try { return fractionOf(value as number); } catch { return undefined; }
+}
+
+export function compatibleBound(value: unknown, kind: string): boolean {
+  if (onTimeline(kind)) return temporalKindOf(value) === kind;
+  if (kind === "number" || kind === "integer") return typeof value === "number";
+  if (kind === "bigint" || kind === "int64") return typeof value === "bigint";
+  if (kind === "rational") return isRational(value);
+  if (kind === "decimal") return isDecimal(value) || typeof value === "number" || typeof value === "string" || typeof value === "bigint";
+  return true;
 }
 // Whether a date, time, date-time or instant meets its schema: a time of day
 // moved by clock units always does, since it wraps at midnight; a date,

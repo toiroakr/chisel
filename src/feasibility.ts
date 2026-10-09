@@ -1,4 +1,4 @@
-import { onTimeline, temporalKindOf } from "./temporal.js";
+import { compatibleBound } from "./interval.js";
 import { deepEqual } from "./equal.js";
 import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
@@ -540,7 +540,7 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
         : [{ operator: normalized.operator, bound: normalized.bound }];
     });
   const constraints = [...group.constraints, ...invariants];
-  if (measure === "value" && onTimeline(schema.kind) && constraints.some(item => temporalKindOf(item.bound) !== schema.kind)) return undefined;
+  if (measure === "value" && constraints.some(item => !compatibleBound(item.bound, schema.kind))) return undefined;
   return ordered(constraints, carrier);
 }
 

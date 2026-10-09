@@ -90,6 +90,19 @@ describe("issue regressions", () => {
         ({ result: { outcome: "ok" as const, v: c.arithmetic("add", given.x, 1) }, effects: [] }))) } });
     expect(c.verify(implementation).status).toBe("undetermined");
   });
+
+  it.each(["5", 5n, new c.Rational(5n)])("leaves a passed-through integer against %s unproved (#57)", bound => {
+    const pass = c.behavior("pass", {
+      input: c.variants("kind", { go: c.object({ x: c.int().min(0).max(3) }) }),
+      result: c.int().refine(v => v.$lte(bound as never)),
+      effects: c.variants("type", {}),
+      requires: { n: c.dependency(c.int(), c.int()) },
+    });
+    const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
+      c.bind<number, c.Execution<number, never>>(c.int(), c.call(deps.n, 0), () =>
+        ({ result: given.x, effects: [] }))) } });
+    expect(c.verify(implementation).status).toBe("undetermined");
+  });
 });
 
 it.each([new Decimal(1), 1, "1", 1n])("proves a decimal against its accepted bound %s", bound => {
