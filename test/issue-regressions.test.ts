@@ -103,6 +103,32 @@ describe("issue regressions", () => {
         ({ result: given.x, effects: [] }))) } });
     expect(c.verify(implementation).status).toBe("undetermined");
   });
+
+  it("leaves a string length against a string bound unproved", () => {
+    const pass = c.behavior("pass", {
+      input: c.variants("kind", { go: c.object({ x: c.string().max(3) }) }),
+      result: c.string().refine(v => v.$length().$lte("5" as never)),
+      effects: c.variants("type", {}),
+      requires: { n: c.dependency(c.int(), c.int()) },
+    });
+    const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
+      c.bind<number, c.Execution<string, never>>(c.int(), c.call(deps.n, 0), () =>
+        ({ result: given.x, effects: [] }))) } });
+    expect(c.verify(implementation).status).toBe("undetermined");
+  });
+
+  it("leaves an integer against a NaN bound unproved", () => {
+    const pass = c.behavior("pass", {
+      input: c.variants("kind", { go: c.object({ x: c.int().min(0).max(3) }) }),
+      result: c.int().refine(v => v.$lte(Number.NaN)),
+      effects: c.variants("type", {}),
+      requires: { n: c.dependency(c.int(), c.int()) },
+    });
+    const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
+      c.bind<number, c.Execution<number, never>>(c.int(), c.call(deps.n, 0), () =>
+        ({ result: given.x, effects: [] }))) } });
+    expect(c.verify(implementation).status).toBe("undetermined");
+  });
 });
 
 it.each([new Decimal(1), 1, "1", 1n])("proves a decimal against its accepted bound %s", bound => {
@@ -116,4 +142,17 @@ it.each([new Decimal(1), 1, "1", 1n])("proves a decimal against its accepted bou
     c.bind<number, c.Execution<Decimal, never>>(c.int(), c.call(deps.n, 0), () =>
       ({ result: c.arithmetic("add", given.amount, new Decimal(0)), effects: [] }))) } });
   expect(c.verify(implementation).status).toBe("verified");
+});
+
+it.each([new Decimal(NaN), NaN, "NaN"])("leaves a decimal against its unordered bound %s unproved", bound => {
+  const definition = c.behavior("decimal bound", {
+    input: c.variants("kind", { go: c.object({ amount: c.decimal(0).min(new Decimal(1)).max(new Decimal(3)) }) }),
+    result: c.decimal(0).refine(v => v.$lte(bound as never)),
+    effects: c.variants("type", {}),
+    requires: { n: c.dependency(c.int(), c.int()) },
+  });
+  const implementation = c.implement(definition, { cases: { go: c.model("decimal bound", (given, deps) =>
+    c.bind<number, c.Execution<Decimal, never>>(c.int(), c.call(deps.n, 0), () =>
+      ({ result: given.amount, effects: [] }))) } });
+  expect(c.verify(implementation).status).toBe("undetermined");
 });

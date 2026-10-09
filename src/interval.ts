@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { Rational, fractionOf, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { nodeOf } from "./model.js";
 import type { Rule, Operator } from "./rule.js";
@@ -30,10 +31,13 @@ function boundOf(value: unknown, kind: string): Rational | undefined {
 
 export function compatibleBound(value: unknown, kind: string): boolean {
   if (onTimeline(kind)) return temporalKindOf(value) === kind;
-  if (kind === "number" || kind === "integer") return typeof value === "number";
+  if (kind === "number" || kind === "integer") return typeof value === "number" && Number.isFinite(value);
   if (kind === "bigint" || kind === "int64") return typeof value === "bigint";
   if (kind === "rational") return isRational(value);
-  if (kind === "decimal") return isDecimal(value) || typeof value === "number" || typeof value === "string" || typeof value === "bigint";
+  if (kind === "decimal") {
+    if (!isDecimal(value) && typeof value !== "number" && typeof value !== "string" && typeof value !== "bigint") return false;
+    try { return new Decimal(value as Decimal.Value).isFinite(); } catch { return false; }
+  }
   return true;
 }
 // Whether a date, time, date-time or instant meets its schema: a time of day

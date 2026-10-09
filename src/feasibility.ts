@@ -540,7 +540,7 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
         : [{ operator: normalized.operator, bound: normalized.bound }];
     });
   const constraints = [...group.constraints, ...invariants];
-  if (measure === "value" && constraints.some(item => !compatibleBound(item.bound, schema.kind))) return undefined;
+  if (constraints.some(item => !compatibleBound(item.bound, counts(measure) ? "number" : schema.kind))) return undefined;
   return ordered(constraints, carrier);
 }
 
