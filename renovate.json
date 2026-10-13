@@ -4,7 +4,7 @@
     "config:best-practices",
     ":automergeMinor",
     ":dependencyDashboard",
-    "github>toiroakr/karinto:pin#v0.10.1"
+    "github>toiroakr/karinto:pin#v0.11.0"
   ],
   "labels": ["dependencies"],
   "minimumReleaseAge": "7 days",
