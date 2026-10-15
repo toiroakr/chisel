@@ -8,6 +8,8 @@
   ],
   "labels": ["dependencies"],
   "minimumReleaseAge": "7 days",
+  "prCreation": "not-pending",
+  "internalChecksAsSuccess": true,
   "internalChecksFilter": "strict",
   "prConcurrentLimit": 5,
   "rangeStrategy": "bump",
