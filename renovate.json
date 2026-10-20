@@ -21,6 +21,7 @@
     },
     {
       "groupName": "testing",
+      "minimumGroupSize": 2,
       "matchPackageNames": ["vitest", "@vitest/*"]
     },
     {
