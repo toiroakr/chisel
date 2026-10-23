@@ -13,14 +13,16 @@ declare data and behavior
 → check the model against the examples
 ```
 
+Install with `npm install @toiroakr/chisel` (Node.js 26.12.0 or newer).
+
 ## 1. Declare data and behavior
 
-The examples import Chisel as a namespace, `import * as c from "chisel"`, the way zod and valibot are used as `z` and `v`; the names below are written without the prefix.
+The examples import Chisel as a namespace, `import * as c from "@toiroakr/chisel"`, the way zod and valibot are used as `z` and `v`; the names below are written without the prefix.
 
 The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type). An `object` holds exactly the fields it declares: a value carrying another key is refused, not trimmed, so a model answering with a stray field fails `check` instead of passing it.
 
 ```ts
-import * as c from "chisel";
+import * as c from "@toiroakr/chisel";
 
 const Order = c.variants("state", {
   unpaid: c.object({ orderId: c.string() }),
@@ -378,7 +380,7 @@ const findMember = c.behavior("find-member", {
 
 Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }` (`generate` writes one on every row it offers, the placeholder of the dependency's type under what the row it moved from writes, so a generated row runs as it is pasted), and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [deps.now.$lt(request.at).$else(...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
 
-`check` now enforces feasible pairs of classes as obligations (`measures.pairs`), and retains the older reached counts in `pairs` for display, over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `chisel/report.schema.json`). The arms, rules, and comparisons measures retain their availability and weakening metadata; pairs record each obligation and constructions record each proof; every border point, arm, way, and pair carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
+`check` now enforces feasible pairs of classes as obligations (`measures.pairs`), and retains the older reached counts in `pairs` for display, over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `@toiroakr/chisel/report.schema.json`). The arms, rules, and comparisons measures retain their availability and weakening metadata; pairs record each obligation and constructions record each proof; every border point, arm, way, and pair carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
 ## One model, several behaviors
 
@@ -515,3 +517,18 @@ For all three commands, `--behavior` matches the name passed to `behavior(...)`,
 Composition verification also checks forwarded results against the next stage's input contract. If that inclusion cannot be proved, the pipeline remains undetermined even when each stage verifies independently. `reportDocument` returns JSON-compatible values, including string representations of int64 witnesses and counterexamples.
 
 The [Souther comparison and design decisions](docs/souther-comparison.html) records the source revisions, changes and remaining differences.
+
+## Publishing
+
+The `release.yml` workflow publishes `@toiroakr/chisel` when a `v*` tag is pushed. The tag must match the version in `package.json` (for example, `v0.1.0`). Publishing runs the type check, tests, and build through `prepublishOnly`. The workflow can also be rerun manually by selecting the release tag.
+
+Configure an npm Trusted Publisher for `@toiroakr/chisel` with:
+
+- Provider: GitHub Actions
+- Organization or user: `toiroakr`
+- Repository: `chisel`
+- Workflow filename: `release.yml`
+- Environment name: leave empty
+- Permission: allow publishing
+
+The workflow authenticates with OIDC and publishes provenance; no npm token secret is required.

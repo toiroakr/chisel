@@ -154,7 +154,7 @@ const generateCommand = defineCommand({
     if (targets.some(target => target.synthesized)) {
       // A decimal's rows are written with decimal.js, which the file then imports.
       const decimal = printed.flat().some(line => line.includes("new Decimal("));
-      console.log(`import * as c from "chisel";\n${decimal ? 'import { Decimal } from "decimal.js";\n' : ""}`);
+      console.log(`import * as c from "@toiroakr/chisel";\n${decimal ? 'import { Decimal } from "decimal.js";\n' : ""}`);
     }
     for (const line of printed.flat()) {
       console.log(line);
