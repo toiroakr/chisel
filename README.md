@@ -285,6 +285,8 @@ node dist/cli.js check ./cancel-order.spec.ts --strict
 
 `check` reports the current state without failing by default. `--strict` exits with status 1 while examples are unanswered, input/result/effect variants, classes or border points are uncovered, the implementation is absent or pending, control policies are incomplete, or the implementation disagrees with an example. It also fails for `undetermined`: missing measurements, unproved constructions, exhausted budgets, and opaque callback bodies must not certify a build. `adequate` is now exactly `verdict === "satisfied"`.
 
+Invalid command lines, including unknown subcommands, unknown flags, and missing required arguments, exit with status 2. Errors while executing a command exit with status 1.
+
 ## Progressive demo
 
 The [hotel reservation demo](./examples/progressive-demo/README.md) runs the complete declaration → generation → human answer → refinement → implementation sequence.

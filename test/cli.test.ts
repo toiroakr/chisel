@@ -49,7 +49,7 @@ describe("chisel check", () => {
   it("fails with a missing-argument message when no file is given", async () => {
     const result = await run(["check"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(2);
     expect(result.error?.message).toMatch(/Missing required argument <file>/);
   });
 
@@ -302,7 +302,7 @@ describe("chisel (root command)", () => {
       fixture("examples/order-cancellation.spec.ts"),
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(2);
     expect(result.error?.message).toMatch(/Unknown subcommand: frobnicate/);
   });
 });
@@ -633,7 +633,7 @@ describe("chisel run", () => {
 
   it("requires input JSON", async () => {
     const result = await run(["run", fixture("test/fixtures/run.ts")]);
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(2);
   });
 
   it("refuses external implementations with their reason", async () => {
