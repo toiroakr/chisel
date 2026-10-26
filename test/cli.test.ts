@@ -233,7 +233,7 @@ describe("chisel generate", () => {
     const result = await run(["generate", fixture("test/fixtures/decimal-weight.ts")]);
 
     expect(stdoutOf(result).match(/^import .*;$/gm)).toStrictEqual([
-      'import * as c from "chisel";',
+      'import * as c from "@toiroakr/chisel";',
       'import { Decimal } from "decimal.js";',
     ]);
     expect(stdoutOf(result)).toContain('      weight: new Decimal("0.001"),');
@@ -242,8 +242,8 @@ describe("chisel generate", () => {
   it("wraps rows for a behavior with no specification in imports and spec", async () => {
     const result = await run(["generate", fixture("test/fixtures/gap-coverage.ts")]);
 
-    expect(stdoutOf(result).match(/^import .* from "chisel";$/gm)).toStrictEqual([
-      'import * as c from "chisel";',
+    expect(stdoutOf(result).match(/^import .* from "@toiroakr\/chisel";$/gm)).toStrictEqual([
+      'import * as c from "@toiroakr/chisel";',
     ]);
     expect(stdoutOf(result)).toContain(
       [
