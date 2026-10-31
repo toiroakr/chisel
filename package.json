@@ -40,7 +40,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@politty/zod": "^0.6.1",
+    "@politty/zod": "^0.6.3",
     "decimal.js": "^10.6.0",
     "temporal-spec": "^1.0.1",
     "tsx": "^4.23.15",
