@@ -168,8 +168,8 @@ export { explore, invariant, transition, world } from "./world.js";
 export type { Draw, ExploredStep, ExploreReport, Invariant, Operation, Transition, World } from "./world.js";
 export { machine, isMachine, runMachine, checkMachine } from "./machine.js";
 export type { Machine, MachineCommand, MachineExecution, MachineReport, MachineStep, MachineTrace } from "./machine.js";
-export { toTla, checkMachineTla } from "./tla.js";
-export type { TlaModule } from "./tla.js";
+export { toTla, checkMachineTla, proveMachine } from "./tla.js";
+export type { TlaModule, InductiveProof } from "./tla.js";
 export type { Composition } from "./composition.js";
 
 export { decode, encode } from "./codec.js";

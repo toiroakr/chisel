@@ -1,9 +1,10 @@
-import { check as checkTla, formatValue } from "tla-ts";
+import { check as checkTla, formatValue, prove as proveTla } from "tla-ts";
 import { SpecificationError } from "./behavior.js";
-import { domainOf } from "./domain.js";
+import { domainOf, integralBounds } from "./domain.js";
 import { nodeOf } from "./model.js";
 import type { Machine } from "./machine.js";
 import { schemaAtPath } from "./schema.js";
+import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { isTerm, termData } from "./rule.js";
 import type { Rule, TermData } from "./rule.js";
 
@@ -99,6 +100,65 @@ export async function checkMachineTla<State, Command>(machine: Machine<State, Co
     reason: `tla-ts could not complete the check: ${result.status}${result.failure ? `: ${result.failure.message}` : ""}`, module };
 }
 
+export interface InductiveProof {
+  readonly status: "proved" | "undetermined";
+  readonly obligations: readonly { readonly name: string; readonly status: "proved" | "undetermined"; readonly reason?: string }[];
+  readonly source?: string;
+  readonly reason?: string;
+}
+
+// This is a universal inductive proof, not finite-state model checking. A
+// theorem is reported proved only when tla-ts discharges its obligation.
+export async function proveMachine<State, Command>(machine: Machine<State, Command>): Promise<InductiveProof> {
+  let source: string;
+  const names = ["initial", "state contract", "emitted commands", ...machine.invariants.map(item => item.name), ...machine.transitions.map(item => item.name)];
+  try {
+    const compiler = new Compiler();
+    const step = compiler.value(machine.update, new Map([["state", "s"], ["command", "c"]]), true);
+    const stateOK = compiler.schema(machine.state as AnySchema, "s");
+    const commandOK = compiler.schema(machine.command as AnySchema, "c");
+    const invariants = machine.invariants.map((item, index) => ({ name: `Inv${index}`,
+      formula: compiler.condition(item.holds, new Map(), "s") }));
+    const assumption = ["StateOK(s)", "CommandOK(c)", ...invariants.map(item => `${item.name}(s)`)].join(" /\\ ");
+    const defs = ["Step", "StateOK", "CommandOK", ...invariants.map(item => item.name)].join(", ");
+    const output = "Step(s, c)";
+    const transitions = machine.transitions.map(item => item.each
+      ? compiler.paired(item.holds, item.each, schemaAtPath(machine.state as never, item.each.path)?.kind, "s", `${output}.state`)
+      : compiler.condition(item.holds, new Map([["before", "s"], ["after", `${output}.state`]]), "s"));
+    const formulae = [
+      `\\A s: InitState(s) => (StateOK(s)${invariants.map(item => ` /\\ ${item.name}(s)`).join("")})`,
+      `\\A s, c: (${assumption}) => StateOK(${output}.state)`,
+      `\\A s, c: (${assumption}) => \\A i \\in 1..Len(${output}.commands): CommandOK(${output}.commands[i])`,
+      ...invariants.map(item => `\\A s, c: (${assumption}) => ${item.name}(${output}.state)`),
+      ...transitions.map(formula => `\\A s, c: (${assumption}) => (s = ${output}.state \\/ (${formula}))`),
+    ];
+    source = [
+      "---- MODULE ChiselInduction ----",
+      "EXTENDS Naturals, Integers, Sequences",
+      `Step(s, c) == ${step}`,
+      `StateOK(s) == ${stateOK}`,
+      `CommandOK(c) == ${commandOK}`,
+      `InitState(s) == s \\in ${set(machine.initial.map(value => compiler.value(value, new Map())))}`,
+      ...invariants.map(item => `${item.name}(s) == ${item.formula}`),
+      ...formulae.map((formula, index) => `THEOREM ${formula} PROOF BY DEF ${index === 0 ? `InitState, StateOK${invariants.map(item => `, ${item.name}`).join("")}` : defs}`),
+      "====",
+    ].join("\n");
+  } catch (error) {
+    if (error instanceof SpecificationError) return { status: "undetermined", obligations: [], reason: error.message };
+    throw error;
+  }
+  let result: Awaited<ReturnType<typeof proveTla>>;
+  try { result = await proveTla({ source }); }
+  catch (error) { return { status: "undetermined", obligations: [], source,
+    reason: error instanceof Error ? error.message : String(error) }; }
+  const obligations = result.obligations.map((obligation, index) => ({ name: names[index] ?? `obligation ${index + 1}`,
+    status: obligation.status === "proved" || obligation.status === "trivial" ? "proved" as const : "undetermined" as const,
+    ...(obligation.status === "failed" || obligation.status === "unsupported" ? { reason: obligation.reason } : {}),
+  }));
+  return { status: obligations.length === names.length && result.missingProofCount === 0 && result.omittedProofCount === 0 && obligations.every(item => item.status === "proved") ? "proved" : "undetermined",
+    obligations, source };
+}
+
 function set(values: readonly string[]): string {
   return `{${values.join(", ")}}`;
 }
@@ -113,6 +173,12 @@ class Compiler {
     if (node?.kind === "bind") {
       const local = `local${this.next++}`;
       return `(LET ${local} == ${this.value(node.value, names)} IN ${this.value(node.body, new Map([...names, [node.name, local]]), result)})`;
+    }
+    if (node?.kind === "map") {
+      const sequence = this.value(node.values, names);
+      const index = `index${this.next++}`;
+      const body = this.value(node.body, new Map([...names, [node.name, `${sequence}[${index}]`]]));
+      return `[${index} \\in 1..Len(${sequence}) |-> ${body}]`;
     }
     if (node?.kind === "construct") return this.value(node.value, names, result);
     if (node?.kind === "operation" && ["add", "subtract", "multiply"].includes(node.operator)) {
@@ -140,9 +206,10 @@ class Compiler {
     return this.value(value, new Map([...names, ["", self]]));
   }
 
-  paired(condition: unknown, each: { readonly path: readonly string[]; readonly by?: string }, kind: string | undefined): string {
-    const before = each.path.reduce((root, field) => `${root}.${identifier(field)}`, "previous");
-    const after = each.path.reduce((root, field) => `${root}.${identifier(field)}`, "state");
+  paired(condition: unknown, each: { readonly path: readonly string[]; readonly by?: string }, kind: string | undefined,
+    beforeRoot = "previous", afterRoot = "state"): string {
+    const before = each.path.reduce((root, field) => `${root}.${identifier(field)}`, `(${beforeRoot})`);
+    const after = each.path.reduce((root, field) => `${root}.${identifier(field)}`, `(${afterRoot})`);
     if (kind === "record") {
       const earlier = `${before}[key]`, later = `${after}[key]`;
       const rule = this.condition(condition, new Map([["before", earlier], ["after", later]]), later);
@@ -154,6 +221,49 @@ class Compiler {
     const rule = this.condition(condition, new Map([["before", bi], ["after", aj]]), aj);
     const unique = (collection: string) => `(\\A x, y \\in 1..Len(${collection}): x = y \\/ ${collection}[x].${key} # ${collection}[y].${key})`;
     return `(${unique(before)} /\\ ${unique(after)} /\\ \\A i \\in 1..Len(${before}): \\A j \\in 1..Len(${after}): ${bi}.${key} # ${aj}.${key} \\/ ${bi} = ${aj} \\/ (${rule}))`;
+  }
+
+  schema(schema: AnySchema, value: string): string {
+    let type: string;
+    switch (schema.kind) {
+      case "integer": type = `(${value} \\in Int /\\ ${value} >= ${Number.MIN_SAFE_INTEGER} /\\ ${value} <= ${Number.MAX_SAFE_INTEGER})`; break;
+      case "int64": type = `(${value} \\in Int /\\ ${value} >= -9223372036854775808 /\\ ${value} <= 9223372036854775807)`; break;
+      case "boolean": type = `${value} \\in BOOLEAN`; break;
+      case "string": type = `${value} \\in STRING`; break;
+      case "enum": type = `${value} \\in ${set((schema as EnumSchema<string>).values.map(item => this.value(item, new Map())))}`; break;
+      case "literal": type = `${value} = ${this.value((schema as LiteralSchema<string | number | boolean | null>).value, new Map())}`; break;
+      case "object": {
+        const fields = Object.entries((schema as ObjectSchema<ObjectShape>).shape);
+        type = `(DOMAIN ${value} = ${set(fields.map(([field]) => JSON.stringify(field)))} /\\ ${fields.map(([field, child]) => this.schema(child, `${value}.${identifier(field)}`)).join(" /\\ ") || "TRUE"})`;
+        break;
+      }
+      case "variants": {
+        const sum = schema as AnyVariantsSchema;
+        type = `(${sum.variantTags.map(tag => {
+          const fields = sum.variants[tag]!.shape as ObjectShape;
+          return `(${value}.${identifier(sum.discriminant)} = ${JSON.stringify(tag)} /\\ DOMAIN ${value} = ${set([sum.discriminant, ...Object.keys(fields)].map(field => JSON.stringify(field)))}${Object.entries(fields).map(([field, child]) => ` /\\ ${this.schema(child, `${value}.${identifier(field)}`)}`).join("")})`;
+        }).join(" \\/ ")})`;
+        break;
+      }
+      case "array": {
+        const child = (schema as ArraySchema<unknown>).element;
+        const bounds = integralBounds(schema, "length");
+        type = `(${value} \\in Seq(${this.carrier(child)}) /\\ Len(${value}) >= ${bounds.lower}${bounds.upper === undefined ? "" : ` /\\ Len(${value}) <= ${bounds.upper}`} /\\ \\A i \\in 1..Len(${value}): ${this.schema(child, `${value}[i]`)})`;
+        break;
+      }
+      default: throw new SpecificationError(`Inductive proof does not support ${schema.kind} schema`);
+    }
+    const constraints = schema.invariants.map(rule => this.rule(rule, new Map(), value));
+    return constraints.length ? `(${type} /\\ ${constraints.join(" /\\ ")})` : type;
+  }
+
+  private carrier(schema: AnySchema): string {
+    if (schema.kind === "integer" || schema.kind === "int64") return "Int";
+    if (schema.kind === "boolean") return "BOOLEAN";
+    if (schema.kind === "string") return "STRING";
+    if (schema.kind === "enum") return set((schema as EnumSchema<string>).values.map(item => this.value(item, new Map())));
+    if (schema.kind === "literal") return set([this.value((schema as LiteralSchema<string | number | boolean | null>).value, new Map())]);
+    throw new SpecificationError(`Inductive proof cannot quantify an array of ${schema.kind}`);
   }
 
   rule(rule: Rule, names: Names, self = "s"): string {

@@ -26,7 +26,7 @@ import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
 import { checkMachine, isMachine, runMachine } from "./machine.js";
 import type { Machine } from "./machine.js";
-import { checkMachineTla, toTla } from "./tla.js";
+import { checkMachineTla, proveMachine, toTla } from "./tla.js";
 import { reportDocument } from "./report-json.js";
 import type {
   AdequacyReport,
@@ -299,6 +299,30 @@ const tlaCommand = defineCommand({
   },
 });
 
+const proveMachineCommand = defineCommand({
+  name: "prove-machine",
+  description: "初期条件と状態遷移の帰納的な保存を静的に証明する",
+  args: z.object({
+    file: fileArg,
+    name: arg(z.string().optional(), { description: "証明するmachine名" }),
+    json: arg(z.boolean().default(false), { description: "証明義務をJSONで出力する" }),
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "証明の実行上限（ミリ秒）" }),
+  }),
+  run: async args => {
+    const declarations = await loadMachines(args.file, args.name);
+    const reports = await Promise.all(declarations.map(async declaration => ({
+      name: declaration.name, ...await proveMachine(declaration),
+    })));
+    if (args.json) console.log(JSON.stringify(reports, undefined, 2));
+    else for (const report of reports) {
+      console.log(`${report.name}: ${report.status}`);
+      if (report.reason) console.log(`  ${report.reason}`);
+      for (const obligation of report.obligations) console.log(`  ${obligation.name}: ${obligation.status}${obligation.reason ? ` — ${obligation.reason}` : ""}`);
+    }
+    if (reports.some(report => report.status !== "proved")) throw new Error("証明できないmachineがあります");
+  },
+});
+
 const runMachineCommand = defineCommand({
   name: "run-machine",
   description: "machineにコマンドを適用して次の状態と全遷移をJSONで出力する",
@@ -343,6 +367,7 @@ export const cli = defineCommand({
     verify: verifyCommand,
     "model-check": modelCheckCommand,
     tla: tlaCommand,
+    "prove-machine": proveMachineCommand,
     "run-machine": runMachineCommand,
   },
 });

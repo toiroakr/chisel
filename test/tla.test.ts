@@ -36,6 +36,19 @@ describe("TLA+ translation of executable machines", () => {
     expect(await c.checkMachineTla(declaration)).toMatchObject({ status: "broken" });
   });
 
+  it("checks a mapped array and a quantified invariant", async () => {
+    const Item = c.int().min(0).max(1);
+    const State = c.array(Item).max(1);
+    const declaration = c.machine("array", {
+      state: State, command: c.boolean(), initial: [[1]],
+      invariants: [c.invariant<readonly number[]>("all entries are bounded", values =>
+        values.$all(value => value.$lte(1)))],
+      update: state => ({ state: c.map(Item, Item, state, item => c.choose(item.$eq(1), 0, item)) }),
+    });
+    expect(c.checkMachine(declaration)).toMatchObject({ status: "held" });
+    expect(await c.checkMachineTla(declaration)).toMatchObject({ status: "held" });
+  });
+
   it("does not claim a proof for an open state space", async () => {
     const declaration = c.machine("open", { state: c.int(), command: c.boolean(), initial: [0], update: state => ({ state }) });
     expect(() => c.toTla(declaration)).toThrow("finite, exhaustively enumerated");

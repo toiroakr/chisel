@@ -88,6 +88,11 @@ describe("chisel check", () => {
 });
 
 describe("chisel machines", () => {
+  it("proves an invariant over an open command domain", async () => {
+    const result = await run(["prove-machine", fixture("examples/open-machine.ts"), "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "open counter", status: "proved" }]);
+  }, 15_000);
   it("checks a generated TLA+ machine with tla-ts", async () => {
     const result = await run(["model-check", fixture("examples/order-machine.ts"), "--engine", "tla", "--json"]);
     expect(result.exitCode).toBe(0);
