@@ -1,6 +1,7 @@
 import { check as checkTla, formatValue, prove as proveTla } from "tla-ts";
 import { SpecificationError } from "./behavior.js";
 import { domainOf, integralBounds } from "./domain.js";
+import { deepEqual } from "./equal.js";
 import { nodeOf } from "./model.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { schemaAtPath } from "./schema.js";
@@ -254,7 +255,8 @@ class Compiler {
       const data = termData(value);
       return data.kind === "position" && data.path.length === 1 && data.path[0] === element;
     }
-    return schema.parse(value).success;
+    const parsed = schema.parse(value);
+    return parsed.success && deepEqual(parsed.value, value);
   }
 
   condition(value: unknown, names: Names, self: string): string {
