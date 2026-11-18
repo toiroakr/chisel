@@ -4,6 +4,7 @@
 import { SpecificationError } from "./behavior.js";
 import { domainOf } from "./domain.js";
 import { deepEqual } from "./equal.js";
+import { EvaluationLimit } from "./exact.js";
 import { childrenOf, interpret, nodeOf } from "./model.js";
 import type { Template } from "./model.js";
 import { rootTerm } from "./rule.js";
@@ -12,13 +13,14 @@ import type { AnySchema, Schema } from "./schema.js";
 import { checks, pairable, refusedBy } from "./world.js";
 import type { Invariant, Transition } from "./world.js";
 
-export interface MachineCommand<State, Command> {
-  readonly state: Template<State>;
+export type MachineCommand<State, Command> = Template<{
+  readonly state: State;
   // Each emitted command runs through this same transition function, in order.
-  readonly commands?: Template<readonly Command[]>;
-}
+  readonly commands?: readonly Command[];
+}>;
 
 export interface Machine<State, Command> {
+  readonly kind: "machine";
   readonly name: string;
   readonly state: Schema<State>;
   readonly command: Schema<Command>;
@@ -39,13 +41,21 @@ export function machine<State, Command>(name: string, definition: {
   if (definition.initial.length === 0) throw new SpecificationError(`Machine ${name} starts from no state`);
   const initial = definition.initial.map((value, index) => parse(definition.state, value, `Initial state ${index + 1}`));
   const update = definition.update(rootTerm<State>("state"), rootTerm<Command>("command"));
-  if (!update || !Object.hasOwn(update, "state")) throw new SpecificationError(`Machine ${name} must return a state`);
+  if (!update || (!nodeOf(update) && !Object.hasOwn(update, "state"))) throw new SpecificationError(`Machine ${name} must return a state`);
   if (hasCall(update)) throw new SpecificationError(`Machine ${name} cannot call external dependencies in a transition`);
   for (const transition of definition.transitions ?? []) {
     if (transition.each) pairable(name, definition.state as AnySchema, transition);
   }
-  return { name, state: definition.state, command: definition.command, initial, update,
+  return { kind: "machine", name, state: definition.state, command: definition.command, initial, update,
     invariants: definition.invariants ?? [], transitions: definition.transitions ?? [] };
+}
+
+export function isMachine(value: unknown): value is Machine<unknown, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<Machine<unknown, unknown>>;
+  return candidate.kind === "machine" && typeof candidate.name === "string" &&
+    typeof candidate.state?.parse === "function" && typeof candidate.command?.parse === "function" &&
+    Array.isArray(candidate.initial) && candidate.update !== undefined;
 }
 
 function hasCall(value: unknown): boolean {
@@ -78,7 +88,7 @@ class MachineLimitError extends SpecificationError {}
 
 // Evaluates the same expression used by checkMachine. Emissions are internal
 // commands, not I/O. The caller decides when and where to persist the result.
-export function runMachine<State, Command>(definition: Machine<State, Command>, state: State, command: Command,
+export function runMachine<State, Command>(definition: Machine<State, Command>, state: NoInfer<State>, command: NoInfer<Command>,
   options: { readonly maxCommands?: number } = {}): MachineExecution<State, Command> {
   const maxCommands = positiveLimit(options.maxCommands, 1000, "maxCommands");
   let current = parse(definition.state, state, "Current state");
@@ -92,6 +102,9 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
     try {
       const input = parse(definition.command, pending.shift(), "Command");
       const output = interpret(definition.update, { state: current, command: input }) as { state: unknown; commands?: unknown };
+      if (output === null || typeof output !== "object" || !Object.hasOwn(output, "state")) {
+        throw new SpecificationError("A machine transition must return a state");
+      }
       const next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
       const emitted = output.commands === undefined ? [] : output.commands;
       if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
@@ -107,6 +120,7 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
       current = next;
       pending.push(...validated);
     } catch (error) {
+      if (error instanceof EvaluationLimit) throw new MachineLimitError(error.message);
       throw new MachineFailure<State, Command>(error instanceof Error ? error.message : String(error), steps);
     }
   }
@@ -146,13 +160,16 @@ export function checkMachine<State, Command>(definition: Machine<State, Command>
   const commands = domainOf(definition.command as AnySchema, domainLimit);
   const seen: State[] = [];
   const queue: { state: State; start: State; commands: Command[]; steps: MachineStep<State, Command>[] }[] = [];
+  let incomplete: string | undefined;
   for (const start of definition.initial) {
     const broken = definition.invariants.find(invariant => !checks(invariant.holds, start));
     if (broken) return { status: "broken", states: 0, transitions: 0,
       counterexample: { start, commands: [], steps: [], reason: `Initial state violates ${broken.name}` } };
     if (seen.some(state => deepEqual(state, start))) continue;
-    if (seen.length === maxStates) return { status: "undetermined", states: seen.length, transitions: 0,
-      reason: `Reached maxStates (${maxStates}) before exploring every initial state` };
+    if (seen.length === maxStates) {
+      incomplete ??= `Reached maxStates (${maxStates}) before exploring every initial state`;
+      continue;
+    }
     seen.push(start);
     queue.push({ state: start, start, commands: [], steps: [] });
   }
@@ -165,13 +182,17 @@ export function checkMachine<State, Command>(definition: Machine<State, Command>
         const result = runMachine(definition, path.state, command,
           options.maxCommands === undefined ? {} : { maxCommands: options.maxCommands });
         if (seen.some(state => deepEqual(state, result.state))) continue;
-        if (seen.length === maxStates) return { status: "undetermined", states: seen.length, transitions,
-          reason: `Reached maxStates (${maxStates}) before exploring every reachable state` };
+        if (seen.length === maxStates) {
+          incomplete ??= `Reached maxStates (${maxStates}) before exploring every reachable state`;
+          continue;
+        }
         seen.push(result.state);
         queue.push({ state: result.state, start: path.start, commands: [...path.commands, command], steps: [...path.steps, ...result.steps] });
       } catch (error) {
-        if (error instanceof MachineLimitError) return { status: "undetermined", states: seen.length, transitions,
-          reason: error.message };
+        if (error instanceof MachineLimitError) {
+          incomplete ??= error.message;
+          continue;
+        }
         return { status: "broken", states: seen.length, transitions,
           counterexample: { start: path.start, commands: [...path.commands, command],
             steps: [...path.steps, ...(error instanceof MachineFailure ? error.steps : [])],
@@ -179,8 +200,8 @@ export function checkMachine<State, Command>(definition: Machine<State, Command>
       }
     }
   }
-  return commands.exhaustive
+  if (!commands.exhaustive) incomplete ??= `Command schema could not be exhaustively enumerated within domainLimit (${domainLimit})`;
+  return incomplete === undefined
     ? { status: "held", states: seen.length, transitions }
-    : { status: "undetermined", states: seen.length, transitions,
-        reason: `Command schema could not be exhaustively enumerated within domainLimit (${domainLimit})` };
+    : { status: "undetermined", states: seen.length, transitions, reason: incomplete };
 }

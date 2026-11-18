@@ -430,6 +430,18 @@ c.runMachine(workflow, 0, "go"); // { state: 2, steps: [go: 0→1, finish: 1→2
 c.checkMachine(workflow); // { status: "held", states: 3, transitions: 6 }
 ```
 
+[`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. It uses `matchValue` for exhaustive command matching, checks the received quantity against the order, and prevents an issued order from reopening. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state.
+
+To fail CI unless the finite state check completes, export a machine and run:
+
+```sh
+chisel model-check examples/order-machine.ts
+chisel model-check examples/order-machine.ts --json --max-states 10000
+chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered":2,"received":0}' --command '{"type":"submit"}'
+```
+
+`run-machine` returns the next state and all internal steps as JSON; it does not save them. When a module exports multiple machines, `--name` selects one for `run-machine`. `model-check` checks all exported machines by default and exits nonzero for `broken` or `undetermined`.
+
 `checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input, output, and each intermediate invariant; `maxCommands` bounds recursive emissions. This approach executes the checked model itself, without generating a separate runtime implementation or relying on TLA+ translation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
 
 Examples show that each behavior answers as its rows say. Some properties hold of a record only because the guards of several operations keep them together, and no single guard says so: a purchase order never receives more than it ordered because receiving checks what is open and changing the quantity checks what is received. Leave out either check and every example of each operation still passes, yet create, approve, issue, receive 3 of 8, then change the quantity to 2 reaches an order that has received more than it ordered.

@@ -87,6 +87,33 @@ describe("chisel check", () => {
   });
 });
 
+describe("chisel machines", () => {
+  it("checks a typed workflow from an exported module", async () => {
+    const result = await run(["model-check", fixture("examples/order-machine.ts"), "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "order fulfillment", status: "held" }]);
+  });
+
+  it("fails the command when a proof is incomplete", async () => {
+    const result = await run(["model-check", fixture("examples/order-machine.ts"), "--max-states", "1"]);
+    expect(result.exitCode).toBe(1);
+    expect(stdoutOf(result)).toMatch(/undetermined/);
+  });
+
+  it("executes a transition without choosing a persistence backend", async () => {
+    const result = await run([
+      "run-machine", fixture("examples/order-machine.ts"),
+      "--state", '{"phase":"draft","ordered":2,"received":0}',
+      "--command", '{"type":"submit"}',
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toMatchObject({
+      state: { phase: "issued", ordered: 2, received: 0 },
+      steps: [{ command: { type: "submit" } }, { command: { type: "allocate" } }],
+    });
+  });
+});
+
 describe("chisel check with a position the invariants leave empty", () => {
   it("prints the position as a model error", async () => {
     const result = await run(["check", fixture("test/fixtures/empty-position.ts")]);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
+import { orderMachine } from "../examples/order-machine.js";
 
 const State = c.int().min(0).max(2);
 const Command = c.enum(["go", "finish"] as const);
@@ -18,12 +19,47 @@ function example(invariant = c.invariant<number>("at most two", state => state.$
 }
 
 describe("executable state machine", () => {
+  it("runs a business workflow and checks every reachable state", () => {
+    const issued = c.runMachine(orderMachine, orderMachine.initial[0]!, { type: "submit" });
+    expect(issued.state).toStrictEqual({ phase: "issued", ordered: 2, received: 0 });
+    expect(issued.steps.map(step => step.command)).toStrictEqual([{ type: "submit" }, { type: "allocate" }]);
+    expect(c.runMachine(orderMachine, issued.state, { type: "receive", units: 2 }).state).toStrictEqual({
+      phase: "issued", ordered: 2, received: 2,
+    });
+    expect(c.checkMachine(orderMachine)).toMatchObject({ status: "held" });
+  });
   it("executes emitted commands through the same reducer", () => {
     const result = c.runMachine(example(), 0, "go");
     expect(result.state).toBe(2);
     expect(result.steps.map(step => [step.command, step.before, step.after])).toEqual([
       ["go", 0, 1], ["finish", 1, 2],
     ]);
+  });
+
+  it("can define distinct commands with exhaustive variant matching", () => {
+    const Phase = c.enum(["draft", "approved", "issued"] as const);
+    const Order = c.object({ phase: Phase, quantity: c.int().min(1).max(2) });
+    const Action = c.variants("type", { approve: c.object({}), issue: c.object({}) });
+    const workflow = c.machine("order", {
+      state: Order, command: Action, initial: [{ phase: "draft", quantity: 1 }],
+      transitions: [c.transition<c.Infer<typeof Order>>("issued stays issued", (before, after) =>
+        before.phase.$ne("issued").$or(after.phase.$eq("issued")))],
+      update: (state, command) => c.matchValue(Action, command, {
+        approve: () => ({
+          state: { phase: c.choose<c.Infer<typeof Phase>>(state.phase.$eq("draft"), "approved", state.phase), quantity: state.quantity },
+          commands: [{ type: "issue" as const }],
+        }),
+        issue: () => ({
+          state: { phase: c.choose<c.Infer<typeof Phase>>(state.phase.$eq("approved"), "issued", state.phase), quantity: state.quantity },
+          commands: [],
+        }),
+      }),
+    });
+    expect(c.runMachine(workflow, { phase: "draft", quantity: 1 }, { type: "approve" })).toMatchObject({
+      state: { phase: "issued", quantity: 1 },
+      steps: [{ command: { type: "approve" } }, { command: { type: "issue" } }],
+    });
+    expect(c.checkMachine(workflow)).toMatchObject({ status: "held", states: 2, transitions: 4 });
   });
 
   it("checks every reachable state and both commands", () => {
@@ -66,5 +102,20 @@ describe("executable state machine", () => {
     });
     expect(() => c.runMachine(looping, 0, "go", { maxCommands: 2 })).toThrow("exceeded 2 commands");
     expect(c.checkMachine(looping, { maxCommands: 2 })).toMatchObject({ status: "undetermined" });
+  });
+
+  it("keeps checking other commands when one exceeds the execution budget", () => {
+    const Action = c.enum(["loop", "break"] as const);
+    const declaration = c.machine("budget", {
+      state: State, command: Action, initial: [0],
+      invariants: [c.invariant<number>("stays zero", state => state.$eq(0))],
+      update: (_state, command) => ({
+        state: c.choose(command.$eq("break"), 1, 0),
+        commands: c.choose(command.$eq("loop"), ["loop" as const], [] as const),
+      }),
+    });
+    expect(c.checkMachine(declaration, { maxCommands: 2 })).toMatchObject({
+      status: "broken", counterexample: { commands: ["break"], reason: "Invariant stays zero failed" },
+    });
   });
 });
