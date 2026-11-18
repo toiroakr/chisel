@@ -22,7 +22,7 @@ function example(invariant = c.invariant<number>("at most two", state => state.$
 describe("executable state machine", () => {
   it("rejects verification properties embedded in the runtime declaration", () => {
     expect(() => c.machine("wrong", { state: State, command: Command, initial: [0],
-      update: state => ({ state }), invariants: [] } as never)).toThrow("separate specifyMachine");
+      update: (state: c.TermOf<number>) => ({ state }), invariants: [] } as never)).toThrow("separate specifyMachine");
   });
   it("runs a business workflow and checks every reachable state", () => {
     const issued = c.runMachine(orderMachine, orderMachine.initial[0]!, { type: "submit" });
