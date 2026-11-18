@@ -89,30 +89,30 @@ describe("chisel check", () => {
 
 describe("chisel machines", () => {
   it("proves an invariant over an open command domain", async () => {
-    const result = await run(["prove-machine", fixture("examples/open-machine.ts"), "--json"]);
+    const result = await run(["prove-machine", fixture("examples/open-machine.spec.ts"), "--json"]);
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "open counter", status: "proved" }]);
   }, 15_000);
   it("checks a generated TLA+ machine with tla-ts", async () => {
-    const result = await run(["model-check", fixture("examples/order-machine.ts"), "--engine", "tla", "--json"]);
+    const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--engine", "tla", "--json"]);
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "order fulfillment", status: "held" }]);
   });
 
   it("exports a TLA+ module and its model-checker configuration", async () => {
-    const result = await run(["tla", fixture("examples/order-machine.ts")]);
+    const result = await run(["tla", fixture("examples/order-machine.spec.ts")]);
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(stdoutOf(result))).toMatchObject({ name: "ChiselOrderFulfillment" });
     expect(JSON.parse(stdoutOf(result)).source).toContain("Step(s, c) ==");
   });
   it("checks a typed workflow from an exported module", async () => {
-    const result = await run(["model-check", fixture("examples/order-machine.ts"), "--json"]);
+    const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--json"]);
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "order fulfillment", status: "held" }]);
   });
 
   it("fails the command when a proof is incomplete", async () => {
-    const result = await run(["model-check", fixture("examples/order-machine.ts"), "--max-states", "1"]);
+    const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--max-states", "1"]);
     expect(result.exitCode).toBe(1);
     expect(stdoutOf(result)).toMatch(/undetermined/);
   });

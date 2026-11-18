@@ -2,7 +2,7 @@ import { check as checkTla, formatValue, prove as proveTla } from "tla-ts";
 import { SpecificationError } from "./behavior.js";
 import { domainOf, integralBounds } from "./domain.js";
 import { nodeOf } from "./model.js";
-import type { Machine } from "./machine.js";
+import type { MachineSpecification } from "./machine-check.js";
 import { schemaAtPath } from "./schema.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { isTerm, termData } from "./rule.js";
@@ -20,10 +20,11 @@ type Names = ReadonlyMap<string, string>;
 
 // Compiles the executable expression itself. No sampled transition table is
 // substituted for it: tla-ts evaluates Step and the invariant independently.
-export function toTla<State, Command>(machine: Machine<State, Command>, options: {
+export function toTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly domainLimit?: number;
   readonly maxCommands?: number;
 } = {}): TlaModule {
+  const machine = { ...specification.machine, invariants: specification.invariants, transitions: specification.transitions };
   const limit = options.domainLimit ?? 10000;
   const maxCommands = options.maxCommands ?? 1000;
   if (!Number.isSafeInteger(limit) || limit < 1) throw new SpecificationError("domainLimit must be a positive safe integer");
@@ -69,7 +70,7 @@ export function toTla<State, Command>(machine: Machine<State, Command>, options:
   return { name, source, config, states: states.values.length, commands: commands.values.length };
 }
 
-export async function checkMachineTla<State, Command>(machine: Machine<State, Command>, options: {
+export async function checkMachineTla<State, Command>(machine: MachineSpecification<State, Command>, options: {
   readonly domainLimit?: number;
   readonly maxCommands?: number;
 } = {}): Promise<{ readonly status: "held" | "broken" | "undetermined"; readonly states: number; readonly transitions: number;
@@ -109,7 +110,8 @@ export interface InductiveProof {
 
 // This is a universal inductive proof, not finite-state model checking. A
 // theorem is reported proved only when tla-ts discharges its obligation.
-export async function proveMachine<State, Command>(machine: Machine<State, Command>): Promise<InductiveProof> {
+export async function proveMachine<State, Command>(specification: MachineSpecification<State, Command>): Promise<InductiveProof> {
+  const machine = { ...specification.machine, invariants: specification.invariants, transitions: specification.transitions };
   let source: string;
   const names = ["initial", "state contract", "emitted commands", ...machine.invariants.map(item => item.name), ...machine.transitions.map(item => item.name)];
   try {

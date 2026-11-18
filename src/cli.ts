@@ -24,8 +24,10 @@ import {
 } from "./specification.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
-import { checkMachine, isMachine, runMachine } from "./machine.js";
+import { isMachine, runMachine } from "./machine.js";
 import type { Machine } from "./machine.js";
+import { checkMachine, isMachineSpecification } from "./machine-check.js";
+import type { MachineSpecification } from "./machine-check.js";
 import { checkMachineTla, proveMachine, toTla } from "./tla.js";
 import { reportDocument } from "./report-json.js";
 import type {
@@ -246,7 +248,7 @@ const modelCheckCommand = defineCommand({
     domainLimit: arg(z.coerce.number().int().positive().optional(), { description: "コマンドの列挙上限（既定10000）" }),
   }),
   run: async args => {
-    const machines = await loadMachines(args.file, args.name);
+    const machines = await loadSpecifications(args.file, args.name);
     if (args.engine === "tla" && args.maxStates !== undefined) {
       throw new Error("--max-statesは--engine tlaでは使えません");
     }
@@ -284,7 +286,7 @@ const tlaCommand = defineCommand({
     timeout: arg(z.coerce.number().int().positive().default(30000), { description: "実行上限（ミリ秒）" }),
   }),
   run: async args => {
-    const declarations = await loadMachines(args.file, args.name);
+    const declarations = await loadSpecifications(args.file, args.name);
     if (declarations.length !== 1) throw new Error("machineを一意に選べません。--nameで指定してください");
     const module = toTla(declarations[0]!, args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit });
     if (args.outputDir === undefined) console.log(JSON.stringify(module, undefined, 2));
@@ -309,7 +311,7 @@ const proveMachineCommand = defineCommand({
     timeout: arg(z.coerce.number().int().positive().default(30000), { description: "証明の実行上限（ミリ秒）" }),
   }),
   run: async args => {
-    const declarations = await loadMachines(args.file, args.name);
+    const declarations = await loadSpecifications(args.file, args.name);
     const reports = await Promise.all(declarations.map(async declaration => ({
       name: declaration.name, ...await proveMachine(declaration),
     })));
@@ -376,6 +378,16 @@ async function loadMachines(file: string, name?: string): Promise<readonly Machi
   const module = (await tsImport(pathToFileURL(resolve(file)).href, import.meta.url)) as Readonly<Record<string, unknown>>;
   const declarations = [...new Set(Object.values(module).filter(isMachine))];
   if (declarations.length === 0) throw new Error(`${file}にexportされたmachineがありません`);
+  if (name === undefined) return declarations;
+  const selected = declarations.filter(declaration => declaration.name === name);
+  if (selected.length === 0) throw new Error(`machine ${name}がありません。選択できるmachine: ${declarations.map(item => item.name).join(", ")}`);
+  return selected;
+}
+
+async function loadSpecifications(file: string, name?: string): Promise<readonly MachineSpecification<unknown, unknown>[]> {
+  const module = (await tsImport(pathToFileURL(resolve(file)).href, import.meta.url)) as Readonly<Record<string, unknown>>;
+  const declarations = [...new Set(Object.values(module).filter(isMachineSpecification))];
+  if (declarations.length === 0) throw new Error(`${file}にexportされたmachine specificationがありません`);
   if (name === undefined) return declarations;
   const selected = declarations.filter(declaration => declaration.name === name);
   if (selected.length === 0) throw new Error(`machine ${name}がありません。選択できるmachine: ${declarations.map(item => item.name).join(", ")}`);

@@ -410,16 +410,17 @@ A disregarded field draws no classes of its type, no invariant borders and no bo
 
 ### One reducer for runtime and exhaustive checking
 
-For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose.
+For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose. Import the execution API from `@toiroakr/chisel/runtime`; put verification properties in a separate module importing `@toiroakr/chisel/verification`. This keeps invariant definitions, model checking, TLA+ translation, and `tla-ts` out of the production import graph.
 
 ```ts
+import * as c from "@toiroakr/chisel/runtime";
+
 const State = c.int().min(0).max(2);
 const Command = c.enum(["go", "finish"] as const);
 const workflow = c.machine("two steps", {
   state: State,
   command: Command,
   initial: [0],
-  invariants: [c.invariant<number>("at most two", state => state.$lte(2))],
   update: (state, command) => ({
     state: c.choose(state.$lt(2), state.$plus(1), state),
     commands: c.choose(command.$eq("go"), ["finish" as const], [] as const),
@@ -427,19 +428,30 @@ const workflow = c.machine("two steps", {
 });
 
 c.runMachine(workflow, 0, "go"); // { state: 2, steps: [go: 0→1, finish: 1→2] }
-c.checkMachine(workflow); // { status: "held", states: 3, transitions: 6 }
 ```
 
-[`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. It uses `matchValue` for exhaustive command matching, checks the received quantity against the order, and prevents an issued order from reopening. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state.
+In a separate `workflow.spec.ts` file used by CI:
+
+```ts
+import { invariant, specifyMachine, checkMachine } from "@toiroakr/chisel/verification";
+import { workflow } from "./workflow.js";
+
+const specification = specifyMachine(workflow, {
+  invariants: [invariant<number>("at most two", state => state.$lte(2))],
+});
+checkMachine(specification); // { status: "held", states: 3, transitions: 6 }
+```
+
+[`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. [`examples/order-machine.spec.ts`](examples/order-machine.spec.ts) declares its invariant and transition property. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state.
 
 To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh
-chisel model-check examples/order-machine.ts
-chisel model-check examples/order-machine.ts --engine tla
-chisel tla examples/order-machine.ts --output-dir ./model
-chisel prove-machine examples/open-machine.ts
-chisel model-check examples/order-machine.ts --json --max-states 10000
+chisel model-check examples/order-machine.spec.ts
+chisel model-check examples/order-machine.spec.ts --engine tla
+chisel tla examples/order-machine.spec.ts --output-dir ./model
+chisel prove-machine examples/open-machine.spec.ts
+chisel model-check examples/order-machine.spec.ts --json --max-states 10000
 chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered":2,"received":0}' --command '{"type":"submit"}'
 ```
 
@@ -447,9 +459,9 @@ chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered"
 
 `--engine tla` compiles the same expression-based update and invariant into a TLA+ `Step`, `Init`, and `Next` and checks them with `tla-ts`. It models emitted commands as a pending queue, so intermediate states are checked. `chisel tla` returns the module and config as JSON, or writes both `.tla` and `.cfg` files with `--output-dir`. TLA+ translation requires exhaustively enumerable state and command schemas and refuses unsupported operators instead of claiming a result. For open state spaces the native `model-check` remains the available finite reachability check when commands can be enumerated; its result is `undetermined` if exploration does not complete.
 
-`prove-machine` emits universal inductive obligations for the initial states, the state contract, emitted commands, invariants, and transition properties, then calls tla-ts's proof engine. It reports `proved` only if every obligation is discharged. This can prove some machines with open state and command domains (see [`examples/open-machine.ts`](examples/open-machine.ts)); unsupported schema and expression constructs, or obligations the prover cannot discharge, remain `undetermined`. A proof is over the TLA+ interpretation of the supported expression subset; `runMachine` is still the executable implementation. Use `model-check` for counterexample traces and `prove-machine` for inductive claims.
+`prove-machine` emits universal inductive obligations for the initial states, the state contract, emitted commands, invariants, and transition properties, then calls tla-ts's proof engine. It reports `proved` only if every obligation is discharged. This can prove some machines with open state and command domains (see [`examples/open-machine.spec.ts`](examples/open-machine.spec.ts)); unsupported schema and expression constructs, or obligations the prover cannot discharge, remain `undetermined`. A proof is over the TLA+ interpretation of the supported expression subset; `runMachine` is still the executable implementation. Use `model-check` for counterexample traces and `prove-machine` for inductive claims.
 
-`checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input, output, and each intermediate invariant; `maxCommands` bounds recursive emissions. This approach executes the checked model itself, without generating a separate runtime implementation or relying on TLA+ translation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
+`checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input and output schemas, while the verification tools check invariants and transition properties; `maxCommands` bounds recursive emissions. This executes the checked model itself without a separate runtime implementation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
 
 Examples show that each behavior answers as its rows say. Some properties hold of a record only because the guards of several operations keep them together, and no single guard says so: a purchase order never receives more than it ordered because receiving checks what is open and changing the quantity checks what is received. Leave out either check and every example of each operation still passes, yet create, approve, issue, receive 3 of 8, then change the quantity to 2 reaches an order that has received more than it ordered.
 

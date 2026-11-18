@@ -1,4 +1,4 @@
-import * as c from "../src/index.js";
+import * as c from "../src/runtime.js";
 
 const State = c.object({
   phase: c.enum(["draft", "approved", "issued"] as const),
@@ -18,13 +18,6 @@ export const orderMachine = c.machine("order fulfillment", {
   state: State,
   command: Command,
   initial: [{ phase: "draft", ordered: 2, received: 0 }],
-  invariants: [
-    c.invariant<Order>("cannot receive more than ordered", order => order.received.$lte(order.ordered)),
-  ],
-  transitions: [
-    c.transition<Order>("issued orders stay issued", (before, after) =>
-      before.phase.$ne("issued").$or(after.phase.$eq("issued"))),
-  ],
   update: (state, command) => c.matchValue<typeof Command, { state: Order; commands: readonly OrderCommand[] }>(Command, command, {
     submit: () => ({
       state: {
