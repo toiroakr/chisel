@@ -430,6 +430,8 @@ async function loadSpecifications(file: string, name?: string): Promise<readonly
   const module = (await tsImport(pathToFileURL(resolve(file)).href, import.meta.url)) as Readonly<Record<string, unknown>>;
   const declarations = [...new Set(Object.values(module).filter(isMachineSpecification))];
   if (declarations.length === 0) throw new Error(`${file}にexportされたmachine specificationがありません`);
+  const duplicate = declarations.find((declaration, index) => declarations.findIndex(other => other.name === declaration.name) !== index);
+  if (duplicate) throw new Error(`machine specification ${duplicate.name} が重複しています。specifyMachineのnameで区別してください`);
   if (name === undefined) return declarations;
   const selected = declarations.filter(declaration => declaration.name === name);
   if (selected.length === 0) throw new Error(`machine ${name}がありません。選択できるmachine: ${declarations.map(item => item.name).join(", ")}`);
