@@ -17,12 +17,12 @@ Install with `npm install @toiroakr/chisel` (Node.js 26.12.0 or newer).
 
 ## 1. Declare data and behavior
 
-The examples import Chisel as a namespace, `import * as c from "@toiroakr/chisel"`, the way zod and valibot are used as `z` and `v`; the names below are written without the prefix.
+The behavior and specification examples in sections 1–6 use `import * as c from "@toiroakr/chisel/full"`. The package root `@toiroakr/chisel` provides the executable state-machine API described below; verification code lives in `@toiroakr/chisel/verification`.
 
 The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type). An `object` holds exactly the fields it declares: a value carrying another key is refused, not trimmed, so a model answering with a stray field fails `check` instead of passing it.
 
 ```ts
-import * as c from "@toiroakr/chisel";
+import * as c from "@toiroakr/chisel/full";
 
 const Order = c.variants("state", {
   unpaid: c.object({ orderId: c.string() }),
@@ -185,7 +185,7 @@ npm run example:verified
 
 `verify` exits 1 for either a counterexample or an unproved implementation. Text diagnostics use `file: error CHISEL001: description`, suitable for an editor task's problem matcher. TypeScript provides type errors and completion; [an example VS Code task](docs/editor-task.json) runs semantic verification. This repository's `build` runs the verifier on its complete expression example after TypeScript compilation.
 
-The executable CLI runs all commands in a worker with a default 30-second deadline (including module loading), a 256 MiB old-generation heap limit, and a 1 MiB streamed-output limit. The deadline terminates synchronous loops too. `runIsolated(argv, timeoutMs)` from `@toiroakr/chisel/isolated` offers this boundary to hosts. It needs Node, which is why it has an entry of its own: `@toiroakr/chisel` imports no Node module, so a bundle of it runs where only Web APIs exist, such as a browser or an edge or serverless function runtime. Direct in-process `check` / `perform` calls cannot preempt arbitrary JavaScript callbacks; expression evaluation has its own step budget. The worker is a resource boundary, not an I/O sandbox for imported modules.
+The executable CLI runs all commands in a worker with a default 30-second deadline (including module loading), a 256 MiB old-generation heap limit, and a 1 MiB streamed-output limit. The deadline terminates synchronous loops too. `runIsolated(argv, timeoutMs)` from `@toiroakr/chisel/isolated` offers this boundary to hosts. It needs Node, which is why it has an entry of its own: `@toiroakr/chisel/full` imports no Node module, so a bundle of it runs where only Web APIs exist, such as a browser or an edge or serverless function runtime. Direct in-process `check` / `perform` calls cannot preempt arbitrary JavaScript callbacks; expression evaluation has its own step budget. The worker is a resource boundary, not an I/O sandbox for imported modules.
 
 The proof system preserves matching quantified facts from input invariants and guards, including nested quantifiers and captured input fields. It also proves structural schema inclusion for collections and pipeline boundaries. Typed `map` and `fold` expressions prove their element and accumulator contracts. Recursive proofs, general higher-order functions, and unsupported substitutions remain unresolved. Full Souther language compatibility is not implied by a passing report; the guarantee applies to the selected model and the reported obligations.
 
@@ -410,10 +410,10 @@ A disregarded field draws no classes of its type, no invariant borders and no bo
 
 ### One reducer for runtime and exhaustive checking
 
-For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose. Import the execution API from `@toiroakr/chisel/runtime`; put verification properties in a separate module importing `@toiroakr/chisel/verification`. This keeps invariant definitions, model checking, TLA+ translation, and `tla-ts` out of the production import graph.
+For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose. Import the execution API from `@toiroakr/chisel`; put verification properties in a separate module importing `@toiroakr/chisel/verification`. This keeps invariant definitions, model checking, TLA+ translation, and `tla-ts` out of the production import graph. The optional `/runtime` subpath is an alias of the root; the previous combined API is available from `/full`.
 
 ```ts
-import * as c from "@toiroakr/chisel/runtime";
+import * as c from "@toiroakr/chisel";
 
 const State = c.int().min(0).max(2);
 const Command = c.enum(["go", "finish"] as const);

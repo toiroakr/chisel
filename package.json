@@ -8,6 +8,10 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
+    "./full": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },

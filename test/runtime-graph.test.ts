@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { build } from "esbuild";
 import { describe, expect, it } from "vitest";
@@ -9,6 +10,12 @@ async function dependencies(entry: string): Promise<Set<string>> {
 }
 
 describe("production import graph", () => {
+  it("points the package root at the production entry", () => {
+    const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"));
+    expect(manifest.exports["."].import).toBe("./dist/runtime.js");
+    expect(manifest.exports["."].types).toBe("./dist/runtime.d.ts");
+    expect(manifest.exports["./full"].import).toBe("./dist/index.js");
+  });
   it("excludes verification tools and TLA+ from the runtime entry", async () => {
     const entry = resolve(import.meta.dirname, "../src/runtime.ts");
     const imports = await dependencies(entry);
