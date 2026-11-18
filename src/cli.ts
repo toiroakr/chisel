@@ -3,7 +3,7 @@ import { isMainThread, parentPort, workerData } from "node:worker_threads";
 import { runIsolated } from "./isolated.js";
 
 import { realpathSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, mkdtemp, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { arg, defineCommand, runCommand as executeCommand } from "@politty/zod";
@@ -248,10 +248,10 @@ const modelCheckCommand = defineCommand({
     domainLimit: arg(z.coerce.number().int().positive().optional(), { description: "コマンドの列挙上限（既定10000）" }),
   }),
   run: async args => {
-    const machines = await loadSpecifications(args.file, args.name);
     if (args.engine === "tla" && args.maxStates !== undefined) {
       throw new Error("--max-statesは--engine tlaでは使えません");
     }
+    const machines = await loadSpecifications(args.file, args.name);
     const options = {
       ...(args.maxStates === undefined ? {} : { maxStates: args.maxStates }),
       ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }),
@@ -266,12 +266,12 @@ const modelCheckCommand = defineCommand({
     }));
     if (args.json) console.log(JSON.stringify(reports, jsonReplacer, 2));
     else for (const report of reports) {
-      console.log(`${report.name}: ${report.status} (${report.states} states, ${report.transitions} transitions)`);
+      console.log(`${report.name}: ${report.status} (${report.states} states, ${"generatedStates" in report ? `${report.generatedStates} generated states` : `${report.transitions} transitions`})`);
       if (report.reason) console.log(`  ${report.reason}`);
       if ("counterexample" in report && report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
       if ("trace" in report && report.trace) console.log(`  ${JSON.stringify(report.trace)}`);
     }
-    if (reports.some(report => report.status !== "held")) throw new Error("到達状態の検査が完了しなかったmachineがあります");
+    if (reports.some(report => report.status !== "held")) throw new Error("反例または未確定の結果が出たmachineがあります");
   },
 });
 
@@ -282,24 +282,64 @@ const tlaCommand = defineCommand({
     file: fileArg,
     name: arg(z.string().optional(), { description: "変換するmachine名" }),
     outputDir: arg(z.string().optional(), { description: "生成した.tlaと.cfgを保存するディレクトリ" }),
+    force: arg(z.boolean().default(false), { description: "既存の.tlaと.cfgを置き換える" }),
     domainLimit: arg(z.coerce.number().int().positive().optional(), { description: "状態とコマンドの列挙上限" }),
+    maxCommands: arg(z.coerce.number().int().positive().optional(), { description: "後続コマンドの実行上限（既定1000）" }),
     timeout: arg(z.coerce.number().int().positive().default(30000), { description: "実行上限（ミリ秒）" }),
   }),
   run: async args => {
     const declarations = await loadSpecifications(args.file, args.name);
     if (declarations.length !== 1) throw new Error("machineを一意に選べません。--nameで指定してください");
-    const module = toTla(declarations[0]!, args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit });
+    const module = toTla(declarations[0]!, {
+      ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
+      ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }),
+    });
     if (args.outputDir === undefined) console.log(JSON.stringify(module, undefined, 2));
     else {
-      await mkdir(args.outputDir, { recursive: true });
-      await Promise.all([
-        writeFile(resolve(args.outputDir, `${module.name}.tla`), `${module.source}\n`),
-        writeFile(resolve(args.outputDir, `${module.name}.cfg`), `${module.config}\n`),
-      ]);
+      await writeTlaPair(args.outputDir, module.name, module.source, module.config, args.force);
       console.log(`Generated ${module.name}.tla and ${module.name}.cfg`);
     }
   },
 });
+
+async function writeTlaPair(directory: string, name: string, source: string, config: string, force: boolean): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  const staging = await mkdtemp(resolve(directory, ".chisel-tla-"));
+  const files = [
+    { filename: `${name}.tla`, contents: `${source}\n` },
+    { filename: `${name}.cfg`, contents: `${config}\n` },
+  ];
+  const published: { destination: string; backup: string; existed: boolean }[] = [];
+  try {
+    await Promise.all(files.map(file => writeFile(resolve(staging, file.filename), file.contents, { flag: "wx" })));
+    if (force) {
+      for (const file of files) {
+        const destination = resolve(directory, file.filename);
+        try { await stat(destination); await copyFile(destination, resolve(staging, `${file.filename}.backup`)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+    }
+    for (const file of files) {
+      const destination = resolve(directory, file.filename);
+      const staged = resolve(staging, file.filename);
+      const backup = resolve(staging, `${file.filename}.backup`);
+      if (force) await rename(staged, destination);
+      else await link(staged, destination); // EEXIST keeps both previous files intact.
+      let existed = false;
+      try { await stat(backup); existed = true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      published.push({ destination, backup, existed });
+    }
+  } catch (error) {
+    for (const file of published.reverse()) {
+      if (file.existed) await copyFile(file.backup, file.destination);
+      else await rm(file.destination, { force: true });
+    }
+    throw error;
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
 
 const proveMachineCommand = defineCommand({
   name: "prove-machine",
@@ -333,6 +373,7 @@ const runMachineCommand = defineCommand({
     name: arg(z.string().optional(), { description: "実行するmachine名" }),
     state: arg(z.string({ error: "Missing required option --state" }), { description: "現在の状態（JSON）" }),
     command: arg(z.string({ error: "Missing required option --command" }), { description: "コマンド（JSON）" }),
+    maxCommands: arg(z.coerce.number().int().positive().optional(), { description: "後続コマンドの実行上限（既定1000）" }),
     timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込と実行の上限（ミリ秒）" }),
   }),
   run: async args => {
@@ -348,7 +389,8 @@ const runMachineCommand = defineCommand({
       throw new Error([...(!decodedState.success ? decodedState.issues : []), ...(!decodedCommand.success ? decodedCommand.issues : [])]
         .map(issue => `${issue.path}: ${issue.message}`).join("\n"));
     }
-    const result = runMachine(declaration, decodedState.value, decodedCommand.value);
+    const result = runMachine(declaration, decodedState.value, decodedCommand.value,
+      args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands });
     const output = encode(object({ state: declaration.state, steps: array(object({
       command: declaration.command, before: declaration.state, after: declaration.state,
     })) }), result);

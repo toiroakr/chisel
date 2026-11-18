@@ -13,7 +13,9 @@ declare data and behavior
 → check the model against the examples
 ```
 
-Install with `npm install @toiroakr/chisel` (Node.js 26.12.0 or newer).
+Install with `npm install @toiroakr/chisel` (Node.js 26.13.1 or newer).
+
+**0.2.0 migration:** The package root now exports the state-machine runtime. Existing 0.1.x imports of `behavior`, `spec`, `check`, and related APIs must change from `@toiroakr/chisel` to `@toiroakr/chisel/full`. Verification of machines uses `@toiroakr/chisel/verification`. This breaking export change is outside the `^0.1.0` version range.
 
 ## 1. Declare data and behavior
 
@@ -406,9 +408,7 @@ c.implement(approve, {
 
 A disregarded field draws no classes of its type, no invariant borders and no borders an `ensures` clause draws on it, so `generate` offers no row that only moves it; where a guard or a `match` reads it, it keeps the classes the guard draws or its own classes, since the arms turn on them. Every input case is still owed its row, guards still draw their borders and arms from the whole input, and an invariant that leaves a disregarded field empty is still a model error. Rows keep the whole record, so `c.test` hands production code what it takes. `check` holds the claim: it moves the disregarded fields of an answered row, each element of an array and each entry of a record on its own, through every combination of their other classes and of the invariant border points they would have owed (`IN (> 0)` for an `int().min(0)` at 0), smallest first, runs the model on each and fails the row on the first answer that changes, naming the fields it moved (`approve disregards @submitted.urgent, but its answer changed when @submitted.urgent was true`). A row with more than 255 combinations the input can hold, or more than 4096 candidates before those it cannot hold are left out, is not tried (the limits are the caller's: `c.check(specification, { disregards: { combinations, candidates } })`, or `chisel check --disregard-combinations <n> --disregard-candidates <n>`); it is listed in `incompleteness` as `disregards not checked` and leaves the verdict `undetermined`. `cases.$default` decides every case `cases` leaves out; it is one decision, so its arms and ways are listed once and owed wherever one of its cases can reach them, a `c.todo` there leaves each of its cases pending, and a `$default` beside cases that decide every case is refused. An input case cannot be named `$default`. [`examples/expense-report/`](examples/expense-report/) writes three behaviors over one five-state model both ways.
 
-## Invariants a world keeps
-
-### One reducer for runtime and exhaustive checking
+## One reducer for runtime and exhaustive checking
 
 For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose. Import the execution API from `@toiroakr/chisel`; put verification properties in a separate module importing `@toiroakr/chisel/verification`. This keeps invariant definitions, model checking, TLA+ translation, and `tla-ts` out of the production import graph. The optional `/runtime` subpath is an alias of the root; the previous combined API is available from `/full`.
 
@@ -417,7 +417,7 @@ import * as c from "@toiroakr/chisel";
 
 const State = c.int().min(0).max(2);
 const Command = c.enum(["go", "finish"] as const);
-const workflow = c.machine("two steps", {
+export const workflow = c.machine("two steps", {
   state: State,
   command: Command,
   initial: [0],
@@ -436,13 +436,13 @@ In a separate `workflow.spec.ts` file used by CI:
 import { invariant, specifyMachine, checkMachine } from "@toiroakr/chisel/verification";
 import { workflow } from "./workflow.js";
 
-const specification = specifyMachine(workflow, {
+export const specification = specifyMachine(workflow, {
   invariants: [invariant<number>("at most two", state => state.$lte(2))],
 });
 checkMachine(specification); // { status: "held", states: 3, transitions: 6 }
 ```
 
-[`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. [`examples/order-machine.spec.ts`](examples/order-machine.spec.ts) declares its invariant and transition property. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state.
+[`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. [`examples/order-machine.spec.ts`](examples/order-machine.spec.ts) declares its invariant and transition property. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state. A receipt before issuance or beyond the ordered quantity intentionally leaves the state unchanged; the invariant checks state safety rather than command acceptance.
 
 To fail CI unless the finite state check completes, export a machine and run:
 
@@ -455,13 +455,15 @@ chisel model-check examples/order-machine.spec.ts --json --max-states 10000
 chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered":2,"received":0}' --command '{"type":"submit"}'
 ```
 
-`run-machine` returns the next state and all internal steps as JSON; it does not save them. When a module exports multiple machines, `--name` selects one for `run-machine`. `model-check` checks all exported machines by default and exits nonzero for `broken` or `undetermined`.
+`run-machine` returns the next state and all internal steps as JSON; it does not save them. When a module exports multiple machines, `--name` selects one for `run-machine`. `model-check` checks all exported machines by default and exits nonzero for `broken` or `undetermined`. Give multiple specifications of one machine distinct `name` values in `specifyMachine(machine, { name, invariants, transitions })` to select them with `--name`.
 
-`--engine tla` compiles the same expression-based update and invariant into a TLA+ `Step`, `Init`, and `Next` and checks them with `tla-ts`. It models emitted commands as a pending queue, so intermediate states are checked. `chisel tla` returns the module and config as JSON, or writes both `.tla` and `.cfg` files with `--output-dir`. TLA+ translation requires exhaustively enumerable state and command schemas and refuses unsupported operators instead of claiming a result. For open state spaces the native `model-check` remains the available finite reachability check when commands can be enumerated; its result is `undetermined` if exploration does not complete.
+`--engine tla` compiles the same expression-based update and invariant into a TLA+ `Step`, `Init`, and `Next` and checks them with `tla-ts`. It models emitted commands as a pending queue, so intermediate states are checked. `chisel tla` returns the module and config as JSON, or writes both `.tla` and `.cfg` files with `--output-dir`. TLA+ translation requires exhaustively enumerable state and command schemas and refuses unsupported operators instead of claiming a result. For open state spaces the native `model-check` remains the available finite reachability check when commands can be enumerated; its result is `undetermined` if exploration does not complete. Existing output files are preserved; pass `--force` to replace both files. Use `--max-commands` to choose the generated command budget.
 
 `prove-machine` emits universal inductive obligations for the initial states, the state contract, emitted commands, invariants, and transition properties, then calls tla-ts's proof engine. It reports `proved` only if every obligation is discharged. This can prove some machines with open state and command domains (see [`examples/open-machine.spec.ts`](examples/open-machine.spec.ts)); unsupported schema and expression constructs, or obligations the prover cannot discharge, remain `undetermined`. A proof is over the TLA+ interpretation of the supported expression subset; `runMachine` is still the executable implementation. Use `model-check` for counterexample traces and `prove-machine` for inductive claims.
 
-`checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input and output schemas, while the verification tools check invariants and transition properties; `maxCommands` bounds recursive emissions. This executes the checked model itself without a separate runtime implementation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
+`checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence among explored paths* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input and output schemas, while the verification tools check invariants and transition properties; `maxCommands` bounds recursive emissions. This executes the checked model itself without a separate runtime implementation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
+
+## Invariants a world keeps
 
 Examples show that each behavior answers as its rows say. Some properties hold of a record only because the guards of several operations keep them together, and no single guard says so: a purchase order never receives more than it ordered because receiving checks what is open and changing the quantity checks what is received. Leave out either check and every example of each operation still passes, yet create, approve, issue, receive 3 of 8, then change the quantity to 2 reaches an order that has received more than it ordered.
 

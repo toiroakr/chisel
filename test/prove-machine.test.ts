@@ -24,10 +24,14 @@ describe("universal inductive proofs", () => {
 
   it("does not claim a proof when an unbounded increment exceeds the state contract", async () => {
     const declaration = c.machine("increment", {
-      state: c.int(), command: c.boolean(), initial: [0],
+      state: c.int().min(0).max(2), command: c.boolean(), initial: [0],
       update: state => ({ state: state.$plus(1) }),
     });
     const proof = await c.proveMachine(c.specifyMachine(declaration, { invariants: [c.invariant<number>("nonnegative", state => state.$gte(0))] }));
     expect(proof.status).toBe("undetermined");
+    expect(proof.obligations.find(item => item.name === "state contract")?.status).toBe("undetermined");
+    expect(proof.obligations).toHaveLength(4);
+    expect(proof.obligations.every(item => item.status === "undetermined")).toBe(true);
+    expect(proof.reason).toBeTruthy();
   }, 15_000);
 });

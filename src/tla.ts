@@ -29,13 +29,14 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
   const maxCommands = options.maxCommands ?? 1000;
   if (!Number.isSafeInteger(limit) || limit < 1) throw new SpecificationError("domainLimit must be a positive safe integer");
   if (!Number.isSafeInteger(maxCommands) || maxCommands < 1) throw new SpecificationError("maxCommands must be a positive safe integer");
+  if (hasOptional(machine.state as AnySchema)) throw new SpecificationError("TLA+ translation does not support optional state fields");
   const states = domainOf(machine.state as never, limit);
   const commands = domainOf(machine.command as never, limit);
   if (!states.exhaustive || !commands.exhaustive) {
     throw new SpecificationError("TLA+ translation requires finite, exhaustively enumerated state and command schemas");
   }
   if (commands.values.length === 0) throw new SpecificationError("TLA+ translation requires at least one command");
-  const compiler = new Compiler();
+  const compiler = new Compiler(machine.state as AnySchema, machine.command as AnySchema);
   const name = `Chisel${machine.name.replace(/[^A-Za-z0-9]+/g, " ").split(" ").filter(Boolean).map(part => part[0]!.toUpperCase() + part.slice(1)).join("") || "Machine"}`;
   const step = compiler.value(machine.update, new Map([["state", "s"], ["command", "c"]]), true);
   const properties = machine.invariants.map((invariant, index) => ({
@@ -59,37 +60,40 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
     `Step(s, c) == ${step}`,
     `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0`,
     "Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1)",
-    "        \\/ (/\\ Len(pending) > 0 /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1)",
+    "        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1)",
     "TypeOK == /\\ state \\in StateDomain /\\ \\A i \\in 1..Len(pending): pending[i] \\in CommandDomain",
-    "Budget == depth <= MaxCommands",
+    "Budget == pending = <<>> \\/ depth < MaxCommands",
     ...properties.map(item => `${item.name} == ${item.formula}`),
     ...transitions.map(item => `${item.name} == previous = state \\/ (${item.formula})`),
     "====",
   ].join("\n");
-  const config = `INIT Init NEXT Next INVARIANT TypeOK INVARIANT Budget ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} CHECK_DEADLOCK FALSE`;
+  const config = `INIT Init NEXT Next INVARIANT TypeOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} INVARIANT Budget CHECK_DEADLOCK FALSE`;
   return { name, source, config, states: states.values.length, commands: commands.values.length };
 }
 
 export async function checkMachineTla<State, Command>(machine: MachineSpecification<State, Command>, options: {
   readonly domainLimit?: number;
   readonly maxCommands?: number;
-} = {}): Promise<{ readonly status: "held" | "broken" | "undetermined"; readonly states: number; readonly transitions: number;
+} = {}): Promise<{ readonly status: "held" | "broken" | "undetermined"; readonly states: number; readonly generatedStates: number;
   readonly reason?: string; readonly trace?: readonly { readonly action?: string; readonly state: string; readonly pending: string }[];
   readonly module?: TlaModule }> {
   let module: TlaModule;
   try { module = toTla(machine, options); }
   catch (error) {
-    if (error instanceof SpecificationError) return { status: "undetermined", states: 0, transitions: 0, reason: error.message };
+    if (error instanceof SpecificationError) return { status: "undetermined", states: 0, generatedStates: 0, reason: error.message };
     throw error;
   }
-  const result = await checkTla({ source: module.source, config: module.config });
-  if (result.status === "success") return { status: "held", states: result.distinctStates, transitions: result.generatedStates, module };
+  let result: Awaited<ReturnType<typeof checkTla>>;
+  try { result = await checkTla({ source: module.source, config: module.config }); }
+  catch (error) { return { status: "undetermined", states: 0, generatedStates: 0,
+    reason: `tla-ts could not complete the check: ${error instanceof Error ? error.message : String(error)}`, module }; }
+  if (result.status === "success") return { status: "held", states: result.distinctStates, generatedStates: result.generatedStates, module };
   if (result.status === "invariant-violation" && result.violation?.name === "Budget") return {
-    status: "undetermined", states: result.distinctStates, transitions: result.generatedStates,
+    status: "undetermined", states: result.distinctStates, generatedStates: result.generatedStates,
     reason: `TLA+ exploration exceeded maxCommands (${options.maxCommands ?? 1000})`, module,
   };
   if (result.status === "invariant-violation") return { status: "broken", states: result.distinctStates,
-    transitions: result.generatedStates,
+    generatedStates: result.generatedStates,
     reason: /^Inv\d+$/.test(result.violation?.name ?? "")
       ? machine.invariants[Number(result.violation!.name.slice(3))]?.name ?? result.violation!.name
       : result.violation?.name ?? "An invariant was violated",
@@ -97,7 +101,7 @@ export async function checkMachineTla<State, Command>(machine: MachineSpecificat
       ...(step.action === undefined ? {} : { action: step.action }),
       state: formatValue(step.state.state!), pending: formatValue(step.state.pending!),
     })) }), module };
-  return { status: "undetermined", states: result.distinctStates, transitions: result.generatedStates,
+  return { status: "undetermined", states: result.distinctStates, generatedStates: result.generatedStates,
     reason: `tla-ts could not complete the check: ${result.status}${result.failure ? `: ${result.failure.message}` : ""}`, module };
 }
 
@@ -115,7 +119,8 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
   let source: string;
   const names = ["initial", "state contract", "emitted commands", ...machine.invariants.map(item => item.name), ...machine.transitions.map(item => item.name)];
   try {
-    const compiler = new Compiler();
+    const compiler = new Compiler(machine.state as AnySchema, machine.command as AnySchema);
+    if (hasOptional(machine.state as AnySchema)) throw new SpecificationError("Inductive proof does not support optional state fields");
     const step = compiler.value(machine.update, new Map([["state", "s"], ["command", "c"]]), true);
     const stateOK = compiler.schema(machine.state as AnySchema, "s");
     const commandOK = compiler.schema(machine.command as AnySchema, "c");
@@ -150,14 +155,28 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
     throw error;
   }
   let result: Awaited<ReturnType<typeof proveTla>>;
-  try { result = await proveTla({ source }); }
-  catch (error) { return { status: "undetermined", obligations: [], source,
-    reason: error instanceof Error ? error.message : String(error) }; }
-  const obligations = result.obligations.map((obligation, index) => ({ name: names[index] ?? `obligation ${index + 1}`,
-    status: obligation.status === "proved" || obligation.status === "trivial" ? "proved" as const : "undetermined" as const,
-    ...(obligation.status === "failed" || obligation.status === "unsupported" ? { reason: obligation.reason } : {}),
-  }));
-  return { status: obligations.length === names.length && result.missingProofCount === 0 && result.omittedProofCount === 0 && obligations.every(item => item.status === "proved") ? "proved" : "undetermined",
+  try { result = await proveTla({ source, backend: "tla-ts" }); }
+  catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { status: "undetermined", obligations: names.map(name => ({ name, status: "undetermined", reason })), source, reason };
+  }
+  const theoremLines = source.split("\n").flatMap((line, index) => line.startsWith("THEOREM ") ? [index + 1] : []);
+  const grouped = names.map(() => [] as typeof result.obligations);
+  let unmatched = false;
+  for (const obligation of result.obligations) {
+    const line = Number(obligation.location.split(":")[0]);
+    const index = theoremLines.indexOf(line);
+    if (index < 0 || index >= grouped.length) unmatched = true;
+    else grouped[index]!.push(obligation);
+  }
+  const obligations = grouped.map((items, index) => {
+    const failed = items.find(item => item.status === "failed" || item.status === "unsupported");
+    return { name: names[index]!,
+      status: items.length > 0 && items.every(item => item.status === "proved" || item.status === "trivial") ? "proved" as const : "undetermined" as const,
+      ...(failed && "reason" in failed ? { reason: failed.reason } : {}),
+    };
+  });
+  return { status: !unmatched && theoremLines.length === names.length && result.missingProofCount === 0 && result.omittedProofCount === 0 && obligations.every(item => item.status === "proved") ? "proved" : "undetermined",
     obligations, source };
 }
 
@@ -165,28 +184,53 @@ function set(values: readonly string[]): string {
   return `{${values.join(", ")}}`;
 }
 
+function hasOptional(schema: AnySchema, visited = new Set<AnySchema>()): boolean {
+  if (schema.kind === "optional") return true;
+  if (visited.has(schema)) return false;
+  visited.add(schema);
+  if (schema.kind === "object") return Object.values((schema as ObjectSchema<ObjectShape>).shape).some(child => hasOptional(child, visited));
+  if (schema.kind === "variants") return (Object.values((schema as AnyVariantsSchema).variants) as AnySchema[]).some(child => hasOptional(child, visited));
+  if (schema.kind === "array") return hasOptional((schema as ArraySchema<unknown>).element, visited);
+  return false;
+}
+
 class Compiler {
   private next = 0;
+  constructor(private readonly stateSchema: AnySchema, private readonly commandSchema: AnySchema) {}
 
   value(value: unknown, names: Names, result = false): string {
     if (isTerm(value)) return this.term(termData(value), names);
     const node = nodeOf(value);
-    if (node?.kind === "choose") return `(IF ${this.rule(node.condition, names)} THEN ${this.value(node.yes, names, result)} ELSE ${this.value(node.no, names, result)})`;
+    if (node?.kind === "choose") return `(IF ${this.rule(node.condition, names, names.get("") ?? "s")} THEN ${this.value(node.yes, names, result)} ELSE ${this.value(node.no, names, result)})`;
     if (node?.kind === "bind") {
+      const data = isTerm(node.value) ? termData(node.value) : undefined;
+      const source = data?.kind === "position" && data.path.length === 1 ? data.path[0] : undefined;
+      if ((source !== "state" || node.schema !== this.stateSchema) &&
+          (source !== "command" || node.schema !== this.commandSchema)) {
+        throw new SpecificationError("TLA+ translation cannot preserve bind schema validation");
+      }
       const local = `local${this.next++}`;
       return `(LET ${local} == ${this.value(node.value, names)} IN ${this.value(node.body, new Map([...names, [node.name, local]]), result)})`;
     }
     if (node?.kind === "map") {
+      const data = isTerm(node.values) ? termData(node.values) : undefined;
+      if (data?.kind !== "position" || data.path.length !== 1 || data.path[0] !== "state" ||
+          this.stateSchema.kind !== "array" || (this.stateSchema as ArraySchema<unknown>).element !== node.element ||
+          node.element !== node.output || !this.safeMappedBody(node.body, node.element as AnySchema, node.name)) {
+        throw new SpecificationError("TLA+ translation cannot preserve map element and output schema validation");
+      }
       const sequence = this.value(node.values, names);
       const index = `index${this.next++}`;
       const body = this.value(node.body, new Map([...names, [node.name, `${sequence}[${index}]`]]));
       return `[${index} \\in 1..Len(${sequence}) |-> ${body}]`;
     }
-    if (node?.kind === "construct") return this.value(node.value, names, result);
-    if (node?.kind === "operation" && ["add", "subtract", "multiply"].includes(node.operator)) {
-      const symbol = node.operator === "add" ? "+" : node.operator === "subtract" ? "-" : "*";
-      return `(${this.value(node.left, names)} ${symbol} ${this.value(node.right, names)})`;
+    if (node?.kind === "construct") {
+      if (isTerm(node.value) || nodeOf(node.value)) throw new SpecificationError("TLA+ translation cannot preserve dynamic constructor validation");
+      const parsed = node.schema.parse(node.value);
+      if (!parsed.success) throw new SpecificationError("TLA+ translation cannot preserve invalid constructor");
+      return this.value(parsed.value, names, result);
     }
+    if (node?.kind === "operation") throw new SpecificationError("TLA+ translation cannot preserve intermediate arithmetic validation");
     if (node) throw new SpecificationError(`TLA+ translation does not support ${node.kind}${"operator" in node ? ` ${node.operator}` : ""}`);
     if (typeof value === "string") return JSON.stringify(value);
     if (typeof value === "boolean") return String(value).toUpperCase();
@@ -200,6 +244,17 @@ class Compiler {
       return `[${fields.map(([key, child]) => `${identifier(key)} |-> ${this.value(child, names)}`).join(", ")}]`;
     }
     throw new SpecificationError(`TLA+ translation cannot represent ${String(value)}`);
+  }
+
+  private safeMappedBody(value: unknown, schema: AnySchema, element: string): boolean {
+    const node = nodeOf(value);
+    if (node?.kind === "choose") return this.safeMappedBody(node.yes, schema, element) && this.safeMappedBody(node.no, schema, element);
+    if (node) return false;
+    if (isTerm(value)) {
+      const data = termData(value);
+      return data.kind === "position" && data.path.length === 1 && data.path[0] === element;
+    }
+    return schema.parse(value).success;
   }
 
   condition(value: unknown, names: Names, self: string): string {

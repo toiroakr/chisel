@@ -88,6 +88,19 @@ describe("executable state machine", () => {
     });
   });
 
+  it("rejects an array pairing without a key and duplicate property names", () => {
+    const Item = c.object({ id: c.int().min(0).max(1) });
+    const State = c.object({ items: c.array(Item).max(1) });
+    const declaration = c.machine("pairs", { state: State, command: c.boolean(), initial: [{ items: [] }],
+      update: state => ({ state }),
+    });
+    expect(() => c.specifyMachine(declaration, { transitions: [
+      c.transition<c.Infer<typeof Item>>("pair", { each: "items" }, (before, after) => before.id.$eq(after.id)),
+    ] })).toThrow("without a by field");
+    const repeated = c.invariant<c.Infer<typeof State>>("duplicate", () => true);
+    expect(() => c.specifyMachine(declaration, { invariants: [repeated, repeated] })).toThrow("more than once");
+  });
+
   it("reports bounds and open command domains as undetermined", () => {
     expect(c.checkMachine(example(), { maxStates: 2 })).toMatchObject({ status: "undetermined", states: 2 });
     const open = c.machine("open", {
@@ -105,6 +118,38 @@ describe("executable state machine", () => {
     });
     expect(() => c.runMachine(looping, 0, "go", { maxCommands: 2 })).toThrow("exceeded 2 commands");
     expect(c.checkMachine(c.specifyMachine(looping), { maxCommands: 2 })).toMatchObject({ status: "undetermined" });
+    const invalid = c.machine("invalid result", {
+      state: State, command: Command, initial: [2], update: state => ({ state: state.$plus(1) }),
+    });
+    expect(() => c.runMachine(invalid, 2, "go")).toThrow("Command 1 next state");
+    expect(() => c.checkMachine(c.specifyMachine(invalid), { maxCommands: 0 })).toThrow("maxCommands");
+    const badEmission = c.machine("bad emission", { state: State, command: Command, initial: [0],
+      update: state => ({ state: state.$plus(1), commands: ["unknown" as never] }),
+    });
+    expect(c.checkMachine(c.specifyMachine(badEmission))).toMatchObject({
+      status: "broken", counterexample: { steps: [{ before: 0, after: 1 }], reason: expect.stringContaining("Emitted command") },
+    });
+  });
+
+  it("checks completed steps before an emitted-command limit", () => {
+    const declaration = c.machine("prefix", {
+      state: State, command: Command, initial: [0],
+      update: (state, command) => ({ state: state.$plus(1), commands: [command] }),
+    });
+    const specification = c.specifyMachine(declaration, {
+      invariants: [c.invariant<number>("remains zero", state => state.$eq(0))],
+    });
+    expect(c.checkMachine(specification, { maxCommands: 1 })).toMatchObject({
+      status: "broken", counterexample: { reason: "Invariant remains zero failed", steps: [{ before: 0, after: 1 }] },
+    });
+  });
+
+  it("explores undefined when the state schema accepts it", () => {
+    const State = c.boolean().optional();
+    const declaration = c.machine("optional state", { state: State, command: c.boolean(), initial: [false],
+      update: () => ({ state: undefined }),
+    });
+    expect(c.checkMachine(c.specifyMachine(declaration))).toMatchObject({ status: "held", states: 2, transitions: 4 });
   });
 
   it("keeps checking other commands when one exceeds the execution budget", () => {

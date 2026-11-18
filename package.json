@@ -1,6 +1,6 @@
 {
   "name": "@toiroakr/chisel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Progressive executable specifications for TypeScript",
   "type": "module",
   "bin": {

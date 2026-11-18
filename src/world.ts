@@ -438,6 +438,9 @@ export function pairable(world: string, state: AnySchema, item: Transition): voi
   const records = unwrap(schemas).filter(schema => schema.kind === "array" || schema.kind === "record");
   const at = each.path.join(".");
   if (records.length === 0) throw new SpecificationError(`World ${world}: transition ${item.name} pairs records at ${at}, where the state holds no array or record`);
+  if (each.by === undefined && records.some(schema => schema.kind === "array")) {
+    throw new SpecificationError(`Transition ${item.name} pairs array elements without a by field`);
+  }
   if (each.by === undefined) return;
   const by = each.by;
   const named = unwrap(records.map(schema => (schema as unknown as { element?: AnySchema; value?: AnySchema }).element ?? (schema as unknown as { value: AnySchema }).value))

@@ -36,6 +36,8 @@ export const orderMachine = c.machine("order fulfillment", {
       commands: [],
     }),
     receive: input => ({
+      // A receipt before issuance or beyond the ordered quantity is deliberately a no-op.
+      // The invariant describes reachable state, not command acceptance.
       state: {
         phase: state.phase,
         ordered: state.ordered,

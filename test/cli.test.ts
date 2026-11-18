@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -97,13 +99,36 @@ describe("chisel machines", () => {
     const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--engine", "tla", "--json"]);
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "order fulfillment", status: "held" }]);
+    expect(JSON.parse(stdoutOf(result))[0]).toHaveProperty("generatedStates");
+    expect(JSON.parse(stdoutOf(result))[0]).not.toHaveProperty("transitions");
   });
 
   it("exports a TLA+ module and its model-checker configuration", async () => {
     const result = await run(["tla", fixture("examples/order-machine.spec.ts")]);
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(stdoutOf(result))).toMatchObject({ name: "ChiselOrderFulfillment" });
-    expect(JSON.parse(stdoutOf(result)).source).toContain("Step(s, c) ==");
+    const module = JSON.parse(stdoutOf(result));
+    expect(module).toMatchObject({ name: "ChiselOrderFulfillment" });
+    expect(module.source).toContain("Step(s, c) ==");
+    expect(module.config).toContain("INIT Init NEXT Next");
+    expect(module.config).toContain("INVARIANT Inv0");
+  });
+
+  it("preserves both TLA artifacts on a failed export and replaces them only with --force", async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), "chisel-tla-test-"));
+    try {
+      const file = fixture("examples/order-machine.spec.ts");
+      const config = resolve(directory, "ChiselOrderFulfillment.cfg");
+      const source = resolve(directory, "ChiselOrderFulfillment.tla");
+      await writeFile(config, "old config");
+      const refused = await run(["tla", file, "--output-dir", directory]);
+      expect(refused.exitCode).toBe(1);
+      expect(await readFile(config, "utf8")).toBe("old config");
+      await expect(readFile(source, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      const replaced = await run(["tla", file, "--output-dir", directory, "--max-commands", "7", "--force"]);
+      expect(replaced.exitCode).toBe(0);
+      expect(await readFile(config, "utf8")).toContain("INVARIANT Budget");
+      expect(await readFile(source, "utf8")).toContain("MaxCommands == 7");
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
   it("checks a typed workflow from an exported module", async () => {
     const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--json"]);
@@ -128,6 +153,12 @@ describe("chisel machines", () => {
       state: { phase: "issued", ordered: 2, received: 0 },
       steps: [{ command: { type: "submit" } }, { command: { type: "allocate" } }],
     });
+  });
+
+  it("passes the command limit to runtime execution", async () => {
+    const result = await run(["run-machine", fixture("examples/order-machine.ts"),
+      "--state", '{"phase":"draft","ordered":2,"received":0}', "--command", '{"type":"submit"}', "--max-commands", "1"]);
+    expect(result.exitCode).toBe(1);
   });
 });
 

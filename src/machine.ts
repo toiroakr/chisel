@@ -75,7 +75,9 @@ export class MachineFailure<State, Command> extends SpecificationError {
   constructor(message: string, readonly steps: readonly MachineStep<State, Command>[]) { super(message); }
 }
 
-export class MachineLimitError extends SpecificationError {}
+export class MachineLimitError<State = unknown, Command = unknown> extends SpecificationError {
+  constructor(message: string, readonly steps: readonly MachineStep<State, Command>[] = []) { super(message); }
+}
 
 // Evaluates the same expression used by the verification tools. Emissions are internal
 // commands, not I/O. The caller decides when and where to persist the result.
@@ -86,7 +88,7 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
   const pending: unknown[] = [command];
   const steps: MachineStep<State, Command>[] = [];
   while (pending.length > 0) {
-    if (steps.length === maxCommands) throw new MachineLimitError(`Machine ${definition.name} exceeded ${maxCommands} commands`);
+    if (steps.length === maxCommands) throw new MachineLimitError(`Machine ${definition.name} exceeded ${maxCommands} commands`, [...steps]);
     try {
       const input = parse(definition.command, pending.shift(), "Command");
       const output = interpret(definition.update, { state: current, command: input }) as { state: unknown; commands?: unknown };
@@ -94,14 +96,14 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
         throw new SpecificationError("A machine transition must return a state");
       }
       const next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
+      steps.push({ command: input, before: current, after: next });
       const emitted = output.commands === undefined ? [] : output.commands;
       if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
       const validated = emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));
-      steps.push({ command: input, before: current, after: next });
       current = next;
       pending.push(...validated);
     } catch (error) {
-      if (error instanceof EvaluationLimit) throw new MachineLimitError(error.message);
+      if (error instanceof EvaluationLimit) throw new MachineLimitError(error.message, [...steps]);
       throw new MachineFailure<State, Command>(error instanceof Error ? error.message : String(error), steps);
     }
   }
