@@ -408,6 +408,30 @@ A disregarded field draws no classes of its type, no invariant borders and no bo
 
 ## Invariants a world keeps
 
+### One reducer for runtime and exhaustive checking
+
+For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose.
+
+```ts
+const State = c.int().min(0).max(2);
+const Command = c.enum(["go", "finish"] as const);
+const workflow = c.machine("two steps", {
+  state: State,
+  command: Command,
+  initial: [0],
+  invariants: [c.invariant<number>("at most two", state => state.$lte(2))],
+  update: (state, command) => ({
+    state: c.choose(state.$lt(2), state.$plus(1), state),
+    commands: c.choose(command.$eq("go"), ["finish" as const], [] as const),
+  }),
+});
+
+c.runMachine(workflow, 0, "go"); // { state: 2, steps: [go: 0→1, finish: 1→2] }
+c.checkMachine(workflow); // { status: "held", states: 3, transitions: 6 }
+```
+
+`checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input, output, and each intermediate invariant; `maxCommands` bounds recursive emissions. This approach executes the checked model itself, without generating a separate runtime implementation or relying on TLA+ translation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
+
 Examples show that each behavior answers as its rows say. Some properties hold of a record only because the guards of several operations keep them together, and no single guard says so: a purchase order never receives more than it ordered because receiving checks what is open and changing the quantity checks what is received. Leave out either check and every example of each operation still passes, yet create, approve, issue, receive 3 of 8, then change the quantity to 2 reaches an order that has received more than it ordered.
 
 A world declares the state its operations share, the states it starts from, the operations that move it, and what must hold of every state they reach, apart from the state's type: the type says what a state may hold, an invariant what a reachable state does hold.

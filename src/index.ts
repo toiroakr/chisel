@@ -166,6 +166,8 @@ export { compose, isComposition } from "./composition.js";
 
 export { explore, invariant, transition, world } from "./world.js";
 export type { Draw, ExploredStep, ExploreReport, Invariant, Operation, Transition, World } from "./world.js";
+export { machine, runMachine, checkMachine } from "./machine.js";
+export type { Machine, MachineCommand, MachineExecution, MachineReport, MachineStep, MachineTrace } from "./machine.js";
 export type { Composition } from "./composition.js";
 
 export { decode, encode } from "./codec.js";
