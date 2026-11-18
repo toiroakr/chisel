@@ -3,6 +3,7 @@ import { isMainThread, parentPort, workerData } from "node:worker_threads";
 import { runIsolated } from "./isolated.js";
 
 import { realpathSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { arg, defineCommand, runCommand as executeCommand } from "@politty/zod";
@@ -25,6 +26,7 @@ import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
 import { checkMachine, isMachine, runMachine } from "./machine.js";
 import type { Machine } from "./machine.js";
+import { checkMachineTla, toTla } from "./tla.js";
 import { reportDocument } from "./report-json.js";
 import type {
   AdequacyReport,
@@ -237,6 +239,7 @@ const modelCheckCommand = defineCommand({
     file: fileArg,
     name: arg(z.string().optional(), { description: "検査するmachine名" }),
     json: arg(z.boolean().default(false), { description: "検査結果をJSONで出力する" }),
+    engine: arg(z.enum(["chisel", "tla"]).default("chisel"), { description: "状態探索エンジン（chisel / tla）" }),
     timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込と検査の実行上限（ミリ秒）" }),
     maxStates: arg(z.coerce.number().int().positive().optional(), { description: "到達状態の上限（既定10000）" }),
     maxCommands: arg(z.coerce.number().int().positive().optional(), { description: "後続コマンドの実行上限（既定1000）" }),
@@ -244,19 +247,55 @@ const modelCheckCommand = defineCommand({
   }),
   run: async args => {
     const machines = await loadMachines(args.file, args.name);
+    if (args.engine === "tla" && args.maxStates !== undefined) {
+      throw new Error("--max-statesは--engine tlaでは使えません");
+    }
     const options = {
       ...(args.maxStates === undefined ? {} : { maxStates: args.maxStates }),
       ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }),
       ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
     };
-    const reports = machines.map(declaration => ({ name: declaration.name, ...checkMachine(declaration, options) }));
+    const reports = await Promise.all(machines.map(async declaration => {
+      if (args.engine === "chisel") return { name: declaration.name, ...checkMachine(declaration, options) };
+      const { module: _module, ...report } = await checkMachineTla(declaration,
+        { ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
+          ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }) });
+      return { name: declaration.name, ...report };
+    }));
     if (args.json) console.log(JSON.stringify(reports, jsonReplacer, 2));
     else for (const report of reports) {
       console.log(`${report.name}: ${report.status} (${report.states} states, ${report.transitions} transitions)`);
       if (report.reason) console.log(`  ${report.reason}`);
-      if (report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
+      if ("counterexample" in report && report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
+      if ("trace" in report && report.trace) console.log(`  ${JSON.stringify(report.trace)}`);
     }
     if (reports.some(report => report.status !== "held")) throw new Error("到達状態の検査が完了しなかったmachineがあります");
+  },
+});
+
+const tlaCommand = defineCommand({
+  name: "tla",
+  description: "実行可能なmachine定義からTLA+のモジュールと設定を生成する",
+  args: z.object({
+    file: fileArg,
+    name: arg(z.string().optional(), { description: "変換するmachine名" }),
+    outputDir: arg(z.string().optional(), { description: "生成した.tlaと.cfgを保存するディレクトリ" }),
+    domainLimit: arg(z.coerce.number().int().positive().optional(), { description: "状態とコマンドの列挙上限" }),
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "実行上限（ミリ秒）" }),
+  }),
+  run: async args => {
+    const declarations = await loadMachines(args.file, args.name);
+    if (declarations.length !== 1) throw new Error("machineを一意に選べません。--nameで指定してください");
+    const module = toTla(declarations[0]!, args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit });
+    if (args.outputDir === undefined) console.log(JSON.stringify(module, undefined, 2));
+    else {
+      await mkdir(args.outputDir, { recursive: true });
+      await Promise.all([
+        writeFile(resolve(args.outputDir, `${module.name}.tla`), `${module.source}\n`),
+        writeFile(resolve(args.outputDir, `${module.name}.cfg`), `${module.config}\n`),
+      ]);
+      console.log(`Generated ${module.name}.tla and ${module.name}.cfg`);
+    }
   },
 });
 
@@ -303,6 +342,7 @@ export const cli = defineCommand({
     run: runCommand,
     verify: verifyCommand,
     "model-check": modelCheckCommand,
+    tla: tlaCommand,
     "run-machine": runMachineCommand,
   },
 });

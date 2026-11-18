@@ -88,6 +88,18 @@ describe("chisel check", () => {
 });
 
 describe("chisel machines", () => {
+  it("checks a generated TLA+ machine with tla-ts", async () => {
+    const result = await run(["model-check", fixture("examples/order-machine.ts"), "--engine", "tla", "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "order fulfillment", status: "held" }]);
+  });
+
+  it("exports a TLA+ module and its model-checker configuration", async () => {
+    const result = await run(["tla", fixture("examples/order-machine.ts")]);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOf(result))).toMatchObject({ name: "ChiselOrderFulfillment" });
+    expect(JSON.parse(stdoutOf(result)).source).toContain("Step(s, c) ==");
+  });
   it("checks a typed workflow from an exported module", async () => {
     const result = await run(["model-check", fixture("examples/order-machine.ts"), "--json"]);
     expect(result.exitCode).toBe(0);

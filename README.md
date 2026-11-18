@@ -436,11 +436,15 @@ To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh
 chisel model-check examples/order-machine.ts
+chisel model-check examples/order-machine.ts --engine tla
+chisel tla examples/order-machine.ts --output-dir ./model
 chisel model-check examples/order-machine.ts --json --max-states 10000
 chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered":2,"received":0}' --command '{"type":"submit"}'
 ```
 
 `run-machine` returns the next state and all internal steps as JSON; it does not save them. When a module exports multiple machines, `--name` selects one for `run-machine`. `model-check` checks all exported machines by default and exits nonzero for `broken` or `undetermined`.
+
+`--engine tla` compiles the same expression-based update and invariant into a TLA+ `Step`, `Init`, and `Next` and checks them with `tla-ts`. It models emitted commands as a pending queue, so intermediate states are checked. `chisel tla` returns the module and config as JSON, or writes both `.tla` and `.cfg` files with `--output-dir`. TLA+ translation requires exhaustively enumerable state and command schemas and refuses unsupported operators instead of claiming a result. For open state spaces the native `model-check` remains the available finite reachability check when commands can be enumerated; its result is `undetermined` if exploration does not complete.
 
 `checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input, output, and each intermediate invariant; `maxCommands` bounds recursive emissions. This approach executes the checked model itself, without generating a separate runtime implementation or relying on TLA+ translation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
 
