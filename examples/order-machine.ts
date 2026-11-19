@@ -18,10 +18,10 @@ export const orderMachine = c.machine("order fulfillment", {
   state: State,
   command: Command,
   initial: [{ phase: "draft", ordered: 2, received: 0 }],
-  update: (state, command) => c.matchValue<typeof Command, { state: Order; commands: readonly OrderCommand[] }>(Command, command, {
+  update: (state, command, machine) => machine.match<typeof Command, { state: Order; commands: readonly OrderCommand[] }>(Command, command, {
     submit: () => ({
       state: {
-        phase: c.choose<Order["phase"]>(state.phase.$eq("draft"), "approved", state.phase),
+        phase: machine.choose<Order["phase"]>(state.phase.$eq("draft"), "approved", state.phase),
         ordered: state.ordered,
         received: state.received,
       },
@@ -29,7 +29,7 @@ export const orderMachine = c.machine("order fulfillment", {
     }),
     allocate: () => ({
       state: {
-        phase: c.choose<Order["phase"]>(state.phase.$eq("approved"), "issued", state.phase),
+        phase: machine.choose<Order["phase"]>(state.phase.$eq("approved"), "issued", state.phase),
         ordered: state.ordered,
         received: state.received,
       },
@@ -41,7 +41,7 @@ export const orderMachine = c.machine("order fulfillment", {
       state: {
         phase: state.phase,
         ordered: state.ordered,
-        received: c.choose<number>(
+        received: machine.choose<number>(
           state.phase.$eq("issued").$and(state.received.$plus(input.units).$lte(state.ordered)),
           state.received.$plus(input.units),
           state.received,

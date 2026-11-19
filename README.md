@@ -16,6 +16,8 @@ Install with `npm install @toiroakr/chisel` (Node.js 26.13.1 or newer).
 
 **0.2.0 migration:** The package root now exports the state-machine runtime. Existing 0.1.x imports of `behavior`, `spec`, `check`, and related APIs must change from `@toiroakr/chisel` to `@toiroakr/chisel/full`. Verification of machines uses `@toiroakr/chisel/verification`. This breaking export change is outside the `^0.1.0` version range.
 
+**0.3.0 migration:** A machine transition uses the `machine` builder passed as its third argument. Use `machine.choose`, `machine.match`, and `machine.map` instead of the broader `c.choose`, `c.matchValue`, and `c.map` model expressions. This makes a transition that has no equivalent TLA+ representation a TypeScript error; declaration-time validation provides the same boundary for untyped callers.
+
 The earlier behavior-and-example workflow remains available from `/full` and is documented below.
 
 ## 1. Declare data and behavior
@@ -422,9 +424,9 @@ export const workflow = c.machine("two steps", {
   state: State,
   command: Command,
   initial: [0],
-  update: (state, command) => ({
-    state: c.choose(state.$lt(2), state.$plus(1), state),
-    commands: c.choose(command.$eq("go"), ["finish" as const], [] as const),
+  update: (state, command, machine) => ({
+    state: machine.choose(state.$lt(2), state.$plus(1), state),
+    commands: machine.choose(command.$eq("go"), ["finish" as const], [] as const),
   }),
 });
 
@@ -463,6 +465,8 @@ chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered"
 `prove-machine` emits universal inductive obligations for the initial states, the state contract, emitted commands, invariants, and transition properties, then calls tla-ts's proof engine. It reports `proved` only if every obligation is discharged. This can prove some machines with open state and command domains (see [`examples/open-machine.spec.ts`](examples/open-machine.spec.ts)); unsupported schema and expression constructs, or obligations the prover cannot discharge, remain `undetermined`. A proof is over the TLA+ interpretation of the supported expression subset; `runMachine` is still the executable implementation. Use `model-check` for counterexample traces and `prove-machine` for inductive claims.
 
 `checkMachine` enumerates command values from their schema, then explores reachable states breadth first. A failing invariant or invalid state reports `broken` with the shortest *initial command sequence among explored paths* reaching it. An open command domain or a `maxStates` / `domainLimit` / `maxCommands` cutoff reports `undetermined`. `held` means all commands from the declared finite domain and all reachable states were checked. No claim is made about commands outside the schema or states outside the declared initial states. The reducer is built from Chisel terms and expressions; external dependency calls are refused. Emitted commands are internal transitions, not I/O. `runMachine` validates input and output schemas, while the verification tools check invariants and transition properties; `maxCommands` bounds recursive emissions. This executes the checked model itself without a separate runtime implementation. `world` and `explore` below remain useful when input domains cannot be enumerated, but their successful walks are samples.
+
+The transition callback deliberately receives a smaller builder and smaller terms than the general `/full` model API. `machine()` accepts integer, int64, boolean, string, enum, literal, object, variant, and array schemas; that restriction is recursive. It accepts object and array values built from literals and machine terms, array length reads, `machine.choose`, exhaustive `machine.match` over a state or command value, and `machine.map` over a state or command array while preserving its element schema. Other operations and schemas require further implementation before they can be used in machines. Declaration-time validation also checks JavaScript and callers that erase the types.
 
 ## Invariants a world keeps
 
@@ -578,7 +582,7 @@ The [Souther comparison and design decisions](docs/souther-comparison.html) reco
 
 ## Publishing
 
-The `release.yml` workflow publishes `@toiroakr/chisel` when a `v*` tag is pushed. The tag must match the version in `package.json` (for example, `v0.2.0` for version `0.2.0`). Publishing runs the type check, tests, and build through `prepublishOnly`. The workflow can also be rerun manually by selecting the release tag.
+The `release.yml` workflow publishes `@toiroakr/chisel` when a `v*` tag is pushed. The tag must match the version in `package.json` (for example, `v0.3.0` for version `0.3.0`). Publishing runs the type check, tests, and build through `prepublishOnly`. The workflow can also be rerun manually by selecting the release tag.
 
 Configure an npm Trusted Publisher for `@toiroakr/chisel` with:
 

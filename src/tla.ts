@@ -200,14 +200,17 @@ class Compiler {
   constructor(private readonly stateSchema: AnySchema, private readonly commandSchema: AnySchema) {}
 
   value(value: unknown, names: Names, result = false): string {
+    // No executable value in the supported machine domain is a TLA+ set.
+    // The empty set therefore provides a distinct encoding for null.
+    if (value === null) return "{}";
     if (isTerm(value)) return this.term(termData(value), names);
     const node = nodeOf(value);
     if (node?.kind === "choose") return `(IF ${this.rule(node.condition, names, names.get("") ?? "s")} THEN ${this.value(node.yes, names, result)} ELSE ${this.value(node.no, names, result)})`;
     if (node?.kind === "bind") {
       const data = isTerm(node.value) ? termData(node.value) : undefined;
-      const source = data?.kind === "position" && data.path.length === 1 ? data.path[0] : undefined;
-      if ((source !== "state" || node.schema !== this.stateSchema) &&
-          (source !== "command" || node.schema !== this.commandSchema)) {
+      const source = data?.kind === "position" ? (data.path[0] === "state" ? this.stateSchema : data.path[0] === "command" ? this.commandSchema : undefined) : undefined;
+      const selected = source && data?.kind === "position" ? schemaAtPath(source, data.path.slice(1)) : undefined;
+      if (data?.kind !== "position" || data.measure !== "value" || selected !== node.schema) {
         throw new SpecificationError("TLA+ translation cannot preserve bind schema validation");
       }
       const local = `local${this.next++}`;
@@ -215,8 +218,10 @@ class Compiler {
     }
     if (node?.kind === "map") {
       const data = isTerm(node.values) ? termData(node.values) : undefined;
-      if (data?.kind !== "position" || data.path.length !== 1 || data.path[0] !== "state" ||
-          this.stateSchema.kind !== "array" || (this.stateSchema as ArraySchema<unknown>).element !== node.element ||
+      const source = data?.kind === "position" ? (data.path[0] === "state" ? this.stateSchema : data.path[0] === "command" ? this.commandSchema : undefined) : undefined;
+      const array = source && data?.kind === "position" ? schemaAtPath(source, data.path.slice(1)) : undefined;
+      if (data?.kind !== "position" || data.measure !== "value" || array?.kind !== "array" ||
+          (array as ArraySchema<unknown>).element !== node.element ||
           node.element !== node.output || !this.safeMappedBody(node.body, node.element as AnySchema, node.name)) {
         throw new SpecificationError("TLA+ translation cannot preserve map element and output schema validation");
       }
@@ -241,8 +246,9 @@ class Compiler {
     if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
       const fields = Object.entries(value);
       if (result && !fields.some(([key]) => key === "commands")) fields.push(["commands", []]);
-      if (!fields.length) throw new SpecificationError("TLA+ translation cannot represent an empty record");
-      return `[${fields.map(([key, child]) => `${identifier(key)} |-> ${this.value(child, names)}`).join(", ")}]`;
+      if (!fields.length) return `{{}}`;
+      const key = `field${this.next++}`;
+      return `[${key} \\in ${set(fields.map(([field]) => JSON.stringify(field)))} |-> CASE ${fields.map(([field, child]) => `${key} = ${JSON.stringify(field)} -> ${this.value(child, names)}`).join(" [] ")}]`;
     }
     throw new SpecificationError(`TLA+ translation cannot represent ${String(value)}`);
   }
@@ -267,19 +273,19 @@ class Compiler {
 
   paired(condition: unknown, each: { readonly path: readonly string[]; readonly by?: string }, kind: string | undefined,
     beforeRoot = "previous", afterRoot = "state"): string {
-    const before = each.path.reduce((root, field) => `${root}.${identifier(field)}`, `(${beforeRoot})`);
-    const after = each.path.reduce((root, field) => `${root}.${identifier(field)}`, `(${afterRoot})`);
+    const before = each.path.reduce((root, field) => `${root}[${JSON.stringify(field)}]`, `(${beforeRoot})`);
+    const after = each.path.reduce((root, field) => `${root}[${JSON.stringify(field)}]`, `(${afterRoot})`);
     if (kind === "record") {
       const earlier = `${before}[key]`, later = `${after}[key]`;
       const rule = this.condition(condition, new Map([["before", earlier], ["after", later]]), later);
       return `(\\A key \\in (DOMAIN ${before} \\cap DOMAIN ${after}): ${earlier} = ${later} \\/ (${rule}))`;
     }
     if (kind !== "array" || each.by === undefined) throw new SpecificationError("TLA+ translation cannot pair this collection");
-    const key = identifier(each.by);
+    const key = `[${JSON.stringify(each.by)}]`;
     const bi = `${before}[i]`, aj = `${after}[j]`;
     const rule = this.condition(condition, new Map([["before", bi], ["after", aj]]), aj);
-    const unique = (collection: string) => `(\\A x, y \\in 1..Len(${collection}): x = y \\/ ${collection}[x].${key} # ${collection}[y].${key})`;
-    return `(${unique(before)} /\\ ${unique(after)} /\\ \\A i \\in 1..Len(${before}): \\A j \\in 1..Len(${after}): ${bi}.${key} # ${aj}.${key} \\/ ${bi} = ${aj} \\/ (${rule}))`;
+    const unique = (collection: string) => `(\\A x, y \\in 1..Len(${collection}): x = y \\/ ${collection}[x]${key} # ${collection}[y]${key})`;
+    return `(${unique(before)} /\\ ${unique(after)} /\\ \\A i \\in 1..Len(${before}): \\A j \\in 1..Len(${after}): ${bi}${key} # ${aj}${key} \\/ ${bi} = ${aj} \\/ (${rule}))`;
   }
 
   schema(schema: AnySchema, value: string): string {
@@ -293,14 +299,14 @@ class Compiler {
       case "literal": type = `${value} = ${this.value((schema as LiteralSchema<string | number | boolean | null>).value, new Map())}`; break;
       case "object": {
         const fields = Object.entries((schema as ObjectSchema<ObjectShape>).shape);
-        type = `(DOMAIN ${value} = ${set(fields.map(([field]) => JSON.stringify(field)))} /\\ ${fields.map(([field, child]) => this.schema(child, `${value}.${identifier(field)}`)).join(" /\\ ") || "TRUE"})`;
+        type = fields.length === 0 ? `${value} = {{}}` : `(DOMAIN ${value} = ${set(fields.map(([field]) => JSON.stringify(field)))} /\\ ${fields.map(([field, child]) => this.schema(child, `${value}[${JSON.stringify(field)}]`)).join(" /\\ ")})`;
         break;
       }
       case "variants": {
         const sum = schema as AnyVariantsSchema;
         type = `(${sum.variantTags.map(tag => {
           const fields = sum.variants[tag]!.shape as ObjectShape;
-          return `(${value}.${identifier(sum.discriminant)} = ${JSON.stringify(tag)} /\\ DOMAIN ${value} = ${set([sum.discriminant, ...Object.keys(fields)].map(field => JSON.stringify(field)))}${Object.entries(fields).map(([field, child]) => ` /\\ ${this.schema(child, `${value}.${identifier(field)}`)}`).join("")})`;
+          return `(${value}[${JSON.stringify(sum.discriminant)}] = ${JSON.stringify(tag)} /\\ DOMAIN ${value} = ${set([sum.discriminant, ...Object.keys(fields)].map(field => JSON.stringify(field)))}${Object.entries(fields).map(([field, child]) => ` /\\ ${this.schema(child, `${value}[${JSON.stringify(field)}]`)}`).join("")})`;
         }).join(" \\/ ")})`;
         break;
       }
@@ -354,11 +360,12 @@ class Compiler {
   }
 
   position(path: readonly string[], measure: string, names: Names): string {
-    if (measure !== "value") throw new SpecificationError(`TLA+ translation does not support measure ${measure}`);
+    if (measure !== "value" && measure !== "length") throw new SpecificationError(`TLA+ translation does not support measure ${measure}`);
     const named = names.get(path[0] ?? "");
     const root = named ?? names.get("");
     if (root === undefined) throw new SpecificationError(`TLA+ translation cannot resolve term ${path.join(".")}`);
-    return path.slice(named === undefined ? 0 : 1).reduce((current, part) => `${current}.${identifier(part)}`, root);
+    const result = path.slice(named === undefined ? 0 : 1).reduce((current, part) => `${current}[${JSON.stringify(part)}]`, root);
+    return measure === "length" ? `Len(${result})` : result;
   }
 }
 

@@ -2,7 +2,7 @@ import { isPromiseLike, snapshotValue } from "./data.js";
 import type { Decimal } from "decimal.js";
 import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
-import type { Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
+import type { MachineTermOf, Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
 import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, selfTerm, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -16,9 +16,16 @@ export interface Expression<T> {
   readonly [EXPRESSION]: Node;
   readonly output?: T;
 }
+declare const MACHINE_EXPRESSION: unique symbol;
+export interface MachineExpression<T> extends Expression<T> {
+  readonly [MACHINE_EXPRESSION]: true;
+}
 export type Template<T> = Term<T> | Expression<T> | (T extends readonly (infer E)[]
   ? readonly Template<E>[]
   : T extends object ? { readonly [K in keyof T]: Template<T[K]> } : T);
+export type MachineTemplate<T> = Term<T> | MachineExpression<T> | (T extends readonly (infer E)[]
+  ? readonly MachineTemplate<E>[]
+  : T extends object ? { readonly [K in keyof T]: MachineTemplate<T[K]> } : T);
 export type Node =
   | { readonly kind: "bind"; readonly name: string; readonly schema: Schema<unknown>; readonly value: unknown; readonly body: unknown }
   | { readonly kind: "map"; readonly name: string; readonly element: Schema<unknown>; readonly output: Schema<unknown>; readonly values: unknown; readonly body: unknown }
@@ -73,6 +80,23 @@ export function localRoots(value: unknown): readonly string[] {
 export function choose<T>(condition: Rule, yes: Template<T>, no: Template<NoInfer<T>>): Expression<T> {
   return expression({ kind: "choose", condition, yes, no });
 }
+
+export interface MachineBuilder {
+  choose<T>(condition: Rule, yes: MachineTemplate<T>, no: MachineTemplate<NoInfer<T>>): MachineExpression<T>;
+  match<S extends AnyVariantsSchema, Result>(schema: S, value: MachineTemplate<NoInfer<Infer<S>>>, cases: {
+    readonly [Tag in Tags<S>]: (value: MachineTermOf<VariantOf<S, Tag>>) => MachineTemplate<Result>
+  }): MachineExpression<Result>;
+  map<Element>(schema: Schema<Element>, values: MachineTemplate<readonly NoInfer<Element>[]>,
+    build: (value: MachineTermOf<Element>) => MachineTemplate<NoInfer<Element>>): MachineExpression<readonly Element[]>;
+}
+
+export const machineBuilder: MachineBuilder = Object.freeze({
+  choose: (condition: Rule, yes: unknown, no: unknown) => choose(condition, yes, no) as MachineExpression<unknown>,
+  match: (schema: AnyVariantsSchema, value: unknown, cases: Readonly<Record<string, (value: TermOf<unknown>) => unknown>>) =>
+    matchValue(schema, value as never, cases as never) as MachineExpression<unknown>,
+  map: (schema: Schema<unknown>, values: unknown, build: (value: TermOf<unknown>) => unknown) =>
+    map(schema, schema, values as never, build as never) as MachineExpression<readonly unknown[]>,
+}) as MachineBuilder;
 export function construct<T>(schema: Schema<T>, value: Template<NoInfer<T extends object ? Pick<T, Extract<keyof T, string | number>> : T>>): Expression<T> {
   return expression({ kind: "construct", schema: schema as Schema<unknown>, value });
 }
