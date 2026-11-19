@@ -185,3 +185,7 @@ export async function checkTlaSource(source: string) {
   const compiled = compileTlaSource(source);
   return check({ source: compiled.specification, config: compiled.config });
 }
+
+export function mapTlaSource(source: string) {
+  return { text: compileTlaSource(source).declarations, extension: ".ts", mappings: [] as number[][] };
+}

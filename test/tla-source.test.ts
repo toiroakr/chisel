@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { compileTlaSource, checkTlaSource } from "../src/tla-source.js";
+import { compileTlaSource, checkTlaSource, mapTlaSource } from "../src/tla-source.js";
 import { createTlaMachine, tlaEqual, tlaExcept, tlaInRange } from "../src/tla-runtime.js";
 import { chiselTla } from "../src/vite.js";
 
@@ -18,6 +18,7 @@ describe("TLA+ source as an executable machine", () => {
     const compiled = compileTlaSource(source);
     expect(compiled.declarations).toContain('export type Command = "go" | "finish"');
     expect(compiled.declarations).toContain('export type State = { "count": 0 | 1 | 2 }');
+    expect(mapTlaSource(source)).toMatchObject({ extension: ".ts", text: compiled.declarations, mappings: [] });
     expect(chiselTla().transform(source, "counter.tla")).toBe(compiled.code);
     expect(chiselTla().transform(source, "other.ts")).toBeNull();
     const machine = execute(source);
