@@ -3,6 +3,16 @@ import * as c from "../src/index.js";
 import { orderSpecification } from "../examples/order-machine.spec.js";
 
 describe("TLA+ translation of executable machines", () => {
+  it("matches a nested variant using its own schema", async () => {
+    const Inner = c.variants("tag", { off: c.object({}), on: c.object({}) });
+    const State = c.object({ inner: Inner, flag: c.boolean() });
+    const machine = c.machine("nested match", { state: State, command: c.boolean(), initial: [{ inner: { tag: "off" }, flag: false }],
+      update: (state, _command, m) => ({ state: { inner: state.inner,
+        flag: m.match<typeof Inner, boolean>(Inner, state.inner, { off: () => true, on: () => false }) } }) });
+    const spec = c.specifyMachine(machine, { invariants: [c.invariant<c.Infer<typeof State>>("off", state => state.flag.$eq(false))] });
+    expect(c.checkMachine(spec)).toMatchObject({ status: "broken" });
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
+  });
   it("represents null as a value distinct from empty objects", async () => {
     const State = c.object({ value: c.literal(null), empty: c.object({}) });
     const machine = c.machine("null", { state: State, command: c.boolean(), initial: [{ value: null, empty: {} }], update: state => ({ state }) });
@@ -117,7 +127,7 @@ describe("TLA+ translation of executable machines", () => {
     const command = c.boolean();
     expect(() => c.machine("invalid bind", { state, command, initial: [0],
       update: ((current: c.TermOf<number>) => c.bind<number, { state: number }>(c.int().min(1), 0, () => ({ state: current }))) as never,
-    })).toThrow("can only match the complete state or command value");
+    })).toThrow("can only match a state or command value with its own schema");
     expect(() => c.machine("invalid construction", { state, command, initial: [0],
       update: (() => ({ state: c.construct(c.int().min(1), 0) })) as never,
     })).toThrow("cannot use construct");

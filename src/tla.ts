@@ -208,9 +208,9 @@ class Compiler {
     if (node?.kind === "choose") return `(IF ${this.rule(node.condition, names, names.get("") ?? "s")} THEN ${this.value(node.yes, names, result)} ELSE ${this.value(node.no, names, result)})`;
     if (node?.kind === "bind") {
       const data = isTerm(node.value) ? termData(node.value) : undefined;
-      const source = data?.kind === "position" && data.path.length === 1 ? data.path[0] : undefined;
-      if ((source !== "state" || node.schema !== this.stateSchema) &&
-          (source !== "command" || node.schema !== this.commandSchema)) {
+      const source = data?.kind === "position" ? (data.path[0] === "state" ? this.stateSchema : data.path[0] === "command" ? this.commandSchema : undefined) : undefined;
+      const selected = source && data?.kind === "position" ? schemaAtPath(source, data.path.slice(1)) : undefined;
+      if (data?.kind !== "position" || data.measure !== "value" || selected !== node.schema) {
         throw new SpecificationError("TLA+ translation cannot preserve bind schema validation");
       }
       const local = `local${this.next++}`;

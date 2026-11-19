@@ -98,9 +98,10 @@ function assertMachineExpression(name: string, value: unknown, state: AnySchema,
     }
     if (node?.kind === "bind") {
       const data = isTerm(node.value) ? termData(node.value) : undefined;
-      const source = data?.kind === "position" && data.path.length === 1 ? data.path[0] : undefined;
-      if ((source !== "state" || node.schema !== state) && (source !== "command" || node.schema !== command)) {
-        throw new SpecificationError(`Machine ${name} can only match the complete state or command value`);
+      const source = data?.kind === "position" ? (data.path[0] === "state" ? state : data.path[0] === "command" ? command : undefined) : undefined;
+      const selected = source && data?.kind === "position" ? schemaAtPath(source, data.path.slice(1)) : undefined;
+      if (data?.kind !== "position" || data.measure !== "value" || selected !== node.schema) {
+        throw new SpecificationError(`Machine ${name} can only match a state or command value with its own schema`);
       }
       childrenOf(current).forEach(visit);
       return;
