@@ -68,16 +68,15 @@ export type AnySchema = Schema<unknown>;
 export type Infer<S> = S extends Schema<infer T> ? T : never;
 
 // Evaluates to S only when the complete schema has a direct TLA+ carrier.
-// Runtime validation additionally checks constraints TypeScript cannot express,
-// such as legal TLA+ field names and non-empty records.
+// Runtime validation additionally checks constraints TypeScript cannot express.
 export type MachineCompatibleSchema<S extends AnySchema> =
   S extends { readonly kind: "integer" | "int64" | "boolean" | "string" | "enum" } ? S
-  : S extends { readonly kind: "literal"; readonly value: infer Value } ? (Value extends null ? never : S)
+  : S extends { readonly kind: "literal"; readonly value: infer Value }
+    ? Value extends number ? `${Value}` extends `${bigint}` ? S : never : S
   : S extends { readonly kind: "array"; readonly element: infer Element extends AnySchema }
     ? MachineCompatibleSchema<Element> extends never ? never : S
   : S extends { readonly kind: "object"; readonly shape: infer Shape extends ObjectShape }
-    ? [keyof Shape] extends [never] ? never
-      : MachineCompatibleShape<Shape> extends true ? S : never
+    ? MachineCompatibleShape<Shape> extends true ? S : never
   : S extends { readonly kind: "variants"; readonly variants: infer Variants extends VariantTable }
     ? Extract<{ [Tag in keyof Variants]: Variants[Tag] extends { readonly shape: infer Shape extends ObjectShape }
         ? MachineCompatibleShape<Shape> extends true ? never : Tag : Tag }[keyof Variants], string> extends never ? S : never

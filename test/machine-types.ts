@@ -42,8 +42,10 @@ c.machine("unsupported nested schema", {
   update: state => ({ state }),
 });
 
-// @ts-expect-error TLA+ has no null value in Chisel's machine representation.
-c.machine("unsupported null", {
+c.machine("null", {
   state: c.literal(null), command: Command, initial: [null],
   update: state => ({ state }),
 });
+
+// @ts-expect-error Fractional numeric literals are not yet supported by the TLA+ compiler.
+c.machine("fractional literal", { state: c.literal(0.5), command: Command, initial: [0.5], update: state => ({ state }) });

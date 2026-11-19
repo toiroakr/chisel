@@ -24,13 +24,12 @@ describe("executable state machine", () => {
     expect(() => c.machine("operation", { state: State, command: Command, initial: [0],
       update: ((state: c.TermOf<number>) => ({ state: c.arithmetic("multiply", state, 2) })) as never,
     })).toThrow("cannot use operation");
-    const ArrayState = c.array(c.int().min(0).max(1)).max(2);
-    expect(() => c.machine("measure", { state: ArrayState, command: Command, initial: [[]],
-      update: ((state: c.TermOf<readonly number[]>) => ({ state: [state.$length()] })) as never,
+    expect(() => c.machine("measure", { state: c.string(), command: Command, initial: [""],
+      update: ((state: c.TermOf<string>) => ({ state: state.$trim() })) as never,
     })).toThrow("cannot use transformed or measured terms");
     expect(() => c.machine("optional", { state: c.boolean().optional(), command: Command, initial: [false],
       update: (state: c.TermOf<boolean | undefined>) => ({ state }),
-    } as never)).toThrow("has no exact TLA+ representation");
+    } as never)).toThrow("not yet supported by the TLA+ compiler");
   });
 
   it("rejects verification properties embedded in the runtime declaration", () => {
@@ -161,7 +160,7 @@ describe("executable state machine", () => {
     const State = c.boolean().optional();
     expect(() => c.machine("optional state", { state: State, command: c.boolean(), initial: [false],
       update: () => ({ state: undefined }),
-    } as never)).toThrow("has no exact TLA+ representation");
+    } as never)).toThrow("not yet supported by the TLA+ compiler");
   });
 
   it("keeps checking other commands when one exceeds the execution budget", () => {

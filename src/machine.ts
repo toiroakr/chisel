@@ -9,6 +9,7 @@ import type { MachineBuilder, MachineTemplate } from "./model.js";
 import { machineRootTerm } from "./rule.js";
 import { isTerm, termData } from "./rule.js";
 import type { MachineTermOf } from "./rule.js";
+import { schemaAtPath } from "./schema.js";
 import type { AnySchema, Infer, MachineCompatibleSchema, Schema } from "./schema.js";
 
 export type MachineCommand<State, Command> = MachineTemplate<{
@@ -57,24 +58,21 @@ function assertMachineSchema(name: string, role: "state" | "command", schema: An
   if (visited.has(schema)) return;
   visited.add(schema);
   if (!["integer", "int64", "boolean", "string", "enum", "literal", "object", "variants", "array"].includes(schema.kind)) {
-    throw new SpecificationError(`Machine ${name} ${role} schema ${schema.kind} has no exact TLA+ representation`);
+    throw new SpecificationError(`Machine ${name} ${role} schema ${schema.kind} is not yet supported by the TLA+ compiler`);
   }
-  if (schema.kind === "literal" && (schema as AnySchema & { readonly value: unknown }).value === null) {
-    throw new SpecificationError(`Machine ${name} ${role} schema uses null, which has no TLA+ value representation`);
+  if (schema.kind === "literal") {
+    const value = (schema as AnySchema & { readonly value: unknown }).value;
+    if (typeof value === "number" && !Number.isSafeInteger(value)) throw new SpecificationError(`Machine ${name} ${role} numeric literal must be a safe integer`);
   }
   if (schema.kind === "object") {
     const shape = (schema as AnySchema & { readonly shape: Readonly<Record<string, AnySchema>> }).shape;
-    if (Object.keys(shape).length === 0) throw new SpecificationError(`Machine ${name} ${role} schema contains an empty record`);
     for (const [field, child] of Object.entries(shape)) {
-      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(field)) throw new SpecificationError(`Machine ${name} ${role} field ${field} is not a TLA+ identifier`);
       assertMachineSchema(name, role, child, visited);
     }
   }
   if (schema.kind === "variants") {
     const sum = schema as AnySchema & { readonly discriminant: string; readonly variants: Readonly<Record<string, { readonly shape: Readonly<Record<string, AnySchema>> }>> };
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(sum.discriminant)) throw new SpecificationError(`Machine ${name} ${role} discriminant ${sum.discriminant} is not a TLA+ identifier`);
     for (const variant of Object.values(sum.variants)) for (const [field, child] of Object.entries(variant.shape)) {
-      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(field)) throw new SpecificationError(`Machine ${name} ${role} field ${field} is not a TLA+ identifier`);
       assertMachineSchema(name, role, child, visited);
     }
   }
@@ -109,10 +107,12 @@ function assertMachineExpression(name: string, value: unknown, state: AnySchema,
     }
     if (node?.kind === "map") {
       const data = isTerm(node.values) ? termData(node.values) : undefined;
-      if (data?.kind !== "position" || data.path.length !== 1 || data.path[0] !== "state" ||
-          state.kind !== "array" || (state as Schema<unknown> & { readonly element: Schema<unknown> }).element !== node.element ||
+      const source = data?.kind === "position" ? (data.path[0] === "state" ? state : data.path[0] === "command" ? command : undefined) : undefined;
+      const array = source && data?.kind === "position" ? schemaAtPath(source, data.path.slice(1)) : undefined;
+      if (data?.kind !== "position" || data.measure !== "value" || array?.kind !== "array" ||
+          (array as Schema<unknown> & { readonly element: Schema<unknown> }).element !== node.element ||
           node.output !== node.element || !safeMappedBody(node.body, node.element, node.name)) {
-        throw new SpecificationError(`Machine ${name} can only map its complete array state while preserving its element schema`);
+        throw new SpecificationError(`Machine ${name} can only map a state or command array while preserving its element schema`);
       }
       childrenOf(current).forEach(visit);
       return;
@@ -120,12 +120,20 @@ function assertMachineExpression(name: string, value: unknown, state: AnySchema,
     if (node) throw new SpecificationError(`Machine ${name} cannot use ${node.kind} in an executable transition`);
     if (isTerm(current)) {
       const data = termData(current);
-      const measures = data.kind === "position" ? [data.measure] : data.parts.map(part => part.measure);
-      if (measures.some(measure => measure !== "value")) {
+      if (data.kind === "linear" && (!Number.isSafeInteger(data.constant) || data.parts.some(part => !Number.isSafeInteger(part.coefficient)))) {
+        throw new SpecificationError(`Machine ${name} arithmetic constants and coefficients must be safe integers`);
+      }
+      const positions = data.kind === "position" ? [data] : data.parts;
+      if (positions.some(part => {
+        if (part.measure === "value") return false;
+        const root = part.path[0] === "state" ? state : part.path[0] === "command" ? command : undefined;
+        return part.measure !== "length" || !root || schemaAtPath(root, part.path.slice(1))?.kind !== "array";
+      })) {
         throw new SpecificationError(`Machine ${name} cannot use transformed or measured terms in an executable transition`);
       }
       return;
     }
+    if (typeof current === "number" && !Number.isSafeInteger(current)) throw new SpecificationError(`Machine ${name} numeric constants must be safe integers`);
     if (current === null || typeof current !== "object") return;
     for (const child of Object.values(current)) visit(child);
   };

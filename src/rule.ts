@@ -187,7 +187,7 @@ export type MachineTermOf<T> = Term<T> &
       : [T] extends [string]
         ? Ordered<T>
         : [T] extends [readonly (infer E)[]]
-          ? MachineQuantified<E>
+          ? MachineQuantified<E> & { $length(): MachineTermOf<number> }
           : [T] extends [object]
             ? MachineFields<T>
             : unknown);
