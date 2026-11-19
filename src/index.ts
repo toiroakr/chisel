@@ -44,7 +44,7 @@ export type {
   VariantOf,
 } from "./schema.js";
 
-export type { Comparable, Condition, InvariantRule, Operand, Operator, Rule, Term, TermOf } from "./rule.js";
+export type { Comparable, Condition, InvariantRule, MachineTermOf, Operand, Operator, Rule, Term, TermOf } from "./rule.js";
 
 export type { Beside } from "./beside.js";
 export { formatTypeScriptValue } from "./codegen.js";
@@ -182,7 +182,7 @@ export type { PairObligation, PairMeasure } from "./pairs.js";
 
 export { model, bind, matchValue, map, fold, call, choose, construct, concat, arithmetic, quotient, plus, minus, between } from "./model.js";
 export type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
-export type { Expression, Template } from "./model.js";
+export type { Expression, Template, MachineBuilder, MachineExpression, MachineTemplate } from "./model.js";
 
 export { verify } from "./proof.js";
 export type { ConstructionProof, ProofReport } from "./proof.js";

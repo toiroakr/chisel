@@ -135,6 +135,20 @@ type Fields<T> = {
   readonly [K in Exclude<keyof T & string, TermOperator>]-?: TermOf<Exclude<T[K], undefined>>;
 };
 
+type MachineFields<T> = {
+  readonly [K in Exclude<keyof T & string, TermOperator>]-?: MachineTermOf<Exclude<T[K], undefined>>;
+};
+
+interface MachineArithmetic<T> {
+  $plus(other: Operand<T>): MachineTermOf<T>;
+  $minus(other: Operand<T>): MachineTermOf<T>;
+}
+
+interface MachineQuantified<E> {
+  $all(each: (element: MachineTermOf<E>) => Rule): Rule & Condition;
+  $any(each: (element: MachineTermOf<E>) => Rule): Rule & Condition;
+}
+
 export type TermOf<T> = Term<T> &
   (0 extends 1 & T
     ? { readonly [key: string]: any }
@@ -156,6 +170,26 @@ export type TermOf<T> = Term<T> &
                 ? { readonly [key: string]: any }
                 : Measured & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
               : Fields<T>
+            : unknown);
+
+// A machine exposes only term operations whose meaning is shared by the
+// TypeScript interpreter and generated TLA+. Length and string transforms
+// remain available in the broader model DSL.
+export type MachineTermOf<T> = Term<T> &
+  (0 extends 1 & T
+    ? never
+    : [T] extends [boolean]
+    ? Equatable<T>
+    : [T] extends [number]
+      ? Ordered<T> & MachineArithmetic<T>
+      : [T] extends [bigint]
+      ? Ordered<T>
+      : [T] extends [string]
+        ? Ordered<T>
+        : [T] extends [readonly (infer E)[]]
+          ? MachineQuantified<E>
+          : [T] extends [object]
+            ? MachineFields<T>
             : unknown);
 
 export type InvariantRule<T> = { bivariant(self: TermOf<T>): Rule }["bivariant"];
@@ -277,6 +311,10 @@ export function withDeps(input: unknown, deps: unknown): unknown {
 
 export function rootTerm<T>(key: string): TermOf<T> {
   return termAt([key], "value") as TermOf<T>;
+}
+
+export function machineRootTerm<T>(key: string): MachineTermOf<T> {
+  return termAt([key], "value") as MachineTermOf<T>;
 }
 
 export function termPaths(rule: Rule): readonly (readonly string[])[] {

@@ -11,15 +11,28 @@ function example(invariant = c.invariant<number>("at most two", state => state.$
     state: State,
     command: Command,
     initial: [0],
-    update: (state, command) => ({
-      state: c.choose(state.$lt(2), state.$plus(1), state),
-      commands: c.choose(command.$eq("go"), ["finish" as const], [] as const),
+    update: (state, command, machine) => ({
+      state: machine.choose(state.$lt(2), state.$plus(1), state),
+      commands: machine.choose(command.$eq("go"), ["finish" as const], [] as const),
     }),
   });
   return c.specifyMachine(declaration, { invariants: [invariant] });
 }
 
 describe("executable state machine", () => {
+  it("refuses transition expressions that cannot be translated to TLA+", () => {
+    expect(() => c.machine("operation", { state: State, command: Command, initial: [0],
+      update: ((state: c.TermOf<number>) => ({ state: c.arithmetic("multiply", state, 2) })) as never,
+    })).toThrow("cannot use operation");
+    const ArrayState = c.array(c.int().min(0).max(1)).max(2);
+    expect(() => c.machine("measure", { state: ArrayState, command: Command, initial: [[]],
+      update: ((state: c.TermOf<readonly number[]>) => ({ state: [state.$length()] })) as never,
+    })).toThrow("cannot use transformed or measured terms");
+    expect(() => c.machine("optional", { state: c.boolean().optional(), command: Command, initial: [false],
+      update: (state: c.TermOf<boolean | undefined>) => ({ state }),
+    } as never)).toThrow("has no exact TLA+ representation");
+  });
+
   it("rejects verification properties embedded in the runtime declaration", () => {
     expect(() => c.machine("wrong", { state: State, command: Command, initial: [0],
       update: (state: c.TermOf<number>) => ({ state }), invariants: [] } as never)).toThrow("separate specifyMachine");
@@ -47,13 +60,13 @@ describe("executable state machine", () => {
     const Action = c.variants("type", { approve: c.object({}), issue: c.object({}) });
     const workflow = c.machine("order", {
       state: Order, command: Action, initial: [{ phase: "draft", quantity: 1 }],
-      update: (state, command) => c.matchValue(Action, command, {
+      update: (state, command, machine) => machine.match(Action, command, {
         approve: () => ({
-          state: { phase: c.choose<c.Infer<typeof Phase>>(state.phase.$eq("draft"), "approved", state.phase), quantity: state.quantity },
+          state: { phase: machine.choose<c.Infer<typeof Phase>>(state.phase.$eq("draft"), "approved", state.phase), quantity: state.quantity },
           commands: [{ type: "issue" as const }],
         }),
         issue: () => ({
-          state: { phase: c.choose<c.Infer<typeof Phase>>(state.phase.$eq("approved"), "issued", state.phase), quantity: state.quantity },
+          state: { phase: machine.choose<c.Infer<typeof Phase>>(state.phase.$eq("approved"), "issued", state.phase), quantity: state.quantity },
           commands: [],
         }),
       }),
@@ -81,7 +94,7 @@ describe("executable state machine", () => {
   it("checks properties of each individual transition", () => {
     const declaration = c.machine("counter", {
       state: State, command: c.enum(["up", "down"] as const), initial: [1],
-      update: (state, command) => ({ state: c.choose(command.$eq("up"), state.$plus(1), state.$minus(1)) }),
+      update: (state, command, machine) => ({ state: machine.choose(command.$eq("up"), state.$plus(1), state.$minus(1)) }),
     });
     expect(c.checkMachine(c.specifyMachine(declaration, { transitions: [c.transition<number>("never decreases", (before, after) => after.$gte(before))] }))).toMatchObject({
       status: "broken", counterexample: { start: 1, commands: ["down"], steps: [{ before: 1, after: 0 }] },
@@ -144,21 +157,20 @@ describe("executable state machine", () => {
     });
   });
 
-  it("explores undefined when the state schema accepts it", () => {
+  it("rejects a runtime state shape that has no exact TLA+ representation", () => {
     const State = c.boolean().optional();
-    const declaration = c.machine("optional state", { state: State, command: c.boolean(), initial: [false],
+    expect(() => c.machine("optional state", { state: State, command: c.boolean(), initial: [false],
       update: () => ({ state: undefined }),
-    });
-    expect(c.checkMachine(c.specifyMachine(declaration))).toMatchObject({ status: "held", states: 2, transitions: 4 });
+    } as never)).toThrow("has no exact TLA+ representation");
   });
 
   it("keeps checking other commands when one exceeds the execution budget", () => {
     const Action = c.enum(["loop", "break"] as const);
     const declaration = c.machine("budget", {
       state: State, command: Action, initial: [0],
-      update: (_state, command) => ({
-        state: c.choose(command.$eq("break"), 1, 0),
-        commands: c.choose(command.$eq("loop"), ["loop" as const], [] as const),
+      update: (_state, command, machine) => ({
+        state: machine.choose(command.$eq("break"), 1, 0),
+        commands: machine.choose(command.$eq("loop"), ["loop" as const], [] as const),
       }),
     });
     expect(c.checkMachine(c.specifyMachine(declaration, { invariants: [c.invariant<number>("stays zero", state => state.$eq(0))] }), { maxCommands: 2 })).toMatchObject({

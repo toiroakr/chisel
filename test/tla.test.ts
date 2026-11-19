@@ -14,7 +14,7 @@ describe("TLA+ translation of executable machines", () => {
     const state = c.int().min(0).max(2);
     const declaration = c.machine("counter", {
       state, command: c.enum(["advance"] as const), initial: [0],
-      update: value => ({ state: c.choose(value.$lt(2), value.$plus(1), value) }),
+      update: (value, _command, machine) => ({ state: machine.choose(value.$lt(2), value.$plus(1), value) }),
     });
     expect(await c.checkMachineTla(c.specifyMachine(declaration, { invariants: [c.invariant<number>("at most one", value => value.$lte(1))] }))).toMatchObject({
       status: "broken", reason: "at most one", trace: [{ state: "0" }, { state: "1" }, { state: "2" }],
@@ -40,7 +40,7 @@ describe("TLA+ translation of executable machines", () => {
     const State = c.array(Item).max(1);
     const declaration = c.machine("array", {
       state: State, command: c.boolean(), initial: [[0]],
-      update: state => ({ state: c.map(Item, Item, state, item => c.choose(item.$eq(0), 1, item)) }),
+      update: (state, _command, machine) => ({ state: machine.map(Item, state, item => machine.choose(item.$eq(0), 1, item)) }),
     });
     const specification = c.specifyMachine(declaration, { invariants: [c.invariant<readonly number[]>("all entries stay zero", values =>
       values.$all(value => value.$eq(0)))] });
@@ -63,33 +63,28 @@ describe("TLA+ translation of executable machines", () => {
     });
     const draining = c.machine("drains at limit", {
       state: c.int().min(0).max(3), command: c.boolean(), initial: [0],
-      update: state => ({ state: c.choose(state.$lt(3), state.$plus(1), state),
-        commands: c.choose(state.$lt(2), [true], [] as const) }),
+      update: (state, _command, machine) => ({ state: machine.choose(state.$lt(3), state.$plus(1), state),
+        commands: machine.choose(state.$lt(2), [true], [] as const) }),
     });
     expect(await c.checkMachineTla(c.specifyMachine(draining), { maxCommands: 3 })).toMatchObject({ status: "held" });
   });
 
-  it("refuses optional field reads rather than accepting an invalid TLA expression", async () => {
+  it("refuses optional state fields when the machine is declared", () => {
     const State = c.object({ flag: c.boolean().optional() });
-    const declaration = c.machine("optional", { state: State, command: c.boolean(), initial: [{}], update: state => ({ state }) });
-    expect(await c.checkMachineTla(c.specifyMachine(declaration, {
-      invariants: [c.invariant<c.Infer<typeof State>>("flag", state => state.flag.$eq(false))],
-    }))).toMatchObject({ status: "undetermined", reason: "TLA+ translation does not support optional state fields" });
+    expect(() => c.machine("optional", { state: State, command: c.boolean(), initial: [{}],
+      update: (state: c.TermOf<c.Infer<typeof State>>) => ({ state }) } as never))
+      .toThrow("has no exact TLA+ representation");
   });
 
   it("does not erase invalid local bind and constructor schemas", async () => {
     const state = c.int().min(0).max(1);
     const command = c.boolean();
-    const bound = c.machine("invalid bind", { state, command, initial: [0],
-      update: current => c.bind<number, { state: number }>(c.int().min(1), 0, () => ({ state: current })),
-    });
-    const constructed = c.machine("invalid construction", { state, command, initial: [0],
-      update: () => ({ state: c.construct(c.int().min(1), 0) }),
-    });
-    expect(await c.checkMachineTla(c.specifyMachine(bound))).toMatchObject({ status: "undetermined" });
-    expect(await c.checkMachineTla(c.specifyMachine(constructed))).toMatchObject({ status: "undetermined" });
-    expect((await c.proveMachine(c.specifyMachine(bound))).status).toBe("undetermined");
-    expect((await c.proveMachine(c.specifyMachine(constructed))).status).toBe("undetermined");
+    expect(() => c.machine("invalid bind", { state, command, initial: [0],
+      update: ((current: c.TermOf<number>) => c.bind<number, { state: number }>(c.int().min(1), 0, () => ({ state: current }))) as never,
+    })).toThrow("can only match the complete state or command value");
+    expect(() => c.machine("invalid construction", { state, command, initial: [0],
+      update: (() => ({ state: c.construct(c.int().min(1), 0) })) as never,
+    })).toThrow("cannot use construct");
   });
 
   it("binds nested invariant choices to the checked state", async () => {
@@ -107,11 +102,8 @@ describe("TLA+ translation of executable machines", () => {
     const Item = c.int().min(0).max(1);
     const Output = c.int().min(1);
     const State = c.array(Item).max(1);
-    const declaration = c.machine("bad map", { state: State, command: c.boolean(), initial: [[0]],
-      update: state => ({ state: c.map(Item, Output, state, element => element) }),
-    });
-    expect(() => c.runMachine(declaration, [0], true)).toThrow("Invalid local construction");
-    expect(await c.checkMachineTla(c.specifyMachine(declaration))).toMatchObject({ status: "undetermined" });
-    expect((await c.proveMachine(c.specifyMachine(declaration))).status).toBe("undetermined");
+    expect(() => c.machine("bad map", { state: State, command: c.boolean(), initial: [[0]],
+      update: ((state: c.TermOf<readonly number[]>) => ({ state: c.map(Item, Output, state, element => element) })) as never,
+    })).toThrow("preserving its element schema");
   });
 });

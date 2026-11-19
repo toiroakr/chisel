@@ -67,6 +67,26 @@ interface LengthBounds {
 export type AnySchema = Schema<unknown>;
 export type Infer<S> = S extends Schema<infer T> ? T : never;
 
+// Evaluates to S only when the complete schema has a direct TLA+ carrier.
+// Runtime validation additionally checks constraints TypeScript cannot express,
+// such as legal TLA+ field names and non-empty records.
+export type MachineCompatibleSchema<S extends AnySchema> =
+  S extends { readonly kind: "integer" | "int64" | "boolean" | "string" | "enum" } ? S
+  : S extends { readonly kind: "literal"; readonly value: infer Value } ? (Value extends null ? never : S)
+  : S extends { readonly kind: "array"; readonly element: infer Element extends AnySchema }
+    ? MachineCompatibleSchema<Element> extends never ? never : S
+  : S extends { readonly kind: "object"; readonly shape: infer Shape extends ObjectShape }
+    ? [keyof Shape] extends [never] ? never
+      : MachineCompatibleShape<Shape> extends true ? S : never
+  : S extends { readonly kind: "variants"; readonly variants: infer Variants extends VariantTable }
+    ? Extract<{ [Tag in keyof Variants]: Variants[Tag] extends { readonly shape: infer Shape extends ObjectShape }
+        ? MachineCompatibleShape<Shape> extends true ? never : Tag : Tag }[keyof Variants], string> extends never ? S : never
+  : never;
+
+type MachineCompatibleShape<Shape extends ObjectShape> =
+  Extract<{ [Key in keyof Shape]: MachineCompatibleSchema<Shape[Key]> extends never ? Key : never }[keyof Shape], string> extends never
+    ? true : false;
+
 export interface StringSchema extends Schema<string>, LengthBounds {
   readonly kind: "string";
 }
@@ -121,9 +141,9 @@ export interface LiteralSchema<T extends string | number | boolean | null>
   readonly value: T;
 }
 
-export interface ArraySchema<T> extends Schema<readonly T[]>, LengthBounds {
+export interface ArraySchema<T, Element extends Schema<T> = Schema<T>> extends Schema<readonly T[]>, LengthBounds {
   readonly kind: "array";
-  readonly element: Schema<T>;
+  readonly element: Element;
 }
 
 export interface OptionalSchema<T> extends Schema<T | undefined> {
@@ -549,20 +569,20 @@ export function object<const Shape extends ObjectShape>(
   }
 }
 
-export function array<T>(element: Schema<T>): ArraySchema<T> {
-  return refinable<ArraySchema<T>>({
+export function array<Element extends Schema<any>>(element: Element): ArraySchema<Infer<Element>, Element> {
+  return refinable<ArraySchema<Infer<Element>, Element>>({
     kind: "array",
     element,
     parse,
     placeholder: (name?: string) => [element.placeholder(name)],
   });
 
-  function parse(value: unknown, path = "$"): ValidationResult<readonly T[]> {
+  function parse(value: unknown, path = "$"): ValidationResult<readonly Infer<Element>[]> {
     if (!Array.isArray(value)) {
       return invalid(path, "Expected an array");
     }
 
-    const output: T[] = [];
+    const output: Infer<Element>[] = [];
     const issues: ValidationIssue[] = [];
 
     value.forEach((item, index) => {

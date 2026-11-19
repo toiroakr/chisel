@@ -5,7 +5,7 @@ describe("universal inductive proofs", () => {
   it("proves a guarded increment and its upper bound inductively", async () => {
     const declaration = c.machine("bounded", {
       state: c.int().min(0).max(2), command: c.boolean(), initial: [0],
-      update: state => ({ state: c.choose(state.$lt(2), state.$plus(1), state) }),
+      update: (state, _command, machine) => ({ state: machine.choose(state.$lt(2), state.$plus(1), state) }),
     });
     expect(await c.proveMachine(c.specifyMachine(declaration, { invariants: [c.invariant<number>("bounded", state => state.$lte(2))] }))).toMatchObject({ status: "proved" });
   }, 15_000);
