@@ -1,25 +1,26 @@
 # Chisel
 
-Chisel is an experimental TypeScript toolkit for growing an executable business specification from a closed data model, generated examples, and human-provided expectations.
+Chisel is an experimental TypeScript toolkit for defining executable state transitions and checking the same definitions against invariants. A machine runs in production through `@toiroakr/chisel`; its verification properties live separately in `@toiroakr/chisel/verification`, so they are not part of the runtime import graph. See [one reducer for runtime and exhaustive checking](#one-reducer-for-runtime-and-exhaustive-checking) for a complete example.
 
-The workflow is deliberately ordered:
+The machine workflow is:
 
 ```text
-declare data and behavior
-→ generate unanswered examples
-→ let a human fill expected results
-→ refine data and behavior
-→ implement an executable model
-→ check the model against the examples
+define state and commands
+→ implement one transition expression
+→ run it with runMachine
+→ declare invariants in a separate specification
+→ check reachable states or generate TLA+ proof obligations
 ```
 
 Install with `npm install @toiroakr/chisel` (Node.js 26.13.1 or newer).
 
 **0.2.0 migration:** The package root now exports the state-machine runtime. Existing 0.1.x imports of `behavior`, `spec`, `check`, and related APIs must change from `@toiroakr/chisel` to `@toiroakr/chisel/full`. Verification of machines uses `@toiroakr/chisel/verification`. This breaking export change is outside the `^0.1.0` version range.
 
+The earlier behavior-and-example workflow remains available from `/full` and is documented below.
+
 ## 1. Declare data and behavior
 
-The behavior and specification examples in sections 1–6 use `import * as c from "@toiroakr/chisel/full"`. The package root `@toiroakr/chisel` provides the executable state-machine API described below; verification code lives in `@toiroakr/chisel/verification`.
+The behavior and specification examples below use `import * as c from "@toiroakr/chisel/full"`. The package root `@toiroakr/chisel` provides the executable state-machine API described in [one reducer for runtime and exhaustive checking](#one-reducer-for-runtime-and-exhaustive-checking).
 
 The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type). An `object` holds exactly the fields it declares: a value carrying another key is refused, not trimmed, so a model answering with a stray field fails `check` instead of passing it.
 
@@ -577,7 +578,7 @@ The [Souther comparison and design decisions](docs/souther-comparison.html) reco
 
 ## Publishing
 
-The `release.yml` workflow publishes `@toiroakr/chisel` when a `v*` tag is pushed. The tag must match the version in `package.json` (for example, `v0.1.0`). Publishing runs the type check, tests, and build through `prepublishOnly`. The workflow can also be rerun manually by selecting the release tag.
+The `release.yml` workflow publishes `@toiroakr/chisel` when a `v*` tag is pushed. The tag must match the version in `package.json` (for example, `v0.2.0` for version `0.2.0`). Publishing runs the type check, tests, and build through `prepublishOnly`. The workflow can also be rerun manually by selecting the release tag.
 
 Configure an npm Trusted Publisher for `@toiroakr/chisel` with:
 
