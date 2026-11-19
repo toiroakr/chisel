@@ -3,7 +3,7 @@ import { isMainThread, parentPort, workerData } from "node:worker_threads";
 import { runIsolated } from "./isolated.js";
 
 import { realpathSync } from "node:fs";
-import { copyFile, link, mkdir, mkdtemp, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { arg, defineCommand, runCommand as executeCommand } from "@politty/zod";
@@ -29,6 +29,7 @@ import type { Machine } from "./machine.js";
 import { checkMachine, isMachineSpecification } from "./machine-check.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { checkMachineTla, proveMachine, toTla } from "./tla.js";
+import { checkTlaSource } from "./tla-source.js";
 import { reportDocument } from "./report-json.js";
 import type {
   AdequacyReport,
@@ -399,6 +400,22 @@ const runMachineCommand = defineCommand({
   },
 });
 
+const checkTlaSourceCommand = defineCommand({
+  name: "check-tla",
+  description: "TLA+を唯一の定義とするmachineを検査する",
+  args: z.object({
+    file: fileArg,
+    timeout: arg(z.coerce.number().int().positive().default(30000), { description: "実行上限（ミリ秒）" }),
+  }),
+  run: async args => {
+    const result = await checkTlaSource(await readFile(resolve(args.file), "utf8"));
+    console.log(`${args.file}: ${result.status} (${result.distinctStates} states)`);
+    if (result.violation) console.log(JSON.stringify(result.violation));
+    if (result.failure) console.log(result.failure.message);
+    if (result.status !== "success") throw new Error("TLA+ machineに反例または未確定の結果があります");
+  },
+});
+
 function jsonReplacer(_key: string, value: unknown): unknown { return typeof value === "bigint" ? String(value) : value; }
 
 export const cli = defineCommand({
@@ -413,6 +430,7 @@ export const cli = defineCommand({
     tla: tlaCommand,
     "prove-machine": proveMachineCommand,
     "run-machine": runMachineCommand,
+    "check-tla": checkTlaSourceCommand,
   },
 });
 

@@ -14,6 +14,53 @@ define state and commands
 
 Install with `npm install @toiroakr/chisel` (Node.js 26.13.1 or newer).
 
+## TLA+ as the machine source
+
+If you want the TLA+ model itself to be the executable definition, write a `.tla` file with `StateDomain`, `CommandDomain`, `InitialStates`, and a deterministic `Step(state, command)`. `Step` returns a record containing the next `state` and a sequence of `commands` to apply through the same transition. An optional `Invariant(s)` is used for checking and is absent from the generated runtime. See [the working example](examples/counter.tla).
+
+```tla
+---- MODULE CounterMachine ----
+EXTENDS Naturals, Sequences
+StateDomain == [count : 0..2]
+CommandDomain == {"go", "finish"}
+InitialStates == {[count |-> 0]}
+Step(s, c) == [
+  state |-> [count |-> IF s.count < 2 THEN s.count + 1 ELSE s.count],
+  commands |-> IF c = "go" /\ s.count = 0 THEN <<"finish">> ELSE <<>>
+]
+Invariant(s) == s.count <= 2
+====
+```
+
+Use TypeScript 7.1's Content Mapper to type an import of that file. The mapper generates declarations from the same parsed TLA+ expressions that the runtime compiler uses. TypeScript requires `--runExternalCode` for command-line checking and editor permission for the mapper:
+
+```json
+{
+  "contentMappers": [{ "package": "@toiroakr/chisel", "extensions": [".tla"] }]
+}
+```
+
+Vite compiles the import with `chiselTla()`. For Node, preload the register hook instead. Neither the runtime module nor its generated machine imports `tla-ts`:
+
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import { chiselTla } from "@toiroakr/chisel/vite";
+export default defineConfig({ plugins: [chiselTla()] });
+
+// application.ts
+import { machine } from "./counter.tla";
+machine.transition({ count: 0 }, "go"); // { state: { count: 2 }, steps: [...] }
+// count is typed as 0 | 1 | 2; command is "go" | "finish".
+```
+
+```sh
+node --import @toiroakr/chisel/register application.mjs
+chisel check-tla counter.tla
+```
+
+`check-tla` extends the authored module with a standard `Init` / `Next`, a pending command queue, the state and command domain checks, and a 1000-command budget before passing it to `tla-ts`. The runtime validates state and command domains on every step. This compiler currently accepts finite literal sets and integer ranges for domains, records, tuples, `IF`, `CASE` with `OTHER`, simple `LET`, record `EXCEPT`, comparisons, boolean operators, integer arithmetic, membership in a literal set or range, and `Append` / `Len`. It reports the location and a suggested rewrite for unsupported expressions. An arbitrary TLA+ `Next` relation or nondeterministic `CHOOSE` cannot be turned into a single executable transition; use the TypeScript-authored machine below if that better fits the model.
+
 **0.2.0 migration:** The package root now exports the state-machine runtime. Existing 0.1.x imports of `behavior`, `spec`, `check`, and related APIs must change from `@toiroakr/chisel` to `@toiroakr/chisel/full`. Verification of machines uses `@toiroakr/chisel/verification`. This breaking export change is outside the `^0.1.0` version range.
 
 The earlier behavior-and-example workflow remains available from `/full` and is documented below.

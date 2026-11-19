@@ -27,7 +27,17 @@
       "types": "./dist/verification.d.ts",
       "import": "./dist/verification.js"
     },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js"
+    },
+    "./register": "./dist/register.js",
     "./report.schema.json": "./schema/report.schema.json"
+  },
+  "typescript": {
+    "contentMapper": {
+      "exec": ["node", "./dist/content-mapper.js"]
+    }
   },
   "files": [
     "dist",
