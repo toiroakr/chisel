@@ -1,6 +1,6 @@
 {
   "name": "@toiroakr/chisel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Progressive executable specifications for TypeScript",
   "type": "module",
   "bin": {
@@ -8,12 +8,24 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
+    "./full": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./isolated": {
       "types": "./dist/isolated.d.ts",
       "import": "./dist/isolated.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
+    "./verification": {
+      "types": "./dist/verification.d.ts",
+      "import": "./dist/verification.js"
     },
     "./report.schema.json": "./schema/report.schema.json"
   },
@@ -43,12 +55,14 @@
     "@politty/zod": "^0.7.2",
     "decimal.js": "^10.6.0",
     "temporal-spec": "^1.0.1",
+    "tla-ts": "^0.0.10",
     "tsx": "^4.23.15",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
     "@vitest/coverage-v8": "^5.0.1",
+    "esbuild": "0.28.2",
     "pkg-pr-new": "0.0.93",
     "typescript": "7.0.2",
     "vitest": "^5.0.1"

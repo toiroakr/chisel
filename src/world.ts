@@ -389,7 +389,7 @@ async function shorten<T>(declaration: World<T>, start: T, plans: readonly Plan[
 // named by its key, in a way the transition does not allow, or left two
 // records with one key, which cannot be paired), or undefined when it allows
 // the step. A pair that did not change is not held to it.
-function refusedBy(item: Transition, operation: string, before: unknown, after: unknown): string | undefined {
+export function refusedBy(item: Transition, operation: string, before: unknown, after: unknown): string | undefined {
   if (deepEqual(before, after)) return undefined;
   const moved = (what: string) => `${operation} moved ${what} in a way ${item.name} does not allow`;
   if (item.each === undefined) return checks(item.holds, { before, after }) ? undefined : moved("the state");
@@ -425,7 +425,7 @@ function labelOf(key: unknown): string {
 // Refuses a transition whose records the state does not hold where it looks,
 // or does not name by its field `by`: a misspelt path or field would leave
 // every step with no pair, and the transition would hold of every walk.
-function pairable(world: string, state: AnySchema, item: Transition): void {
+export function pairable(world: string, state: AnySchema, item: Transition): void {
   const each = item.each!;
   const unwrap = (schemas: readonly AnySchema[]): AnySchema[] =>
     schemas.map(schema => (schema.kind === "optional" ? (schema as unknown as { schema: AnySchema }).schema : schema));
@@ -438,6 +438,9 @@ function pairable(world: string, state: AnySchema, item: Transition): void {
   const records = unwrap(schemas).filter(schema => schema.kind === "array" || schema.kind === "record");
   const at = each.path.join(".");
   if (records.length === 0) throw new SpecificationError(`World ${world}: transition ${item.name} pairs records at ${at}, where the state holds no array or record`);
+  if (each.by === undefined && records.some(schema => schema.kind === "array")) {
+    throw new SpecificationError(`Transition ${item.name} pairs array elements without a by field`);
+  }
   if (each.by === undefined) return;
   const by = each.by;
   const named = unwrap(records.map(schema => (schema as unknown as { element?: AnySchema; value?: AnySchema }).element ?? (schema as unknown as { value: AnySchema }).value))
@@ -467,7 +470,7 @@ const RULE_KINDS = new Set(["compare", "all", "any", "and", "or", "not"]);
 
 // A rule is read as a guard reads it; anything else is evaluated as a model
 // expression and must answer a boolean.
-function checks(condition: unknown, scope: unknown): boolean {
+export function checks(condition: unknown, scope: unknown): boolean {
   if (typeof condition === "object" && condition !== null && nodeOf(condition) === undefined && RULE_KINDS.has((condition as { kind?: string }).kind ?? "")) {
     return holds(condition as Rule, scope);
   }

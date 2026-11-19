@@ -217,11 +217,10 @@ describe("a world's invariants", () => {
     expect(report.operations[1]!.ran).toBeGreaterThan(0);
   });
 
-  it("refuses to pair an array's elements without a field to match them by", async () => {
+  it("refuses to pair an array's elements without a field to match them by", () => {
     const unmatched = c.transition<OrderValue>("an issued order stays issued", { each: "orders" }, (before, after) => before.status.$ne("ISSUED").$or(after.status.$eq("ISSUED")));
-    await expect(
-      c.explore(c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), transitions: [unmatched] })),
-    ).rejects.toThrow("Transition an issued order stays issued pairs the elements of orders but names no field to match them by");
+    expect(() => c.world("purchasing", { state: Orders, initial: [{ orders: [] }], operations: operations(changingAboveReceived), transitions: [unmatched] }))
+      .toThrow("Transition an issued order stays issued pairs array elements without a by field");
   });
 
   // The first item goes down; a transition pairing by key must see it.
