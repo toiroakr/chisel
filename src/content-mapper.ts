@@ -27,7 +27,7 @@ process.stdin.on("data", (chunk: Buffer) => {
       if (message.method === "initialize") reply(message.id, { protocolVersion: 1, positionEncoding: "utf-16", diagnosticSource: "chisel" });
       else if (message.method === "openProject") reply(message.id, {});
       else if (message.method === "closeProject") reply(message.id, null);
-      else if (message.method === "transform") reply(message.id, { text: compileTlaSource(message.params?.content ?? "").declarations, extension: ".d.ts", mappings: [] });
+      else if (message.method === "transform") reply(message.id, { text: compileTlaSource(message.params?.content ?? "").declarations, extension: ".ts", mappings: [] });
       else reply(message.id, undefined, `Unknown content-mapper method: ${message.method}`);
     } catch (error) { reply(message.id, undefined, error instanceof Error ? error.message : String(error)); }
   }
