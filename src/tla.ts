@@ -2,7 +2,7 @@ import { check as checkTla, formatValue, prove as proveTla } from "tla-ts";
 import { SpecificationError } from "./behavior.js";
 import { domainOf, integralBounds } from "./domain.js";
 import { deepEqual } from "./equal.js";
-import { nodeOf } from "./model.js";
+import { childrenOf, nodeOf } from "./model.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { schemaAtPath } from "./schema.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape } from "./schema.js";
@@ -21,6 +21,16 @@ type Names = ReadonlyMap<string, string>;
 
 // Compiles the executable expression itself. No sampled transition table is
 // substituted for it: tla-ts evaluates Step and the invariant independently.
+// What one command can do when each of its effects may fail: the state it ends in and the
+// commands it emits, for the run in which every effect succeeds and for the failure of each.
+const OUTCOMES = [
+  "Outcomes(s, c) == LET r == Step(s, c) IN",
+  "  IF \"effects\" \\in DOMAIN r THEN",
+  "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, failed |-> FALSE]}",
+  "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, failed |-> TRUE] : i \\in 1..Len(r.effects)}",
+  "  ELSE {[state |-> r.state, commands |-> r.commands, failed |-> FALSE]}",
+];
+
 export function toTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly domainLimit?: number;
   readonly maxCommands?: number;
@@ -49,23 +59,35 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
       ? compiler.paired(transition.holds, transition.each, schemaAtPath(machine.state as never, transition.each.path)?.kind)
       : compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
   const discriminant = (machine.command as unknown as Partial<AnyVariantsSchema>).discriminant === undefined ? "" : identifier((machine.command as unknown as AnyVariantsSchema).discriminant);
-  const preconditions = Object.entries(specification.requires).map(([tag, holds], index) => ({ name: `Req${index}`,
-    formula: `IF depth = 0 THEN TRUE ELSE IF last.${discriminant} = ${JSON.stringify(tag)} THEN (${compiler.condition(holds, new Map([["state", "previous"], ["command", "last"]]), "previous")}) <=> previous # state ELSE TRUE` }));
+  const effectful = hasEffect(machine.update);
+  const preconditions = Object.entries(specification.requires).map(([tag, holds], index) => {
+    const precondition = `(${compiler.condition(holds, new Map([["state", "previous"], ["command", "last"]]), "previous")})`;
+    // A command that stopped at a failed effect may have written nothing yet, so only the other direction holds of it.
+    const agrees = effectful ? `IF failed THEN (~${precondition} => previous = state) ELSE (${precondition} <=> previous # state)` : `${precondition} <=> previous # state`;
+    return { name: `Req${index}`, formula: `IF depth = 0 THEN TRUE ELSE IF last.${discriminant} = ${JSON.stringify(tag)} THEN ${agrees} ELSE TRUE` };
+  });
   const last = (command: string) => preconditions.length > 0 ? ` /\\ last' = ${command}` : "";
+  const next = effectful ? [
+    `Next == \\/ (\\E c \\in CommandDomain: \\E r \\in Outcomes(state, c): /\\ pending = <<>> /\\ state' = r.state /\\ pending' = r.commands /\\ previous' = state /\\ depth' = 1 /\\ failed' = r.failed${last("c")})`,
+    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ \\E r \\in Outcomes(state, Head(pending)): /\\ state' = r.state /\\ pending' = Tail(pending) \\o r.commands /\\ previous' = state /\\ depth' = depth + 1 /\\ failed' = r.failed${last("Head(pending)")})`,
+  ] : [
+    `Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1${last("c")})`,
+    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1${last("Head(pending)")})`,
+  ];
   const stateSet = set(states.values.map(value => compiler.value(value, new Map())));
   const commandSet = set(commands.values.map(value => compiler.value(value, new Map())));
   const initial = set(machine.initial.map(value => compiler.value(value, new Map())));
   const source = [
     `---- MODULE ${name} ----`,
     "EXTENDS Naturals, Integers, Sequences",
-    `VARIABLES state, pending, previous, depth${preconditions.length > 0 ? ", last" : ""}`,
+    `VARIABLES state, pending, previous, depth${effectful ? ", failed" : ""}${preconditions.length > 0 ? ", last" : ""}`,
     `MaxCommands == ${maxCommands}`,
     `StateDomain == ${stateSet}`,
     `CommandDomain == ${commandSet}`,
     `Step(s, c) == ${step}`,
-    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
-    `Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1${last("c")})`,
-    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1${last("Head(pending)")})`,
+    ...(effectful ? OUTCOMES : []),
+    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${effectful ? " /\\ failed = FALSE" : ""}${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
+    ...next,
     "TypeOK == /\\ state \\in StateDomain /\\ \\A i \\in 1..Len(pending): pending[i] \\in CommandDomain",
     "Budget == pending = <<>> \\/ depth < MaxCommands",
     ...properties.map(item => `${item.name} == ${item.formula}`),
@@ -138,29 +160,32 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
     const invariants = machine.invariants.map((item, index) => ({ name: `Inv${index}`,
       formula: compiler.condition(item.holds, new Map(), "s") }));
     const assumption = ["StateOK(s)", "CommandOK(c)", ...invariants.map(item => `${item.name}(s)`)].join(" /\\ ");
-    const defs = ["Step", "StateOK", "CommandOK", ...invariants.map(item => item.name)].join(", ");
-    const output = "Step(s, c)";
+    const effectful = hasEffect(machine.update);
+    const defs = ["Step", ...(effectful ? ["Outcomes"] : []), "StateOK", "CommandOK", ...invariants.map(item => item.name)].join(", ");
+    const output = effectful ? "r" : "Step(s, c)";
+    const over = (body: string) => `\\A s, c: (${assumption}) => ${effectful ? `\\A r \\in Outcomes(s, c): ${body}` : body}`;
     const transitions = machine.transitions.map(item => item.each
       ? compiler.paired(item.holds, item.each, schemaAtPath(machine.state as never, item.each.path)?.kind, "s", `${output}.state`)
       : compiler.condition(item.holds, new Map([["before", "s"], ["after", `${output}.state`]]), "s"));
     const formulae = [
       `\\A s: InitState(s) => (StateOK(s)${invariants.map(item => ` /\\ ${item.name}(s)`).join("")})`,
-      `\\A s, c: (${assumption}) => StateOK(${output}.state)`,
-      `\\A s, c: (${assumption}) => \\A i \\in 1..Len(${output}.commands): CommandOK(${output}.commands[i])`,
-      ...invariants.map(item => `\\A s, c: (${assumption}) => ${item.name}(${output}.state)`),
-      ...transitions.map(formula => `\\A s, c: (${assumption}) => (s = ${output}.state \\/ (${formula}))`),
+      over(`StateOK(${output}.state)`),
+      over(`\\A i \\in 1..Len(${output}.commands): CommandOK(${output}.commands[i])`),
+      ...invariants.map(item => over(`${item.name}(${output}.state)`)),
+      ...transitions.map(formula => over(`(s = ${output}.state \\/ (${formula}))`)),
       ...requiredTags.flatMap(tag => {
         const pre = compiler.condition(specification.requires[tag], new Map([["state", "s"], ["command", "c"]]), "s");
         const isTag = `c.${identifier((machine.command as unknown as AnyVariantsSchema).discriminant)} = ${JSON.stringify(tag)}`;
         const unchanged = unchangedFormula(machine.state as AnySchema, "s", `${output}.state`);
-        return [`\\A s, c: (${assumption}) => (${isTag} => (${unchanged} \\/ (${pre})))`,
-          `\\A s, c: (${assumption}) => (${isTag} => (~(${pre}) \\/ ~(${unchanged})))`];
+        return [over(`(${isTag} => (${unchanged} \\/ (${pre})))`),
+          over(`(${isTag} => (${effectful ? `${output}.failed \\/ ` : ""}~(${pre}) \\/ ~(${unchanged})))`)];
       }),
     ];
     source = [
       "---- MODULE ChiselInduction ----",
       "EXTENDS Naturals, Integers, Sequences",
       `Step(s, c) == ${step}`,
+      ...(effectful ? OUTCOMES : []),
       `StateOK(s) == ${stateOK}`,
       `CommandOK(c) == ${commandOK}`,
       `InitState(s) == s \\in ${set(machine.initial.map(value => compiler.value(value, new Map())))}`,
@@ -204,6 +229,11 @@ function unchangedFormula(schema: AnySchema, before: string, after: string): str
   if (schema.kind !== "object") return `${before} = ${after}`;
   const fields = Object.entries((schema as ObjectSchema<ObjectShape>).shape);
   return `(${fields.map(([field, child]) => unchangedFormula(child, `${before}.${identifier(field)}`, `${after}.${identifier(field)}`)).join(" /\\ ") || "TRUE"})`;
+}
+
+function hasEffect(value: unknown): boolean {
+  if (value !== null && typeof value === "object" && (value as { kind?: unknown }).kind === "effect") return true;
+  return childrenOf(value).some(hasEffect);
 }
 
 function set(values: readonly string[]): string {
@@ -265,6 +295,11 @@ class Compiler {
     if (Array.isArray(value)) return `<<${value.map(item => this.value(item, names)).join(", ")}>>`;
     if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
       const fields = Object.entries(value);
+      if ((value as { kind?: unknown }).kind === "effect") {
+        const hasFailure = fields.some(([key]) => key === "failure");
+        if (!hasFailure) fields.push(["failure", 0]);
+        fields.push(["hasFailure", hasFailure]);
+      }
       if (result && !fields.some(([key]) => key === "commands")) fields.push(["commands", []]);
       if (!fields.length) throw new SpecificationError("TLA+ translation cannot represent an empty record");
       return `[${fields.map(([key, child]) => `${identifier(key)} |-> ${this.value(child, names)}`).join(", ")}]`;

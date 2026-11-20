@@ -166,8 +166,8 @@ export { compose, isComposition } from "./composition.js";
 
 export { explore, invariant, transition, world } from "./world.js";
 export type { Draw, ExploredStep, ExploreReport, Invariant, Operation, Transition, World } from "./world.js";
-export { machine, isMachine, runMachine } from "./machine.js";
-export type { Machine, MachineCommand, MachineExecution, MachineStep } from "./machine.js";
+export { machine, effect, isMachine, runMachine } from "./machine.js";
+export type { Effect, Machine, MachineCommand, MachineExecution, MachineStep, PerformedEffect } from "./machine.js";
 export { specifyMachine, isMachineSpecification, checkMachine } from "./machine-check.js";
 export type { MachineSpecification, MachineReport, MachineTrace } from "./machine-check.js";
 export { toTla, checkMachineTla, proveMachine } from "./tla.js";
