@@ -263,14 +263,15 @@ const modelCheckCommand = defineCommand({
       if (args.engine === "chisel") {
         return [{ name: declaration.name, ...checkMachine(declaration, options) },
           ...(declaration.interleavings === undefined ? [] : [{ name: `${declaration.name} (interleavings)`,
-            ...checkInterleavings(declaration, { ...declaration.interleavings, ...(args.maxStates === undefined ? {} : { maxStates: args.maxStates }) }) }])];
+            ...checkInterleavings(declaration, { ...declaration.interleavings, ...(args.maxStates === undefined ? {} : { maxStates: args.maxStates }),
+              ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }) }) }])];
       }
       const { module: _module, ...report } = await checkMachineTla(declaration,
         { ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
           ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }) });
       return [{ name: declaration.name, ...report },
         ...(declaration.interleavings === undefined ? [] : [await (async () => {
-          const { module: _interleaved, ...interleaved } = await checkInterleavingsTla(declaration, { copies: declaration.interleavings!.copies });
+          const { module: _interleaved, ...interleaved } = await checkInterleavingsTla(declaration, declaration.interleavings!);
           return { name: `${declaration.name} (interleavings)`, ...interleaved };
         })()])];
     }))).flat();

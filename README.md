@@ -486,7 +486,7 @@ checkMachine(specifyMachine(checkout, { invariants: [leak], crashes: true }));  
 
 A command without effects has no point to die at, and a command that stopped by dying is held to its precondition as a command that stopped at a failed effect is. `runMachine` takes `dies: point => point.completed === 1` to follow such a run, and `chisel run-machine ... --die-after 1` does the same. In TLA+ a death is one more outcome of the command, so `--engine tla` and `prove-machine` read it too.
 
-Two runs of one flow can also work on the same state at once. `checkInterleavings(specification, { copies: [commandA, commandB] })` runs one copy per command against a single shared state. A copy reads the state when it starts a command, then performs that command's effects one step at a time, and every order in which the steps of the copies interleave is explored. An effect writes only the fields it changes from what its copy last saw (or the fields `writes: ["stock", "buyer"]` names) onto the state as it is by then, so a write computed from a stale read overwrites what another copy wrote since, and `c.effect(name, after, { ifUnchanged: true })` applies only if nothing was written since the copy read the state, otherwise the copy ends `refused` with the shared state unchanged. Take two customers buying the last unit of a stock, each copy reading the stock and then writing it with its own flag:
+Two runs of one flow can also work on the same state at once. `checkInterleavings(specification, { copies: [commandA, commandB] })` runs one copy per command against a single shared state. A copy reads the state when it starts a command, then performs that command's effects one step at a time, and every order in which the steps of the copies interleave is explored. An effect writes only the fields it changes from what its copy last saw (or the fields `writes: ["stock", "a"]` names, which must be fields of the state) onto the state as it is by then, so a write computed from a stale read overwrites what another copy wrote since, and `c.effect(name, after, { ifUnchanged: true })` applies only if nothing was written since the copy read the state, otherwise the copy ends `refused` with the shared state unchanged. Take two customers buying the last unit of a stock, each copy reading the stock and then writing it with its own flag:
 
 ```ts
 const shop = c.machine("shop", {
@@ -495,8 +495,11 @@ const shop = c.machine("shop", {
   initial: [{ stock: 1, a: false, b: false }],
   update: (state, command) => ({
     effects: c.choose(state.stock.$gte(1), [
-      c.effect("take", { stock: state.stock.$minus(1), a: /* a if the customer is a */, b: /* b if the customer is b */ },
-        { ifUnchanged: true }),                                  // drop this line to see the lost update
+      c.effect("take", {
+        stock: state.stock.$minus(1),
+        a: c.choose(command.customer.$eq("a"), true, state.a),
+        b: c.choose(command.customer.$eq("b"), true, state.b),
+      }, { ifUnchanged: true }),                                 // drop the option to see the lost update
     ], []),
   }),
 });

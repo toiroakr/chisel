@@ -67,11 +67,14 @@ interface Node<State, Command> {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
-// What an effect writes onto the state as it is now: the fields it changed from what its run last saw.
+// What an effect writes onto the state as it is now: the fields it changed from what its run last saw
+// (a field it left out is removed).
 function written<State>(seen: State, now: State, after: State, writes?: readonly string[]): { readonly state: State; readonly wrote: boolean } {
   if (isRecord(seen) && isRecord(now) && isRecord(after)) {
-    const fields = writes ?? Object.keys(after).filter(key => !deepEqual(seen[key], after[key]));
-    return { state: { ...now, ...Object.fromEntries(fields.map(key => [key, after[key]])) } as State, wrote: fields.length > 0 };
+    const fields = writes ?? [...new Set([...Object.keys(seen), ...Object.keys(after)])].filter(key => !deepEqual(seen[key], after[key]));
+    const next: Record<string, unknown> = { ...now };
+    for (const key of fields) { if (Object.hasOwn(after, key)) next[key] = after[key]; else delete next[key]; }
+    return { state: next as State, wrote: fields.length > 0 };
   }
   const wrote = writes !== undefined ? writes.length > 0 : !deepEqual(seen, after);
   return { state: wrote ? after : now, wrote };
@@ -96,6 +99,8 @@ export function checkInterleavings<State, Command>(specification: MachineSpecifi
   if (options.copies.length > maxCopies) {
     return { status: "undetermined", states: 0, reason: `${options.copies.length} copies exceed maxCopies (${maxCopies})`, terminals: [] };
   }
+  if (options.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
+  const fieldNames = Object.keys((machine.state as { shape?: object }).shape ?? {});
   const commands = options.copies.map((command, index) => {
     const parsed = machine.command.parse(command);
     if (!parsed.success) throw new SpecificationError(`Copy ${index}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
@@ -163,6 +168,8 @@ export function checkInterleavings<State, Command>(specification: MachineSpecifi
       return { joint: replace({ queue: [], status: "refused", started: copy.started }, joint.state, joint.version),
         step: { copy: index, action: "refused", command: label, effect: effect.name, before: joint.state, after: joint.state }, wrote: false };
     }
+    const unknown = effect.writes?.find(key => fieldNames.length > 0 && !fieldNames.includes(key));
+    if (unknown !== undefined) throw new SpecificationError(`Effect ${effect.name} writes ${unknown}, which the state does not have`);
     const next = written(active.seen, joint.state, effect.state, effect.writes);
     const last = active.index === active.effects.length - 1;
     const queue = last ? [...copy.queue, ...active.commands] : copy.queue;

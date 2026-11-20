@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
+import { interleavingsToTla } from "../src/tla.js";
 
 const Stock = c.object({ stock: c.int().min(0).max(1), a: c.boolean(), b: c.boolean() });
 type Shop = c.Infer<typeof Stock>;
@@ -47,7 +48,7 @@ describe("two copies of a command interleaving on one shared state", () => {
     expect(report.status).toBe("held");
     expect(report.terminals.map(item => item.statuses.join("/"))).toContain("finished/refused");
     expect(report.terminals.map(item => item.statuses.join("/"))).toContain("refused/finished");
-    expect(report.terminals.every(item => item.state.stock === 0 && item.state.a !== item.state.b)).toBe(true);
+    expect([...new Set(report.terminals.map(item => `${item.state.stock}/${item.state.a}/${item.state.b}`))].sort()).toStrictEqual(["0/false/true", "0/true/false"]);
   });
 
   it("writes the fields it names instead of the ones that changed", () => {
@@ -118,5 +119,69 @@ describe("copies interleaving on one shared state, in TLA+", () => {
         { state: { n: 2 } } as never)) as never,
     });
     expect((await c.checkInterleavingsTla(c.specifyMachine(emitting), { copies: ["go", "go"] })).status).toBe("undetermined");
+  });
+});
+
+describe("what an effect and an interleaving declaration are checked for", () => {
+  it("writes the removal of an optional field a copy made", () => {
+    const Notes = c.object({ n: c.int().min(0).max(1), note: c.string().optional() });
+    const notes = c.machine("notes", {
+      state: Notes, command: c.enum(["clear"] as const), initial: [{ n: 0, note: "x" }],
+      update: state => ({ effects: [c.effect<c.Infer<typeof Notes>>("drop", { n: state.n })] }),
+    });
+    const report = c.checkInterleavings(c.specifyMachine(notes), { copies: ["clear"] });
+    expect(report.terminals.map(item => item.state)).toStrictEqual([{ n: 0 }]);
+  });
+
+  it("refuses a write that names a field the state does not have", () => {
+    const report = c.checkInterleavings(c.specifyMachine(shop({ writes: ["nope"] })), { copies: both });
+    expect(report).toMatchObject({ status: "broken", counterexample: { reason: expect.stringContaining("nope") } });
+  });
+
+  it("refuses an effect whose writes is not a list of names or whose ifUnchanged is not a boolean", () => {
+    const wrong = (options: object) => c.checkInterleavings(c.specifyMachine(shop(options as never)), { copies: both });
+    expect(wrong({ writes: "stock" })).toMatchObject({ status: "broken", counterexample: { reason: expect.stringContaining("writes") } });
+    expect(wrong({ ifUnchanged: "yes" })).toMatchObject({ status: "broken", counterexample: { reason: expect.stringContaining("ifUnchanged") } });
+  });
+
+  it("refuses an empty list of copies or starts, and a copy the command schema refuses, where they are declared or run", () => {
+    expect(() => c.specifyMachine(shop(), { interleavings: { copies: [] } })).toThrow("no copy to run");
+    expect(() => c.specifyMachine(shop(), { interleavings: { copies: [{ type: "sell" } as never] } })).toThrow("Copy 0");
+    expect(() => c.specifyMachine(shop(), { interleavings: { copies: both, starts: [] } })).toThrow("no state to start from");
+    expect(() => c.checkInterleavings(c.specifyMachine(shop()), { copies: both, starts: [] })).toThrow("no state to start from");
+  });
+
+  it("starts from the states it is given", async () => {
+    const empty: Shop = { stock: 0, a: false, b: false };
+    const specification = c.specifyMachine(shop(), { invariants: [once] });
+    expect(c.checkInterleavings(specification, { copies: both, starts: [empty] }).status).toBe("held");
+    expect((await c.checkInterleavingsTla(specification, { copies: both, starts: [empty] })).status).toBe("held");
+    expect((await c.checkInterleavingsTla(specification, { copies: both })).status).toBe("broken");
+  });
+
+  it("holds the state a write leaves to the state schema in TLA+ too", async () => {
+    const Drain = c.object({ stock: c.int().min(0).max(1) });
+    const draining = c.machine("draining", {
+      state: Drain, command: c.enum(["take"] as const), initial: [{ stock: 0 }],
+      update: state => ({ effects: [c.effect<c.Infer<typeof Drain>>("take", { stock: state.stock.$minus(1) })] }),
+    });
+    const specification = c.specifyMachine(draining);
+    expect(c.checkInterleavings(specification, { copies: ["take", "take"] }).status).toBe("broken");
+    expect((await c.checkInterleavingsTla(specification, { copies: ["take", "take"] })).status).toBe("broken");
+  });
+
+  it("is undetermined in TLA+ for a write that names a field the state does not have", async () => {
+    const report = await c.checkInterleavingsTla(c.specifyMachine(shop({ writes: ["nope"] })), { copies: both });
+    expect(report.status).toBe("undetermined");
+  });
+
+  it("refuses a maxCopies that is not a positive integer in TLA+ as it does natively", async () => {
+    await expect(c.checkInterleavingsTla(c.specifyMachine(shop()), { copies: both, maxCopies: Number.NaN })).rejects.toThrow("maxCopies");
+  });
+
+  it("wraps the conditional values of the TLA+ actions so they cannot swallow what follows", () => {
+    const { source } = interleavingsToTla(c.specifyMachine(shop()), { copies: both });
+    expect(source).toContain("version' = (IF");
+    expect(source).toContain("status' = (IF");
   });
 });

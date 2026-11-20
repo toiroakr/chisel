@@ -3,6 +3,7 @@ import { SpecificationError } from "./behavior.js";
 import { domainOf, integralBounds } from "./domain.js";
 import { deepEqual } from "./equal.js";
 import { childrenOf, nodeOf } from "./model.js";
+import { positiveLimit } from "./machine.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { schemaAtPath } from "./schema.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape } from "./schema.js";
@@ -145,9 +146,10 @@ export async function checkMachineTla<State, Command>(machine: MachineSpecificat
 // native checker follows the commands a command emits, so a translation that meets one is undetermined.
 export async function checkInterleavingsTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly copies: readonly NoInfer<Command>[];
+  readonly starts?: readonly NoInfer<State>[];
   readonly maxCopies?: number;
 }): Promise<{ readonly status: "held" | "broken" | "undetermined"; readonly states: number; readonly reason?: string; readonly module?: TlaModule }> {
-  const maxCopies = options.maxCopies ?? 2;
+  const maxCopies = positiveLimit(options.maxCopies, 2, "maxCopies");
   if (options.copies.length > maxCopies) {
     return { status: "undetermined", states: 0, reason: `${options.copies.length} copies exceed maxCopies (${maxCopies})` };
   }
@@ -163,6 +165,10 @@ export async function checkInterleavingsTla<State, Command>(specification: Machi
     reason: `tla-ts could not complete the check: ${error instanceof Error ? error.message : String(error)}` }; }
   if (result.status === "success") return { status: "held", states: result.distinctStates, module };
   const violated = result.violation?.name ?? "";
+  if (result.status === "invariant-violation" && violated === "WritesKnown") return { status: "undetermined", states: result.distinctStates, module,
+    reason: "An effect writes a field the state does not have" };
+  if (result.status === "invariant-violation" && violated === "StateOK") return { status: "broken", states: result.distinctStates, module,
+    reason: "A write left a value that is not a state" };
   if (result.status === "invariant-violation" && violated === "NoEmission") return { status: "undetermined", states: result.distinctStates, module,
     reason: "TLA+ translation of interleavings does not follow the commands a command emits" };
   if (result.status === "invariant-violation") return { status: "broken", states: result.distinctStates, module,
@@ -174,6 +180,7 @@ export async function checkInterleavingsTla<State, Command>(specification: Machi
 
 export function interleavingsToTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly copies: readonly NoInfer<Command>[];
+  readonly starts?: readonly NoInfer<State>[];
 }): TlaModule {
   const machine = specification.machine;
   if (machine.state.kind !== "object") throw new SpecificationError("TLA+ translation of interleavings needs a state that is an object");
@@ -183,8 +190,12 @@ export function interleavingsToTla<State, Command>(specification: MachineSpecifi
   const step = compiler.value(machine.update, new Map([["state", "s"], ["command", "c"]]), true);
   const name = `ChiselInterleave${machine.name.replace(/[^A-Za-z0-9]+/g, " ").split(" ").filter(Boolean).map(part => part[0]!.toUpperCase() + part.slice(1)).join("") || "Machine"}`;
   const copies = options.copies.length;
-  const initial = set(machine.initial.map(value => compiler.value(value, new Map())));
+  if (options.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
+  const initial = set((options.starts ?? machine.initial).map(value => compiler.value(value, new Map())));
   const properties = specification.invariants.map((invariant, index) => ({ name: `Inv${index}`, formula: compiler.condition(invariant.holds, new Map(), "state") }));
+  const states = domainOf(machine.state as never, 10000);
+  if (!states.exhaustive) throw new SpecificationError("TLA+ translation of interleavings requires a finite, exhaustively enumerated state schema");
+  const stateOK = `state \\in ${set(states.values.map(value => compiler.value(value, new Map())))}`;
   const transitions = specification.transitions.map((transition, index) => ({ name: `Trans${index}`,
     formula: compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
   const variables = ["state", "previous", "version", "status", "pc", "snap", "plan", "readVersion", "unsupported"];
@@ -209,20 +220,22 @@ export function interleavingsToTla<State, Command>(specification: MachineSpecifi
     "               /\\ IF \"effects\" \\in DOMAIN r THEN",
     `                    (IF Len(r.effects) = 0 THEN (/\\ ${set1("status", '"finished"')} /\\ ${keep("status", "unsupported")})`,
     `                     ELSE (/\\ ${set1("status", '"running"')} /\\ ${set1("snap", "state")} /\\ ${set1("plan", "r.effects")} /\\ ${set1("pc", "0")} /\\ ${set1("readVersion", "version")} /\\ ${keep("status", "snap", "plan", "pc", "readVersion", "unsupported")}))`,
-    `                  ELSE (/\\ previous' = state /\\ state' = r.state /\\ version' = IF r.state # state THEN version + 1 ELSE version /\\ ${set1("status", '"finished"')} /\\ ${keep("previous", "state", "version", "status", "unsupported")})`,
+    `                  ELSE (/\\ previous' = state /\\ state' = r.state /\\ version' = (IF r.state # state THEN version + 1 ELSE version) /\\ ${set1("status", '"finished"')} /\\ ${keep("previous", "state", "version", "status", "unsupported")})`,
     "Run(p) == /\\ status[p] = \"running\"",
     "          /\\ LET e == plan[p][pc[p] + 1] IN",
     `             IF e.ifUnchanged /\\ version # readVersion[p] THEN (/\\ ${set1("status", '"refused"')} /\\ ${keep("status")})`,
-    `             ELSE (/\\ previous' = state /\\ state' = Patched(p, e) /\\ version' = IF Wrote(p, e) THEN version + 1 ELSE version`,
-    `                   /\\ ${set1("pc", "pc[p] + 1")} /\\ status' = IF pc[p] + 1 = Len(plan[p]) THEN [status EXCEPT ![p] = "finished"] ELSE status`,
+    `             ELSE (/\\ previous' = state /\\ state' = Patched(p, e) /\\ version' = (IF Wrote(p, e) THEN version + 1 ELSE version)`,
+    `                   /\\ ${set1("pc", "pc[p] + 1")} /\\ status' = (IF pc[p] + 1 = Len(plan[p]) THEN [status EXCEPT ![p] = "finished"] ELSE status)`,
     `                   /\\ ${keep("previous", "state", "version", "pc", "status")})`,
     `Next == \\E p \\in 1..${copies}: Begin(p) \\/ Run(p)`,
     "NoEmission == ~unsupported",
+    `StateOK == ${stateOK}`,
+    `WritesKnown == \\A p \\in 1..${copies}: \\A i \\in 1..Len(plan[p]): \\A j \\in 1..Len(plan[p][i].writes): plan[p][i].writes[j] \\in DOMAIN state`,
     ...properties.map(item => `${item.name} == ${item.formula}`),
     ...transitions.map(item => `${item.name} == previous = state \\/ (${item.formula})`),
     "====",
   ].join("\n");
-  const config = `INIT Init NEXT Next INVARIANT NoEmission ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} CHECK_DEADLOCK FALSE`;
+  const config = `INIT Init NEXT Next INVARIANT NoEmission INVARIANT WritesKnown INVARIANT StateOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} CHECK_DEADLOCK FALSE`;
   return { name, source, config, states: 0, commands: options.copies.length };
 }
 

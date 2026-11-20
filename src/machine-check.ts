@@ -64,6 +64,14 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   for (const column of properties.columns ?? []) {
     if (!fields.includes(column)) throw new SpecificationError(`Machine ${machine.name} has no state field ${column} to use as a column`);
   }
+  if (properties.interleavings !== undefined) {
+    if (properties.interleavings.copies.length === 0) throw new SpecificationError(`Machine ${machine.name} has no copy to run`);
+    if (properties.interleavings.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
+    properties.interleavings.copies.forEach((command, index) => {
+      const parsed = machine.command.parse(command);
+      if (!parsed.success) throw new SpecificationError(`Copy ${index}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
+    });
+  }
   return { kind: "machine-specification", name: properties.name ?? machine.name, machine,
     invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires, columns: properties.columns ?? [], crashes: properties.crashes ?? false,
     ...(properties.interleavings === undefined ? {} : { interleavings: properties.interleavings }) };

@@ -203,8 +203,12 @@ export function evaluateCommand<State, Command>(definition: Machine<State, Comma
   const effects = (output.effects as unknown[]).map(item => {
     const declared = item as { name?: unknown; state?: unknown; ifUnchanged?: unknown; writes?: unknown } | null;
     if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
+    if (declared.ifUnchanged !== undefined && typeof declared.ifUnchanged !== "boolean") throw new SpecificationError(`Effect ${declared.name}: ifUnchanged must be a boolean`);
+    if (declared.writes !== undefined && (!Array.isArray(declared.writes) || declared.writes.some(item => typeof item !== "string"))) {
+      throw new SpecificationError(`Effect ${declared.name}: writes must be a list of field names`);
+    }
     return { name: declared.name, state: parse(definition.state, declared.state, `Effect ${declared.name} state`), ifUnchanged: declared.ifUnchanged === true,
-      ...(Array.isArray(declared.writes) ? { writes: declared.writes as string[] } : {}) };
+      ...(declared.writes === undefined ? {} : { writes: declared.writes as string[] }) };
   });
   return { effects, commands };
 }
