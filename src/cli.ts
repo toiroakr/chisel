@@ -26,6 +26,7 @@ import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
 import { isMachine, runMachine } from "./machine.js";
 import type { Machine } from "./machine.js";
+import { checkInterleavings } from "./interleave.js";
 import { checkMachine, isMachineSpecification } from "./machine-check.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { checkMachineTla, proveMachine, toTla } from "./tla.js";
@@ -257,16 +258,20 @@ const modelCheckCommand = defineCommand({
       ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }),
       ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
     };
-    const reports = await Promise.all(machines.map(async declaration => {
-      if (args.engine === "chisel") return { name: declaration.name, ...checkMachine(declaration, options) };
+    const reports = (await Promise.all(machines.map(async declaration => {
+      if (args.engine === "chisel") {
+        return [{ name: declaration.name, ...checkMachine(declaration, options) },
+          ...(declaration.interleavings === undefined ? [] : [{ name: `${declaration.name} (interleavings)`,
+            ...checkInterleavings(declaration, { ...declaration.interleavings, ...(args.maxStates === undefined ? {} : { maxStates: args.maxStates }) }) }])];
+      }
       const { module: _module, ...report } = await checkMachineTla(declaration,
         { ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
           ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }) });
-      return { name: declaration.name, ...report };
-    }));
+      return [{ name: declaration.name, ...report }];
+    }))).flat();
     if (args.json) console.log(JSON.stringify(reports, jsonReplacer, 2));
     else for (const report of reports) {
-      console.log(`${report.name}: ${report.status} (${report.states} states, ${"generatedStates" in report ? `${report.generatedStates} generated states` : `${report.transitions} transitions`})`);
+      console.log(`${report.name}: ${report.status} (${report.states} states, ${"generatedStates" in report ? `${report.generatedStates} generated states` : "transitions" in report ? `${report.transitions} transitions` : "interleaved"})`);
       if (report.reason) console.log(`  ${report.reason}`);
       if ("counterexample" in report && report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
       if ("trace" in report && report.trace) console.log(`  ${JSON.stringify(report.trace)}`);

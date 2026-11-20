@@ -20,6 +20,7 @@ export interface MachineSpecification<State, Command> {
   readonly requires: Readonly<Record<string, unknown>>;
   readonly columns: readonly string[];
   readonly crashes: boolean;
+  readonly interleavings?: { readonly copies: readonly Command[]; readonly starts?: readonly State[] };
 }
 
 // The key every command carries as a literal: the tag that tells the commands apart.
@@ -41,6 +42,9 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   readonly columns?: readonly (keyof State & string)[];
   // Also explore the process dying before the first effect of a command and after each effect.
   readonly crashes?: boolean;
+  // Also check copies of the machine running at once on one shared state (`checkInterleavings`),
+  // one copy per command listed.
+  readonly interleavings?: { readonly copies: readonly NoInfer<Command>[]; readonly starts?: readonly NoInfer<State>[] };
 } = {}): MachineSpecification<State, Command> {
   const names = [...properties.invariants ?? [], ...properties.transitions ?? []].map(item => item.name);
   const repeated = names.find((item, index) => names.indexOf(item) !== index);
@@ -61,7 +65,8 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
     if (!fields.includes(column)) throw new SpecificationError(`Machine ${machine.name} has no state field ${column} to use as a column`);
   }
   return { kind: "machine-specification", name: properties.name ?? machine.name, machine,
-    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires, columns: properties.columns ?? [], crashes: properties.crashes ?? false };
+    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires, columns: properties.columns ?? [], crashes: properties.crashes ?? false,
+    ...(properties.interleavings === undefined ? {} : { interleavings: properties.interleavings }) };
 }
 
 export function isMachineSpecification(value: unknown): value is MachineSpecification<unknown, unknown> {
