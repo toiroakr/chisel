@@ -171,6 +171,19 @@ describe("chisel machines", () => {
     });
   });
 
+  it("runs a command that declares effects and fails the ones it is told to", async () => {
+    const file = fixture("test/fixtures/effects-machine.ts");
+    const args = ["run-machine", file, "--state", '{"label":"none","migrated":false}', "--command", '"deploy"'];
+    expect(JSON.parse(stdoutOf(await run(args)))).toMatchObject({
+      state: { label: "checkpoint", migrated: true },
+      steps: [{ performed: [{ name: "writeLabel", outcome: "succeeded" }, { name: "runScript", outcome: "succeeded" }, { name: "writeLabel", outcome: "succeeded" }] }],
+    });
+    expect(JSON.parse(stdoutOf(await run([...args, "--fail", "runScript"])))).toMatchObject({
+      state: { label: "in-progress", migrated: false },
+      steps: [{ performed: [{ name: "writeLabel", outcome: "succeeded" }, { name: "runScript", outcome: "failed" }] }],
+    });
+  });
+
   it("passes the command limit to runtime execution", async () => {
     const result = await run(["run-machine", fixture("examples/order-machine.ts"),
       "--state", '{"phase":"draft","ordered":2,"received":0}', "--command", '{"type":"submit"}', "--max-commands", "1"]);

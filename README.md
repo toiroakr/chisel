@@ -449,6 +449,20 @@ checkMachine(specification); // { status: "held", states: 3, transitions: 6 }
 
 `columns` in `specifyMachine` (`columns: ["phase"]`) names the state fields that tell the rows of a table apart. Then `checkMachine` adds `matrix` to its report: for each value of the columns reached and each command, whether the command `changes` the state (`always`, `sometimes` or `never`, over every reachable state that shares those column values) and, where `requires` has an entry, whether its `precondition` holds. `model-check` prints it, and `--json` carries it. For the order workflow, `receive` with one unit in `phase=issued` reads `changes sometimes, precondition sometimes`, since it takes effect only while the ordered quantity has room. A cell no run reached, such as one cut off by `maxCommands`, reads `unknown` rather than `never`. The table lists each command as it is invoked from a state, so a state that exists only between a command and the commands it emits (`approved` in the order workflow) has no row; the precondition of an emitted command is still checked at every step. A `sometimes` that you expected to be `always` or `never` is a row to read. Columns are always chosen by you: a state field with many values (a counter, an id) would give one row per value.
 
+A command that writes to something outside the machine returns `effects` instead of `state`. Each `c.effect(name, stateAfter)` names a write and the state the machine is in once it has succeeded; the state after the command is the one after the last effect, and with no effects the state is unchanged. The expression stays pure: the effect only says what the state would be.
+
+```ts
+update: (state, command) => ({
+  effects: [
+    c.effect("writeLabel", { ...state, label: "in-progress" }),
+    c.effect("runScript", { ...state, migrated: true }),
+    c.effect("writeLabel", { ...state, label: "checkpoint" }),
+  ],
+}),
+```
+
+`checkMachine` explores both outcomes of every effect. A failed effect stops the command, drops the commands it would have emitted and leaves the state as it was before that effect, so the writes before it stay. Where a failure should leave something else, write it: `c.effect("runScript", after, { failure: state })` rolls the whole command back. Invariants, transition properties and preconditions are held on every outcome, the states a failure leaves are reachable states from which every command is explored (so "after a failed script, `resolve` then `deploy` converges" is a claim you can write), and a counterexample names the effect that failed (`... failed after runScript failed`). A command that stopped at a failed effect may have written nothing yet, so a precondition that held is not held against it for leaving the state unchanged. `runMachine(machine, state, command, { fails: effect => effect.name === "runScript" })` follows the machine with the effects you say failed, and each step lists what `performed`; `chisel run-machine ... --fail runScript` does the same. `maxOutcomes` bounds the outcomes explored for one command (default 1000). The TLA+ translation makes each effect a choice between its success and its failure, and `--engine tla` and `prove-machine` read effects the same way.
+
 To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh
