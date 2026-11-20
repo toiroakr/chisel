@@ -445,6 +445,8 @@ checkMachine(specification); // { status: "held", states: 3, transitions: 6 }
 
 [`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. [`examples/order-machine.spec.ts`](examples/order-machine.spec.ts) declares its invariant and transition property. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state. A receipt before issuance or beyond the ordered quantity intentionally leaves the state unchanged; the invariant checks state safety rather than command acceptance.
 
+`requires` in `specifyMachine` states, per command, the states and commands in which the command is meant to change the state (`requires: { allocate: order => order.phase.$eq("approved") }`). `checkMachine` is `broken` when a step changes the state although its precondition is false, or leaves the state unchanged although it holds, and the counterexample is the shortest command sequence that reaches such a step. A command without an entry is not held to one. The native checker reads `requires`; the TLA+ translation does not translate it yet.
+
 To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh

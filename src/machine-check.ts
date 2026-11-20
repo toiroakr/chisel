@@ -3,6 +3,9 @@ import { EvaluationLimit } from "./exact.js";
 import { deepEqual } from "./equal.js";
 import { MachineFailure, MachineLimitError, isMachine, positiveLimit, runMachine } from "./machine.js";
 import type { Machine, MachineExecution, MachineStep } from "./machine.js";
+import { rootTerm } from "./rule.js";
+import type { TermOf } from "./rule.js";
+import { isVariantsSchema, tagOf } from "./schema.js";
 import type { AnySchema } from "./schema.js";
 import { checks, pairable, refusedBy } from "./world.js";
 import type { Invariant, Transition } from "./world.js";
@@ -14,12 +17,22 @@ export interface MachineSpecification<State, Command> {
   readonly machine: Machine<State, Command>;
   readonly invariants: readonly Invariant[];
   readonly transitions: readonly Transition[];
+  readonly requires: Readonly<Record<string, unknown>>;
 }
+
+type CommandTags<Command> = Command extends unknown ? Extract<Command[keyof Command], string> : never;
+type CommandCase<Command, Tag extends string> = Command extends unknown ? (Tag extends Command[keyof Command] ? Command : never) : never;
+
+// A command's precondition: the states and commands in which it is meant to change the state.
+export type Requires<State, Command> = {
+  readonly [Tag in CommandTags<Command>]?: (state: TermOf<State>, command: TermOf<CommandCase<Command, Tag>>) => unknown;
+};
 
 export function specifyMachine<State, Command>(machine: Machine<State, Command>, properties: {
   readonly name?: string;
   readonly invariants?: readonly Invariant[];
   readonly transitions?: readonly Transition[];
+  readonly requires?: Requires<State, Command>;
 } = {}): MachineSpecification<State, Command> {
   const names = [...properties.invariants ?? [], ...properties.transitions ?? []].map(item => item.name);
   const repeated = names.find((item, index) => names.indexOf(item) !== index);
@@ -27,8 +40,15 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   for (const transition of properties.transitions ?? []) {
     if (transition.each) pairable(machine.name, machine.state as AnySchema, transition);
   }
+  const commandSchema = machine.command as AnySchema;
+  const tags = isVariantsSchema(commandSchema) ? commandSchema.variantTags : [];
+  const requires: Record<string, unknown> = {};
+  for (const [tag, precondition] of Object.entries(properties.requires ?? {}) as [string, (state: unknown, command: unknown) => unknown][]) {
+    if (!tags.includes(tag)) throw new SpecificationError(`Machine ${machine.name} declares no command ${tag}`);
+    requires[tag] = precondition(rootTerm("state"), rootTerm("command"));
+  }
   return { kind: "machine-specification", name: properties.name ?? machine.name, machine,
-    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [] };
+    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires };
 }
 
 export function isMachineSpecification(value: unknown): value is MachineSpecification<unknown, unknown> {
@@ -60,6 +80,14 @@ function violation<State, Command>(specification: MachineSpecification<State, Co
     for (const transition of specification.transitions) {
       const reason = refusedBy(transition, specification.name, step.before, step.after);
       if (reason !== undefined) return reason;
+    }
+    const tag = tagOf(specification.machine.command as never, step.command);
+    const precondition = tag === undefined ? undefined : specification.requires[tag];
+    if (precondition !== undefined) {
+      const held = checks(precondition, { state: step.before, command: step.command });
+      const changed = !deepEqual(step.before, step.after);
+      if (!held && changed) return `${tag} changed the state although its precondition was false`;
+      if (held && !changed) return `${tag} left the state unchanged although its precondition held`;
     }
   }
   return undefined;
