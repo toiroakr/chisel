@@ -89,6 +89,8 @@ export interface MachineStep<State, Command> {
   readonly after: State;
   // Present when the command declared effects: the ones it ran, the last one failed if the command stopped.
   readonly performed?: readonly PerformedEffect[];
+  // Present when the process died in the command, after this many of its effects.
+  readonly died?: { readonly after: number };
 }
 
 export interface MachineExecution<State, Command> {
@@ -106,10 +108,15 @@ export class MachineLimitError<State = unknown, Command = unknown> extends Speci
 
 // Evaluates the same expression used by the verification tools. Emissions are internal
 // commands, not I/O. The caller decides when and where to persist the result.
-// `fails` says whether an effect fails; by default none does, since an effect is something
-// the caller performs and this function only follows the machine.
+// `fails` says whether an effect fails and `dies` whether the process dies at a point of a
+// command with effects (before the first, and after each); by default neither happens, since
+// an effect is something the caller performs and this function only follows the machine.
 export function runMachine<State, Command>(definition: Machine<State, Command>, state: NoInfer<State>, command: NoInfer<Command>,
-  options: { readonly maxCommands?: number; readonly fails?: (effect: { readonly name: string; readonly index: number; readonly command: Command }) => boolean } = {}): MachineExecution<State, Command> {
+  options: {
+    readonly maxCommands?: number;
+    readonly fails?: (effect: { readonly name: string; readonly index: number; readonly command: Command }) => boolean;
+    readonly dies?: (point: { readonly completed: number; readonly command: Command }) => boolean;
+  } = {}): MachineExecution<State, Command> {
   const maxCommands = positiveLimit(options.maxCommands, 1000, "maxCommands");
   let current = parse(definition.state, state, "Current state");
   const pending: unknown[] = [command];
@@ -125,11 +132,14 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
       let next: State;
       let performed: PerformedEffect[] | undefined;
       let stopped = false;
+      let died: { after: number } | undefined;
       if (Object.hasOwn(output, "effects")) {
         if (!Array.isArray(output.effects)) throw new SpecificationError("Effects must be an array");
         next = current;
         performed = [];
-        for (const [index, item] of (output.effects as unknown[]).entries()) {
+        const declaredEffects = output.effects as unknown[];
+        for (const [index, item] of declaredEffects.entries()) {
+          if (options.dies?.({ completed: index, command: input })) { died = { after: index }; stopped = true; break; }
           const declared = item as { name?: unknown; state?: unknown; failure?: unknown } | null;
           if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
           if (options.fails?.({ name: declared.name, index, command: input })) {
@@ -141,8 +151,9 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
           next = parse(definition.state, declared.state, `Effect ${declared.name} state`);
           performed.push({ name: declared.name, outcome: "succeeded" });
         }
+        if (!stopped && options.dies?.({ completed: declaredEffects.length, command: input })) { died = { after: declaredEffects.length }; stopped = true; }
       } else next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
-      steps.push({ command: input, before: current, after: next, ...(performed === undefined ? {} : { performed }) });
+      steps.push({ command: input, before: current, after: next, ...(performed === undefined ? {} : { performed }), ...(died === undefined ? {} : { died }) });
       const emitted = output.commands === undefined || stopped ? [] : output.commands;
       if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
       const validated = emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));
@@ -164,7 +175,7 @@ export interface MachineOutcome<State, Command> {
 // Every way a command can end when each effect it runs may succeed or fail, found by
 // replaying the run with each choice taken the other way once.
 export function runMachineOutcomes<State, Command>(definition: Machine<State, Command>, state: NoInfer<State>, command: NoInfer<Command>,
-  options: { readonly maxCommands?: number; readonly maxOutcomes?: number } = {}): MachineOutcome<State, Command>[] {
+  options: { readonly maxCommands?: number; readonly maxOutcomes?: number; readonly crashes?: boolean } = {}): MachineOutcome<State, Command>[] {
   const maxOutcomes = positiveLimit(options.maxOutcomes, 1000, "maxOutcomes");
   const outcomes: MachineOutcome<State, Command>[] = [];
   const tapes: boolean[][] = [[]];
@@ -176,13 +187,14 @@ export function runMachineOutcomes<State, Command>(definition: Machine<State, Co
     }
     const decided = tape;
     let evaluated = 0;
-    const fails = () => {
+    const choose = () => {
       const choice = evaluated++;
       if (choice < decided.length) return decided[choice]!;
       tapes.push([...decided, ...Array.from({ length: choice - decided.length }, () => false), true]);
       return false;
     };
-    try { outcomes.push({ result: runMachine(definition, state, command, { ...options, fails }) }); }
+    const { crashes, ...limits } = options;
+    try { outcomes.push({ result: runMachine(definition, state, command, { ...limits, fails: choose, ...(crashes ? { dies: choose } : {}) }) }); }
     catch (error) { outcomes.push({ error }); }
   }
   return outcomes;
