@@ -288,6 +288,9 @@ export function behavior<
   if (options.input.variantTags.includes("$default")) {
     throw new SpecificationError(`${name} cannot take a case named $default`);
   }
+  if (Object.hasOwn(options, "requires")) {
+    throw new SpecificationError(`${name} no longer takes requires; declare its dependencies under dependencies`);
+  }
   if (Object.keys(options.dependencies ?? {}).length && (options.input.discriminant === DEPS || options.input.variantTags.some(tag => Object.hasOwn(options.input.variants[tag]!.shape, DEPS)))) {
     throw new SpecificationError("#deps is reserved when dependencies are declared");
   }

@@ -51,20 +51,21 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
   const discriminant = (machine.command as unknown as Partial<AnyVariantsSchema>).discriminant === undefined ? "" : identifier((machine.command as unknown as AnyVariantsSchema).discriminant);
   const preconditions = Object.entries(specification.requires).map(([tag, holds], index) => ({ name: `Req${index}`,
     formula: `IF depth = 0 THEN TRUE ELSE IF last.${discriminant} = ${JSON.stringify(tag)} THEN (${compiler.condition(holds, new Map([["state", "previous"], ["command", "last"]]), "previous")}) <=> previous # state ELSE TRUE` }));
+  const last = (command: string) => preconditions.length > 0 ? ` /\\ last' = ${command}` : "";
   const stateSet = set(states.values.map(value => compiler.value(value, new Map())));
   const commandSet = set(commands.values.map(value => compiler.value(value, new Map())));
   const initial = set(machine.initial.map(value => compiler.value(value, new Map())));
   const source = [
     `---- MODULE ${name} ----`,
     "EXTENDS Naturals, Integers, Sequences",
-    "VARIABLES state, pending, previous, depth, last",
+    `VARIABLES state, pending, previous, depth${preconditions.length > 0 ? ", last" : ""}`,
     `MaxCommands == ${maxCommands}`,
     `StateDomain == ${stateSet}`,
     `CommandDomain == ${commandSet}`,
     `Step(s, c) == ${step}`,
-    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0 /\\ last = <<>>`,
-    "Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1 /\\ last' = c)",
-    "        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1 /\\ last' = Head(pending))",
+    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
+    `Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1${last("c")})`,
+    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1${last("Head(pending)")})`,
     "TypeOK == /\\ state \\in StateDomain /\\ \\A i \\in 1..Len(pending): pending[i] \\in CommandDomain",
     "Budget == pending = <<>> \\/ depth < MaxCommands",
     ...properties.map(item => `${item.name} == ${item.formula}`),

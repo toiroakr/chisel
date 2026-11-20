@@ -73,4 +73,24 @@ describe("machine preconditions", () => {
     expect(() => c.specifyMachine(orderMachine, { columns: ["status"] as never }))
       .toThrow("Machine order fulfillment has no state field status to use as a column");
   });
+
+  it("takes the discriminant of a sum state as a column", () => {
+    const State = c.variants("kind", { idle: c.object({}), busy: c.object({ jobs: c.int().min(1).max(1) }) });
+    const declaration = c.machine("worker", {
+      state: State, command: c.enum(["start"] as const), initial: [{ kind: "idle" }],
+      update: state => ({ state: c.choose(state.kind.$eq("idle"), { kind: "busy" as const, jobs: 1 }, state) }),
+    });
+    const report = c.checkMachine(c.specifyMachine(declaration, { columns: ["kind"] }));
+    expect(report.matrix?.rows.map(row => row.state)).toStrictEqual([{ kind: "idle" }, { kind: "busy" }]);
+  });
+
+  it("does not claim a command never changes the state when it was not evaluated", () => {
+    const declaration = c.machine("endless", {
+      state: c.object({ n: c.int().min(0).max(1) }), command: c.enum(["stop", "go"] as const), initial: [{ n: 0 }],
+      update: (state, command) => ({ state, commands: c.choose(command.$eq("go"), ["go" as const], [] as const) }),
+    });
+    const report = c.checkMachine(c.specifyMachine(declaration, { columns: ["n"] }), { maxCommands: 2 });
+    expect(report.status).toBe("undetermined");
+    expect(report.matrix?.rows[0]?.cells.map(cell => cell.changes)).toStrictEqual(["never", "unknown"]);
+  });
 });

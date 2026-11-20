@@ -585,3 +585,12 @@ describe("a dependency declared as another behavior", () => {
     ]);
   });
 });
+
+describe("a behavior left on the old dependency key", () => {
+  it("is refused instead of losing its dependencies", () => {
+    expect(() => behavior("stale", {
+      input: variants("kind", { only: object({}) }), result: object({}), effects: variants("type", {}),
+      requires: { clock: dependency(instant()) },
+    } as never)).toThrow("declare its dependencies under dependencies");
+  });
+});

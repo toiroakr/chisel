@@ -49,7 +49,8 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
     if (!tags.includes(tag)) throw new SpecificationError(`Machine ${machine.name} declares no command ${tag}`);
     requires[tag] = precondition(rootTerm("state"), rootTerm("command"));
   }
-  const fields = Object.keys((machine.state as { shape?: object }).shape ?? {});
+  const stateSchema = machine.state as AnySchema;
+  const fields = isVariantsSchema(stateSchema) ? [stateSchema.discriminant] : Object.keys((stateSchema as { shape?: object }).shape ?? {});
   for (const column of properties.columns ?? []) {
     if (!fields.includes(column)) throw new SpecificationError(`Machine ${machine.name} has no state field ${column} to use as a column`);
   }
@@ -71,7 +72,8 @@ export interface MachineTrace<State, Command> {
   readonly reason: string;
 }
 
-export type Occurrence = "always" | "sometimes" | "never";
+// "unknown" is a cell no command run reached, such as one cut off by a limit.
+export type Occurrence = "always" | "sometimes" | "never" | "unknown";
 
 // What each command does in the states that share the values of the columns.
 export interface MachineMatrix<Command> {
@@ -169,7 +171,7 @@ export function checkMachine<State, Command>(specification: MachineSpecification
     row.cells[commandIndex]!.changes.add(changed);
     if (precondition !== undefined) row.cells[commandIndex]!.precondition.add(precondition);
   };
-  const occurrence = (seen: Set<boolean>): Occurrence => seen.size === 2 ? "sometimes" : seen.has(true) ? "always" : "never";
+  const occurrence = (seen: Set<boolean>): Occurrence => seen.size === 2 ? "sometimes" : seen.has(true) ? "always" : seen.has(false) ? "never" : "unknown";
   const matrix = (): { matrix?: MachineMatrix<Command> } => specification.columns.length === 0 ? {} : { matrix: {
     columns: specification.columns,
     rows: [...tabulated.values()].map(row => ({ state: row.state, cells: row.cells.map((cell, index) => ({

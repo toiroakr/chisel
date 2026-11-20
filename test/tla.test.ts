@@ -134,4 +134,9 @@ describe("TLA+ translation of executable machines", () => {
     expect(wrong.status).toBe("undetermined");
     expect(wrong.obligations.find(item => item.name === "allocate precondition forces the change")?.status).toBe("undetermined");
   }, 60000);
+
+  it("adds the last-command variable only when a precondition is declared", () => {
+    expect(c.toTla(c.specifyMachine(orderSpecification.machine)).source).not.toContain("last");
+    expect(c.toTla(orderSpecification).source).toContain("last");
+  });
 });
