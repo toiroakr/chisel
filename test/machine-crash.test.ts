@@ -33,6 +33,16 @@ describe("a process that dies between the effects of a command", () => {
     expect(last.steps[0]!.died).toStrictEqual({ after: 2 });
   });
 
+  it("makes no death point of a command whose effects list is empty", () => {
+    const idle = c.machine("idle", {
+      state: c.object({ n: c.int().min(0).max(1) }), command: c.enum(["go"] as const), initial: [{ n: 0 }],
+      update: () => ({ effects: [] }),
+    });
+    const asked: number[] = [];
+    c.runMachine(idle, { n: 0 }, "go", { dies: point => { asked.push(point.completed); return false; } });
+    expect(asked).toStrictEqual([]);
+  });
+
   it("is not explored unless the specification asks for it", () => {
     expect(c.checkMachine(c.specifyMachine(checkout, { invariants: [leak] }))).toMatchObject({ status: "held" });
   });
@@ -75,7 +85,7 @@ describe("a process that dies between the effects of a command", () => {
       }),
     });
     const specification = c.specifyMachine(guarded, { requires: { checkout: state => state.charged.$eq(false) }, crashes: true });
-    expect(c.checkMachine(specification).status).not.toBe("broken");
+    expect(c.checkMachine(specification).status).toBe("held");
   });
 
   it("leaves a machine without effects as it was", () => {

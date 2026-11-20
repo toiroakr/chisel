@@ -221,6 +221,19 @@ describe("TLA+ translation of executable machines", () => {
       });
     });
 
+    it("makes no death point of a command whose effects list is empty", async () => {
+      const Mixed = c.object({ n: c.int().min(0).max(1) });
+      const mixed = c.machine("tla mixed", {
+        state: Mixed, command: c.enum(["write", "skip"] as const), initial: [{ n: 0 }],
+        update: (_state, command) => ({
+          effects: c.choose<readonly c.Effect<c.Infer<typeof Mixed>>[]>(command.$eq("write"), [c.effect<c.Infer<typeof Mixed>>("write", { n: 1 })], []),
+        }),
+      });
+      const specification = c.specifyMachine(mixed, { crashes: true });
+      expect(c.toTla(specification).source).toContain("IF Len(r.effects) = 0 THEN {} ELSE 0..Len(r.effects)");
+      expect((await c.checkMachineTla(specification)).status).toBe("held");
+    });
+
     it("proves an invariant over the states a death leaves", { timeout: 60000 }, async () => {
       expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [paid], crashes: true }))).status).toBe("proved");
       expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).status).toBe("undetermined");

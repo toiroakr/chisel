@@ -87,7 +87,7 @@ export interface MachineStep<State, Command> {
   readonly command: Command;
   readonly before: State;
   readonly after: State;
-  // Present when the command declared effects: the ones it ran, the last one failed if the command stopped.
+  // Present when the command declared effects: the ones it ran. A command that stopped at a failed effect ends with a failed entry; one the process died in has `died`.
   readonly performed?: readonly PerformedEffect[];
   // Present when the process died in the command, after this many of its effects.
   readonly died?: { readonly after: number };
@@ -151,7 +151,7 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
           next = parse(definition.state, declared.state, `Effect ${declared.name} state`);
           performed.push({ name: declared.name, outcome: "succeeded" });
         }
-        if (!stopped && options.dies?.({ completed: declaredEffects.length, command: input })) { died = { after: declaredEffects.length }; stopped = true; }
+        if (!stopped && declaredEffects.length > 0 && options.dies?.({ completed: declaredEffects.length, command: input })) { died = { after: declaredEffects.length }; stopped = true; }
       } else next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
       steps.push({ command: input, before: current, after: next, ...(performed === undefined ? {} : { performed }), ...(died === undefined ? {} : { died }) });
       const emitted = output.commands === undefined || stopped ? [] : output.commands;
@@ -172,8 +172,9 @@ export interface MachineOutcome<State, Command> {
   readonly error?: unknown;
 }
 
-// Every way a command can end when each effect it runs may succeed or fail, found by
-// replaying the run with each choice taken the other way once.
+// Every way a command can end when each effect it runs may succeed or fail (and, with `crashes`,
+// the process may die before the first effect and after each one), found by replaying the run
+// with each choice taken the other way once.
 export function runMachineOutcomes<State, Command>(definition: Machine<State, Command>, state: NoInfer<State>, command: NoInfer<Command>,
   options: { readonly maxCommands?: number; readonly maxOutcomes?: number; readonly crashes?: boolean } = {}): MachineOutcome<State, Command>[] {
   const maxOutcomes = positiveLimit(options.maxOutcomes, 1000, "maxOutcomes");
