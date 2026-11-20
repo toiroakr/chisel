@@ -4,6 +4,7 @@ import { orderMachine } from "./order-machine.js";
 type Order = typeof orderMachine.initial[number];
 
 export const orderSpecification = specifyMachine(orderMachine, {
+  columns: ["phase"],
   requires: {
     allocate: order => order.phase.$eq("approved"),
     receive: (order, command) => order.phase.$eq("issued").$and(order.received.$plus(command.units).$lte(order.ordered)),

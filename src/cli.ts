@@ -270,6 +270,10 @@ const modelCheckCommand = defineCommand({
       if (report.reason) console.log(`  ${report.reason}`);
       if ("counterexample" in report && report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
       if ("trace" in report && report.trace) console.log(`  ${JSON.stringify(report.trace)}`);
+      if ("matrix" in report && report.matrix) for (const row of report.matrix.rows) {
+        console.log(`  ${report.matrix.columns.map(column => `${column}=${JSON.stringify(row.state[column])}`).join(", ").replace(/"/g, "")}`);
+        for (const cell of row.cells) console.log(`    ${JSON.stringify(cell.command, jsonReplacer)}: changes ${cell.changes}${cell.precondition === undefined ? "" : `, precondition ${cell.precondition}`}`);
+      }
     }
     if (reports.some(report => report.status !== "held")) throw new Error("反例または未確定の結果が出たmachineがあります");
   },

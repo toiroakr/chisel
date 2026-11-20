@@ -46,4 +46,31 @@ describe("machine preconditions", () => {
     expect(() => c.specifyMachine(orderMachine, { requires: { cancel: approvedOnly } as never }))
       .toThrow("Machine order fulfillment declares no command cancel");
   });
+
+  it("tabulates, per projected state and command, whether the state changes and whether the precondition holds", () => {
+    const specification = c.specifyMachine(orderMachine, {
+      requires: { allocate: approvedOnly, receive: issuedWithRoom },
+      columns: ["phase"],
+    });
+    const report = c.checkMachine(specification);
+    expect(report.matrix?.columns).toStrictEqual(["phase"]);
+    const cell = (phase: string, command: object) => report.matrix?.rows
+      .find(row => row.state.phase === phase)?.cells.find(item => JSON.stringify(item.command) === JSON.stringify(command));
+    expect(report.matrix?.rows.map(row => row.state)).toStrictEqual([{ phase: "draft" }, { phase: "issued" }]);
+    expect(cell("draft", { type: "submit" })).toMatchObject({ changes: "always" });
+    expect(cell("issued", { type: "submit" })).toMatchObject({ changes: "never" });
+    expect(cell("draft", { type: "allocate" })).toStrictEqual({ command: { type: "allocate" }, changes: "never", precondition: "never" });
+    expect(cell("issued", { type: "receive", units: 1 })).toStrictEqual({
+      command: { type: "receive", units: 1 }, changes: "sometimes", precondition: "sometimes",
+    });
+  });
+
+  it("leaves the matrix out when no columns are given", () => {
+    expect(c.checkMachine(c.specifyMachine(orderMachine)).matrix).toBeUndefined();
+  });
+
+  it("refuses a column the state does not declare", () => {
+    expect(() => c.specifyMachine(orderMachine, { columns: ["status"] as never }))
+      .toThrow("Machine order fulfillment has no state field status to use as a column");
+  });
 });

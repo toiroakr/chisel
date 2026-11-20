@@ -18,6 +18,7 @@ export interface MachineSpecification<State, Command> {
   readonly invariants: readonly Invariant[];
   readonly transitions: readonly Transition[];
   readonly requires: Readonly<Record<string, unknown>>;
+  readonly columns: readonly string[];
 }
 
 type CommandTags<Command> = Command extends unknown ? Extract<Command[keyof Command], string> : never;
@@ -33,6 +34,7 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   readonly invariants?: readonly Invariant[];
   readonly transitions?: readonly Transition[];
   readonly requires?: Requires<State, Command>;
+  readonly columns?: readonly (keyof State & string)[];
 } = {}): MachineSpecification<State, Command> {
   const names = [...properties.invariants ?? [], ...properties.transitions ?? []].map(item => item.name);
   const repeated = names.find((item, index) => names.indexOf(item) !== index);
@@ -47,8 +49,12 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
     if (!tags.includes(tag)) throw new SpecificationError(`Machine ${machine.name} declares no command ${tag}`);
     requires[tag] = precondition(rootTerm("state"), rootTerm("command"));
   }
+  const fields = Object.keys((machine.state as { shape?: object }).shape ?? {});
+  for (const column of properties.columns ?? []) {
+    if (!fields.includes(column)) throw new SpecificationError(`Machine ${machine.name} has no state field ${column} to use as a column`);
+  }
   return { kind: "machine-specification", name: properties.name ?? machine.name, machine,
-    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires };
+    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires, columns: properties.columns ?? [] };
 }
 
 export function isMachineSpecification(value: unknown): value is MachineSpecification<unknown, unknown> {
@@ -65,12 +71,24 @@ export interface MachineTrace<State, Command> {
   readonly reason: string;
 }
 
+export type Occurrence = "always" | "sometimes" | "never";
+
+// What each command does in the states that share the values of the columns.
+export interface MachineMatrix<Command> {
+  readonly columns: readonly string[];
+  readonly rows: readonly {
+    readonly state: Readonly<Record<string, unknown>>;
+    readonly cells: readonly { readonly command: Command; readonly changes: Occurrence; readonly precondition?: Occurrence }[];
+  }[];
+}
+
 export interface MachineReport<State, Command> {
   readonly status: "held" | "broken" | "undetermined";
   readonly states: number;
   readonly transitions: number;
   readonly reason?: string;
   readonly counterexample?: MachineTrace<State, Command>;
+  readonly matrix?: MachineMatrix<Command>;
 }
 
 function violation<State, Command>(specification: MachineSpecification<State, Command>, steps: readonly MachineStep<State, Command>[]): string | undefined {
@@ -103,6 +121,7 @@ export function checkMachine<State, Command>(specification: MachineSpecification
   const domainLimit = positiveLimit(options.domainLimit, 10000, "domainLimit");
   const maxCommands = positiveLimit(options.maxCommands, 1000, "maxCommands");
   const commands = domainOf(specification.machine.command as AnySchema, domainLimit);
+  const commandList = commands.values as Command[];
   const seen = new Map<string, State[]>();
   let stateCount = 0;
   const queue: { state: State; start: State; parent?: number; command?: Command; steps: readonly MachineStep<State, Command>[] }[] = [];
@@ -141,10 +160,27 @@ export function checkMachine<State, Command>(specification: MachineSpecification
     remember(start);
     queue.push({ state: start, start, steps: [] });
   }
+  const tabulated = new Map<string, { state: Record<string, unknown>; cells: { changes: Set<boolean>; precondition: Set<boolean> }[] }>();
+  const tabulate = (state: State, commandIndex: number, changed: boolean, precondition: boolean | undefined) => {
+    const projected = Object.fromEntries(specification.columns.map(column => [column, (state as Record<string, unknown>)[column]]));
+    const key = keyOf(projected as State);
+    const row = tabulated.get(key) ?? { state: projected, cells: commandList.map(() => ({ changes: new Set<boolean>(), precondition: new Set<boolean>() })) };
+    tabulated.set(key, row);
+    row.cells[commandIndex]!.changes.add(changed);
+    if (precondition !== undefined) row.cells[commandIndex]!.precondition.add(precondition);
+  };
+  const occurrence = (seen: Set<boolean>): Occurrence => seen.size === 2 ? "sometimes" : seen.has(true) ? "always" : "never";
+  const matrix = (): { matrix?: MachineMatrix<Command> } => specification.columns.length === 0 ? {} : { matrix: {
+    columns: specification.columns,
+    rows: [...tabulated.values()].map(row => ({ state: row.state, cells: row.cells.map((cell, index) => ({
+      command: commandList[index]!, changes: occurrence(cell.changes),
+      ...(cell.precondition.size === 0 ? {} : { precondition: occurrence(cell.precondition) }),
+    })) })),
+  } };
   let transitions = 0;
   for (let index = 0; index < queue.length; index++) {
     const path = queue[index]!;
-    for (const command of commands.values as Command[]) {
+    for (const [commandIndex, command] of commandList.entries()) {
       transitions++;
       let steps: readonly MachineStep<State, Command>[];
       let result: MachineExecution<State, Command> | undefined;
@@ -173,6 +209,12 @@ export function checkMachine<State, Command>(specification: MachineSpecification
         continue;
       }
       if (result === undefined) continue;
+      if (specification.columns.length > 0) {
+        const tag = tagOf(specification.machine.command as never, command);
+        const precondition = tag === undefined ? undefined : specification.requires[tag];
+        tabulate(path.state, commandIndex, !deepEqual(path.state, result.state),
+          precondition === undefined ? undefined : checks(precondition, { state: path.state, command }));
+      }
       const next = result.state;
       if (contains(next)) continue;
       if (stateCount === maxStates) {
@@ -185,6 +227,6 @@ export function checkMachine<State, Command>(specification: MachineSpecification
   }
   if (!commands.exhaustive) incomplete ??= `Command schema could not be exhaustively enumerated within domainLimit (${domainLimit})`;
   return incomplete === undefined
-    ? { status: "held", states: stateCount, transitions }
-    : { status: "undetermined", states: stateCount, transitions, reason: incomplete };
+    ? { status: "held", states: stateCount, transitions, ...matrix() }
+    : { status: "undetermined", states: stateCount, transitions, reason: incomplete, ...matrix() };
 }
