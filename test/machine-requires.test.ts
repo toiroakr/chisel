@@ -93,4 +93,14 @@ describe("machine preconditions", () => {
     expect(report.status).toBe("undetermined");
     expect(report.matrix?.rows[0]?.cells.map(cell => cell.changes)).toStrictEqual(["never", "unknown"]);
   });
+
+  it("types a precondition by the command's tag even when another command has a string field", () => {
+    const Command = c.variants("type", { write: c.object({ key: c.string() }), reset: c.object({ hard: c.boolean() }) });
+    const declaration = c.machine("store", {
+      state: c.object({ dirty: c.boolean() }), command: Command, initial: [{ dirty: false }],
+      update: state => ({ state }),
+    });
+    const specification = c.specifyMachine(declaration, { requires: { reset: (state, command) => command.hard.$eq(true).$and(state.dirty.$eq(true)) } });
+    expect(Object.keys(specification.requires)).toStrictEqual(["reset"]);
+  });
 });

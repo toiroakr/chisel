@@ -21,8 +21,11 @@ export interface MachineSpecification<State, Command> {
   readonly columns: readonly string[];
 }
 
-type CommandTags<Command> = Command extends unknown ? Extract<Command[keyof Command], string> : never;
-type CommandCase<Command, Tag extends string> = Command extends unknown ? (Tag extends Command[keyof Command] ? Command : never) : never;
+// The key every command carries as a literal: the tag that tells the commands apart.
+type DiscriminantOf<Command> = { [Key in keyof Command]-?: Command[Key] extends string ? (string extends Command[Key] ? never : Key) : never }[keyof Command];
+type CommandTags<Command> = Command[DiscriminantOf<Command>] & string;
+type CommandCase<Command, Tag extends string, Key = DiscriminantOf<Command>> =
+  Command extends unknown ? (Key extends keyof Command ? (Tag extends Command[Key] ? Command : never) : never) : never;
 
 // A command's precondition: the states and commands in which it is meant to change the state.
 export type Requires<State, Command> = {
