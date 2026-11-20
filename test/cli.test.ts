@@ -146,6 +146,12 @@ describe("chisel machines", () => {
     expect(json[0].matrix.columns).toStrictEqual(["phase"]);
   });
 
+  it("prints column values that are bigints or hold quotes as they are", async () => {
+    const result = await run(["model-check", fixture("test/fixtures/matrix-columns.spec.ts")]);
+    expect(result.exitCode).toBe(0);
+    expect(stdoutOf(result)).toContain('count=0, label=a"b');
+  });
+
   it("fails the command when a proof is incomplete", async () => {
     const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--max-states", "1"]);
     expect(result.exitCode).toBe(1);

@@ -271,7 +271,8 @@ const modelCheckCommand = defineCommand({
       if ("counterexample" in report && report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
       if ("trace" in report && report.trace) console.log(`  ${JSON.stringify(report.trace)}`);
       if ("matrix" in report && report.matrix) for (const row of report.matrix.rows) {
-        console.log(`  ${report.matrix.columns.map(column => `${column}=${JSON.stringify(row.state[column])}`).join(", ").replace(/"/g, "")}`);
+        const show = (value: unknown) => typeof value === "string" || typeof value === "bigint" ? String(value) : JSON.stringify(value, jsonReplacer);
+        console.log(`  ${report.matrix.columns.map(column => `${column}=${show(row.state[column])}`).join(", ")}`);
         for (const cell of row.cells) console.log(`    ${JSON.stringify(cell.command, jsonReplacer)}: changes ${cell.changes}${cell.precondition === undefined ? "" : `, precondition ${cell.precondition}`}`);
       }
     }
