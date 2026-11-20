@@ -139,4 +139,63 @@ describe("TLA+ translation of executable machines", () => {
     expect(c.toTla(c.specifyMachine(orderSpecification.machine)).source).not.toContain("last");
     expect(c.toTla(orderSpecification).source).toContain("last");
   });
+
+  describe("effects", () => {
+    const Label = c.enum(["none", "in-progress", "checkpoint"] as const);
+    const State = c.object({ label: Label, migrated: c.boolean() });
+    const Command = c.variants("type", { deploy: c.object({}), resolve: c.object({}) });
+    type Deploy = c.Infer<typeof State>;
+    const deploy = c.machine("tla deploy", {
+      state: State, command: Command, initial: [{ label: "none", migrated: false }],
+      update: (state, command) => c.matchValue<typeof Command, never>(Command, command, {
+        deploy: () => ({
+          effects: [
+            c.effect<Deploy>("writeLabel", { label: "in-progress" as const, migrated: state.migrated }),
+            c.effect<Deploy>("runScript", { label: "in-progress" as const, migrated: true }),
+            c.effect<Deploy>("writeLabel", { label: "checkpoint" as const, migrated: true }),
+          ],
+        }),
+        resolve: () => ({ state: { label: "none" as const, migrated: state.migrated } }),
+      } as never),
+    });
+    const finished = c.invariant<Deploy>("checkpoint means migrated", state => state.label.$ne("checkpoint").$or(state.migrated.$eq(true)));
+    const stable = c.invariant<Deploy>("no half-finished deploy", state => state.label.$ne("in-progress"));
+
+    it("explores the failure of every effect", async () => {
+      expect(await c.checkMachineTla(c.specifyMachine(deploy, { invariants: [finished] }))).toMatchObject({ status: "held" });
+      expect(await c.checkMachineTla(c.specifyMachine(deploy, { invariants: [stable] }))).toMatchObject({
+        status: "broken", reason: "no half-finished deploy",
+      });
+    });
+
+    it("agrees with the native checker about preconditions after a failure", { timeout: 60000 }, async () => {
+      const guarded = c.machine("tla guarded deploy", {
+        state: State, command: Command, initial: [{ label: "none", migrated: false }],
+        update: (state, command) => c.matchValue<typeof Command, never>(Command, command, {
+          deploy: () => ({
+            effects: c.choose<readonly c.Effect<Deploy>[]>(state.label.$eq("none"), [
+              c.effect<Deploy>("writeLabel", { label: "in-progress" as const, migrated: state.migrated }),
+              c.effect<Deploy>("writeLabel", { label: "checkpoint" as const, migrated: state.migrated }),
+            ], []),
+          }),
+          resolve: () => ({ state: { label: "none" as const, migrated: state.migrated } }),
+        } as never),
+      });
+      const right = c.specifyMachine(guarded, { requires: { deploy: state => state.label.$eq("none"), resolve: state => state.label.$ne("none") } });
+      expect(c.checkMachine(right).status).toBe("held");
+      expect((await c.checkMachineTla(right)).status).toBe("held");
+      expect((await c.proveMachine(right)).status).toBe("proved");
+      const wrong = c.specifyMachine(guarded, { requires: { deploy: state => state.label.$ne("none") } });
+      expect(c.checkMachine(wrong).status).toBe("broken");
+      expect((await c.checkMachineTla(wrong)).status).toBe("broken");
+    });
+
+    it("proves an invariant over every outcome of the effects", async () => {
+      const proof = await c.proveMachine(c.specifyMachine(deploy, { invariants: [finished] }));
+      expect(proof.status).toBe("proved");
+      const broken = await c.proveMachine(c.specifyMachine(deploy, { invariants: [stable] }));
+      expect(broken.status).toBe("undetermined");
+      expect(broken.obligations.find(item => item.name === "no half-finished deploy")?.status).toBe("undetermined");
+    }, 60000);
+  });
 });

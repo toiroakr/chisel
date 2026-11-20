@@ -99,6 +99,13 @@ describe("machine effects", () => {
     expect(c.checkMachine(c.specifyMachine(guarded, { requires: wrong }))).toMatchObject({ status: "broken" });
   });
 
+  it("tabulates a command that can fail as one that sometimes changes the state", () => {
+    const report = c.checkMachine(c.specifyMachine(deployMachine(), { columns: ["label"] }));
+    const row = (label: string) => report.matrix?.rows.find(item => item.state.label === label);
+    expect(report.matrix?.rows.map(item => item.state.label).sort()).toStrictEqual(["checkpoint", "in-progress", "none"]);
+    expect(row("none")?.cells.find(cell => JSON.stringify(cell.command) === '{"type":"deploy"}')?.changes).toBe("sometimes");
+  });
+
   it("refuses an effect that names nothing", () => {
     const declaration = c.machine("nameless", {
       state: c.int().min(0).max(1), command: c.boolean(), initial: [0],
