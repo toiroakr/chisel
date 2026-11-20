@@ -1,7 +1,7 @@
 import { domainOf } from "./domain.js";
 import { EvaluationLimit } from "./exact.js";
 import { deepEqual } from "./equal.js";
-import { MachineFailure, MachineLimitError, isMachine, positiveLimit, runMachine } from "./machine.js";
+import { MachineFailure, MachineLimitError, isMachine, positiveLimit, runMachineOutcomes } from "./machine.js";
 import type { Machine, MachineExecution, MachineStep } from "./machine.js";
 import { rootTerm } from "./rule.js";
 import type { TermOf } from "./rule.js";
@@ -98,19 +98,22 @@ export interface MachineReport<State, Command> {
 
 function violation<State, Command>(specification: MachineSpecification<State, Command>, steps: readonly MachineStep<State, Command>[]): string | undefined {
   for (const step of steps) {
+    const stopped = step.performed?.find(item => item.outcome === "failed");
+    const after = (reason: string) => stopped === undefined ? reason : `${reason} after ${stopped.name} failed`;
     const broken = specification.invariants.find(invariant => !checks(invariant.holds, step.after));
-    if (broken) return `Invariant ${broken.name} failed`;
+    if (broken) return after(`Invariant ${broken.name} failed`);
     for (const transition of specification.transitions) {
       const reason = refusedBy(transition, specification.name, step.before, step.after);
-      if (reason !== undefined) return reason;
+      if (reason !== undefined) return after(reason);
     }
     const tag = tagOf(specification.machine.command as never, step.command);
     const precondition = tag === undefined ? undefined : specification.requires[tag];
     if (precondition !== undefined) {
       const held = checks(precondition, { state: step.before, command: step.command });
       const changed = !deepEqual(step.before, step.after);
-      if (!held && changed) return `${tag} changed the state although its precondition was false`;
-      if (held && !changed) return `${tag} left the state unchanged although its precondition held`;
+      if (!held && changed) return after(`${tag} changed the state although its precondition was false`);
+      // A command that stopped at a failed effect may have written nothing yet.
+      if (held && !changed && stopped === undefined) return `${tag} left the state unchanged although its precondition held`;
     }
   }
   return undefined;
@@ -120,11 +123,13 @@ function violation<State, Command>(specification: MachineSpecification<State, Co
 export function checkMachine<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly maxStates?: number;
   readonly maxCommands?: number;
+  readonly maxOutcomes?: number;
   readonly domainLimit?: number;
 } = {}): MachineReport<State, Command> {
   const maxStates = positiveLimit(options.maxStates, 10000, "maxStates");
   const domainLimit = positiveLimit(options.domainLimit, 10000, "domainLimit");
   const maxCommands = positiveLimit(options.maxCommands, 1000, "maxCommands");
+  const maxOutcomes = positiveLimit(options.maxOutcomes, 1000, "maxOutcomes");
   const commands = domainOf(specification.machine.command as AnySchema, domainLimit);
   const commandList = commands.values as Command[];
   const seen = new Map<string, State[]>();
@@ -186,48 +191,44 @@ export function checkMachine<State, Command>(specification: MachineSpecification
   for (let index = 0; index < queue.length; index++) {
     const path = queue[index]!;
     for (const [commandIndex, command] of commandList.entries()) {
-      transitions++;
-      let steps: readonly MachineStep<State, Command>[];
-      let result: MachineExecution<State, Command> | undefined;
-      let failure: unknown;
-      try {
-        result = runMachine(specification.machine, path.state, command, { maxCommands });
-        steps = result.steps;
-      } catch (error) {
-        steps = error instanceof MachineFailure || error instanceof MachineLimitError ? error.steps as MachineStep<State, Command>[] : [];
-        failure = error;
+      for (const outcome of runMachineOutcomes(specification.machine, path.state, command, { maxCommands, maxOutcomes })) {
+        transitions++;
+        const result = outcome.result;
+        const failure = outcome.error;
+        const steps: readonly MachineStep<State, Command>[] = result?.steps ??
+          (failure instanceof MachineFailure || failure instanceof MachineLimitError ? failure.steps as MachineStep<State, Command>[] : []);
+        let broken: string | undefined;
+        try { broken = violation(specification, steps); }
+        catch (error) {
+          if (!(error instanceof EvaluationLimit)) throw error;
+          incomplete ??= error.message;
+          continue;
+        }
+        if (broken || (failure && !(failure instanceof MachineLimitError))) return {
+          status: "broken", states: stateCount, transitions,
+          counterexample: { start: path.start, ...trace(index, command, steps),
+            reason: broken ?? (failure instanceof Error ? failure.message : String(failure)) },
+        };
+        if (failure instanceof MachineLimitError) {
+          incomplete ??= failure.message;
+          continue;
+        }
+        if (result === undefined) continue;
+        if (specification.columns.length > 0) {
+          const tag = tagOf(specification.machine.command as never, command);
+          const precondition = tag === undefined ? undefined : specification.requires[tag];
+          tabulate(path.state, commandIndex, !deepEqual(path.state, result.state),
+            precondition === undefined ? undefined : checks(precondition, { state: path.state, command }));
+        }
+        const next = result.state;
+        if (contains(next)) continue;
+        if (stateCount === maxStates) {
+          incomplete ??= `Reached maxStates (${maxStates}) before exploring every reachable state`;
+          continue;
+        }
+        remember(next);
+        queue.push({ state: next, start: path.start, parent: index, command, steps });
       }
-      let broken: string | undefined;
-      try { broken = violation(specification, steps); }
-      catch (error) {
-        if (!(error instanceof EvaluationLimit)) throw error;
-        incomplete ??= error.message;
-        continue;
-      }
-      if (broken || (failure && !(failure instanceof MachineLimitError))) return {
-        status: "broken", states: stateCount, transitions,
-        counterexample: { start: path.start, ...trace(index, command, steps),
-          reason: broken ?? (failure instanceof Error ? failure.message : String(failure)) },
-      };
-      if (failure instanceof MachineLimitError) {
-        incomplete ??= failure.message;
-        continue;
-      }
-      if (result === undefined) continue;
-      if (specification.columns.length > 0) {
-        const tag = tagOf(specification.machine.command as never, command);
-        const precondition = tag === undefined ? undefined : specification.requires[tag];
-        tabulate(path.state, commandIndex, !deepEqual(path.state, result.state),
-          precondition === undefined ? undefined : checks(precondition, { state: path.state, command }));
-      }
-      const next = result.state;
-      if (contains(next)) continue;
-      if (stateCount === maxStates) {
-        incomplete ??= `Reached maxStates (${maxStates}) before exploring every reachable state`;
-        continue;
-      }
-      remember(next);
-      queue.push({ state: next, start: path.start, parent: index, command, steps });
     }
   }
   if (!commands.exhaustive) incomplete ??= `Command schema could not be exhaustively enumerated within domainLimit (${domainLimit})`;
