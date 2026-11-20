@@ -189,7 +189,7 @@ const runCommand = defineCommand({
     }
     const implementation = implementations[0]!;
     const definition = implementation.behavior;
-    if (Object.keys(definition.requires).length > 0) {
+    if (Object.keys(definition.dependencies).length > 0) {
       throw new Error(`${definition.name}には依存関係があります。performで依存関係を渡して実行してください`);
     }
     let json: unknown;

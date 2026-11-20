@@ -125,7 +125,7 @@ describe("telling a border from the lines beside it", () => {
     input: variants("状態", { 入力済み: object({ x: int(), y: int() }) }),
     result: variants("結果", { 真: object({}), 偽: object({}) }),
     effects: variants("種類", {}),
-    requires: { 上限: dependency(int()) },
+    dependencies: { 上限: dependency(int()) },
   });
   const 上限までの線 = implement(上限つき, {
     cases: {

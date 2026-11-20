@@ -1483,7 +1483,7 @@ describe("a guard comparing an expression of positions", () => {
       input: variants("状態", { 入力済み: object({ 甲: int() }) }),
       result: variants("結果", { 受付: object({}), 却下: object({}) }),
       effects: variants("種類", {}),
-      requires: { 明細: dependency(array(int())) },
+      dependencies: { 明細: dependency(array(int())) },
     });
     const 長さまで = implement(依存の長さ, {
       cases: {

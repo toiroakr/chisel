@@ -1,7 +1,7 @@
 import { invokeDependency } from "./dependency.js";
 import { DATA, isPromiseLike, snapshotValue } from "./data.js";
 import { interpret, childrenOf, modelDependencyIssue, nodeOf } from "./model.js";
-import type { Requirements, Resolved, Supplied } from "./dependency.js";
+import type { DeclaredDependencies, Resolved, Supplied } from "./dependency.js";
 import type {
   AnyVariantsSchema,
   EnumSchema,
@@ -116,7 +116,7 @@ export interface Behavior<
   InputSchema extends AnyVariantsSchema,
   ResultSchema extends Schema<unknown>,
   EffectSchema extends AnyVariantsSchema,
-  Requires extends Requirements = {},
+  Requires extends DeclaredDependencies = {},
 > {
   readonly kind: "behavior";
   readonly name: string;
@@ -125,7 +125,7 @@ export interface Behavior<
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
-  readonly requires: Requires;
+  readonly dependencies: Requires;
   readonly ensures: readonly EnsuresClause[];
   readonly disregards: Readonly<Record<string, readonly (readonly string[])[]>>;
 }
@@ -146,7 +146,7 @@ export type Disregards<InputSchema extends AnyVariantsSchema> = {
     : Disregarded<Fielded<Infer<InputSchema>>>;
 };
 
-export type AnyBehavior = Behavior<AnyVariantsSchema, Schema<unknown>, AnyVariantsSchema, Requirements>;
+export type AnyBehavior = Behavior<AnyVariantsSchema, Schema<unknown>, AnyVariantsSchema, DeclaredDependencies>;
 
 export type BehaviorInput<B> = B extends { readonly input: infer Input } ? Infer<Input> : never;
 export type BehaviorResult<B> = B extends { readonly result: infer Result }
@@ -155,11 +155,11 @@ export type BehaviorResult<B> = B extends { readonly result: infer Result }
 export type BehaviorEffect<B> = B extends { readonly effects: infer Effect }
   ? Infer<Effect>
   : never;
-export type BehaviorDeps<B> = B extends { readonly requires: infer Requires }
+export type BehaviorDeps<B> = B extends { readonly dependencies: infer Requires }
   ? Resolved<Requires>
   : never;
 // The dependencies a caller hands `perform`: a function may answer a promise.
-export type SuppliedDeps<B> = B extends { readonly requires: infer Requires }
+export type SuppliedDeps<B> = B extends { readonly dependencies: infer Requires }
   ? Supplied<Requires>
   : never;
 
@@ -273,13 +273,13 @@ export function behavior<
   const InputSchema extends AnyVariantsSchema,
   const ResultSchema extends Schema<unknown>,
   const EffectSchema extends AnyVariantsSchema,
-  const Requires extends Requirements = {},
+  const Requires extends DeclaredDependencies = {},
 >(name: string, options: {
   readonly description?: string;
   readonly input: InputSchema;
   readonly result: ResultSchema;
   readonly effects: EffectSchema;
-  readonly requires?: Requires;
+  readonly dependencies?: Requires;
   readonly ensures?: (
     clause: EnsuresBuilder<Infer<InputSchema>, ResultSchema>,
   ) => readonly EnsuresClause[];
@@ -288,7 +288,7 @@ export function behavior<
   if (options.input.variantTags.includes("$default")) {
     throw new SpecificationError(`${name} cannot take a case named $default`);
   }
-  if (Object.keys(options.requires ?? {}).length && (options.input.discriminant === DEPS || options.input.variantTags.some(tag => Object.hasOwn(options.input.variants[tag]!.shape, DEPS)))) {
+  if (Object.keys(options.dependencies ?? {}).length && (options.input.discriminant === DEPS || options.input.variantTags.some(tag => Object.hasOwn(options.input.variants[tag]!.shape, DEPS)))) {
     throw new SpecificationError("#deps is reserved when dependencies are declared");
   }
   const clauses = options.ensures?.(ensuresBuilder()) ?? [];
@@ -321,7 +321,7 @@ export function behavior<
     input: options.input,
     result: options.result,
     effects: options.effects,
-    requires: options.requires ?? ({} as Requires),
+    dependencies: options.dependencies ?? ({} as Requires),
     ensures: clauses,
     disregards: disregardedPaths(name, options.input, options.disregards ?? {}),
   };
@@ -782,14 +782,14 @@ function decide<Result, Effect>(
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
   definition: AnyBehavior,
 ): Execution<Result, Effect> | Promise<Execution<Result, Effect>> {
-  let resolved = Object.keys(definition.requires).length === 0 ? undefined : deps;
+  let resolved = Object.keys(definition.dependencies).length === 0 ? undefined : deps;
   if (decision.expression !== undefined) {
     const issue = modelDependencyIssue(decision.expression, definition, [tagOf(definition.input, input)!]);
     if (issue) throw new SpecificationError(issue);
   }
-  if (decision.expression !== undefined && Object.keys(definition.requires).length > 0) {
+  if (decision.expression !== undefined && Object.keys(definition.dependencies).length > 0) {
     const values: Record<string, unknown> = Object.assign(Object.create(null), typeof deps === "object" && deps !== null ? deps : {});
-    for (const [name, dependency] of Object.entries(definition.requires)) {
+    for (const [name, dependency] of Object.entries(definition.dependencies)) {
       if (dependency.takes !== "nothing") continue;
       const parsed = dependency.output.parse(values[name]);
       if (!parsed.success) throw new SpecificationError(formatIssues(`Invalid dependency ${name}`, parsed.issues));
@@ -801,7 +801,7 @@ function decide<Result, Effect>(
   if (decision.expression === undefined) deps = answeringValues(definition, deps);
   if (decision.expression !== undefined) {
     return interpret(decision.expression, scope, { observe, distinguish,
-      invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
+      invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
     }) as Execution<Result, Effect> | Promise<Execution<Result, Effect>>;
   }
@@ -836,7 +836,7 @@ function decide<Result, Effect>(
 function answeringValues(definition: AnyBehavior, deps: unknown): unknown {
   if (typeof deps !== "object" || deps === null) return deps;
   const wrapped: Record<string, unknown> = { ...deps };
-  for (const [name, dependency] of Object.entries(definition.requires)) {
+  for (const [name, dependency] of Object.entries(definition.dependencies)) {
     if (!(name in deps)) continue;
     const supplied = (deps as Record<string, unknown>)[name];
     if (dependency.takes === "nothing" || typeof supplied !== "function") {

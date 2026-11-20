@@ -43,13 +43,13 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
     const dependencyIssue = modelDependencyIssue(decision.expression, definition, [tag]);
     if (dependencyIssue) { decisions.push({ ...base, status: "undetermined", reason: dependencyIssue }); continue; }
     const calls = containsCalls(decision.expression);
-    const domain = domainOf(object({ input: definition.input, deps: object(Object.fromEntries(Object.entries(definition.requires).filter(([, dependency]) => dependency.takes === "nothing").map(([name, dependency]) => [name, dependency.output]))) }), candidates, constantsOf(decision.guards.map(guard => guard.condition)));
+    const domain = domainOf(object({ input: definition.input, deps: object(Object.fromEntries(Object.entries(definition.dependencies).filter(([, dependency]) => dependency.takes === "nothing").map(([name, dependency]) => [name, dependency.output]))) }), candidates, constantsOf(decision.guards.map(guard => guard.condition)));
     let failed: ConstructionProof | undefined;
     for (const candidate of calls ? [] : domain.values) {
       const { input, deps } = candidate as { input: unknown; deps: unknown };
       if (tagOf(definition.input, input) !== tag) continue;
       try {
-        const execution = interpret(decision.expression, withDeps(input, Object.keys(definition.requires).length ? deps : undefined)) as { result: unknown; effects: readonly unknown[] };
+        const execution = interpret(decision.expression, withDeps(input, Object.keys(definition.dependencies).length ? deps : undefined)) as { result: unknown; effects: readonly unknown[] };
         const result = definition.result.parse(execution.result);
         if (!result.success) throw new Error(result.issues.map(issue => `${issue.path}: ${issue.message}`).join("; "));
         if (!Array.isArray(execution.effects)) throw new Error("Effects must be an array");
@@ -60,7 +60,7 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
         const broken = brokenEnsures(definition, input, result.value);
         if (broken) throw new Error(`Ensures ${broken.name} does not hold`);
       } catch (error) {
-        failed = { ...base, status: error instanceof EvaluationLimit ? "undetermined" : "refuted", reason: error instanceof Error ? error.message : String(error), ...(error instanceof EvaluationLimit ? {} : { counterexample: Object.keys(definition.requires).length ? { input, deps } : input }) };
+        failed = { ...base, status: error instanceof EvaluationLimit ? "undetermined" : "refuted", reason: error instanceof Error ? error.message : String(error), ...(error instanceof EvaluationLimit ? {} : { counterexample: Object.keys(definition.dependencies).length ? { input, deps } : input }) };
         break;
       }
     }
@@ -153,7 +153,7 @@ function prepareExpression(template: unknown, definition: AnyBehavior, tag: stri
     const node = nodeOf(lowered);
     if (node?.kind !== "call") return lowered;
     const name = dependencyName(node.dependency);
-    const declared = Object.hasOwn(definition.requires, name) ? definition.requires[name] : undefined;
+    const declared = Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined;
     if (declared?.takes !== "input" || !prove(declared.input, node.input)) {
       valid = false;
       return undefined;

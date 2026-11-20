@@ -376,7 +376,7 @@ describe("arithmetic on decimals", () => {
       input: variants("状態", { 明細: object({ a: decimal(2) }) }),
       result: variants("結果", { 合計: object({ 合計: decimal(2) }) }),
       effects: variants("種類", {}),
-      requires: { 手数料: dependency(decimal(2)) },
+      dependencies: { 手数料: dependency(decimal(2)) },
     });
     const report = await check(
       spec("手数料を足す", {

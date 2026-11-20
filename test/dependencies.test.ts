@@ -26,7 +26,7 @@ const 受付する = behavior("受付する", {
   input: variants("状態", { 申込済み: object({ 申込ID: string() }) }),
   result: object({ 受付日時: instant() }),
   effects: variants("種類", {}),
-  requires: { 現在時刻: dependency(instant()) },
+  dependencies: { 現在時刻: dependency(instant()) },
 });
 
 const 今で受け付ける = implement(受付する, {
@@ -137,7 +137,7 @@ describe("a function dependency", () => {
     input: variants("状態", { 注文済み: object({ 商品ID: string() }) }),
     result: object({ 在庫あり: boolean() }),
     effects: variants("種類", {}),
-    requires: { 在庫を照会する: dependency(string(), int()) },
+    dependencies: { 在庫を照会する: dependency(string(), int()) },
   });
   const 照会して答える = implement(在庫を確かめる, {
     cases: {
@@ -242,7 +242,7 @@ describe("generated rows and dependencies", () => {
       input: variants("状態", { 申込済み: object({ 申込ID: string() }) }),
       result: object({ 担当: string() }),
       effects: variants("種類", {}),
-      requires: { 担当者ID: dependency(string()) },
+      dependencies: { 担当者ID: dependency(string()) },
     });
 
     expect(generate(examples(担当を決める, {})).rows.map(row => row.with)).toStrictEqual([{ 担当者ID: "<担当者ID>" }]);
@@ -253,7 +253,7 @@ describe("generated rows and dependencies", () => {
       input: variants("状態", { 申込済み: object({ 申込ID: string() }) }),
       result: object({ 受付日時: instant() }),
       effects: variants("種類", {}),
-      requires: { 現在時刻: dependency(instant()), 採番: dependency(string(), string()) },
+      dependencies: { 現在時刻: dependency(instant()), 採番: dependency(string(), string()) },
     });
 
     expect(generate(examples(採番して受付する, {})).rows.map(row => row.with)).toStrictEqual([
@@ -286,7 +286,7 @@ describe("generated rows and dependencies", () => {
       input: variants("状態", { 申込済み: object({ 紹介コード: string().optional() }) }),
       result: object({ 受付日時: instant() }),
       effects: variants("種類", {}),
-      requires: { 現在時刻: dependency(instant()) },
+      dependencies: { 現在時刻: dependency(instant()) },
     });
     const 時刻 = Temporal.Instant.from("2026-10-01T09:00:00Z");
 
@@ -310,7 +310,7 @@ describe("generated rows and dependencies", () => {
       }),
       result: object({ 送料: int() }),
       effects: variants("種類", {}),
-      requires: { 料金表: dependency(string(), int()) },
+      dependencies: { 料金表: dependency(string(), int()) },
     });
     const 料金表で決める = implement(送料を決める, {
       cases: {
@@ -341,7 +341,7 @@ describe("a value dependency read in a guard condition", () => {
     input: variants("状態", { 申込済み: object({ 希望日時: instant() }) }),
     result: variants("結果", { 受付: object({}), 過去: object({}) }),
     effects: variants("種類", {}),
-    requires: {
+    dependencies: {
       現在時刻: dependency(instant()),
       採番: dependency(string(), string()),
     },
@@ -466,7 +466,7 @@ describe("a value dependency read inside all", () => {
     }),
     result: variants("結果", { 受付: object({}), 上限超過: object({}) }),
     effects: variants("種類", {}),
-    requires: { 上限: dependency(int()) },
+    dependencies: { 上限: dependency(int()) },
   });
   const 上限で断る = implement(注文する, {
     cases: {
@@ -523,7 +523,7 @@ describe("a dependency declared as another behavior", () => {
     input: variants("状態", { 入力済み: object({ 商品ID: string() }) }),
     result: object({ 在庫あり: boolean() }),
     effects: variants("種類", {}),
-    requires: { 在庫: dependency(在庫照会の例) },
+    dependencies: { 在庫: dependency(在庫照会の例) },
   });
   const 在庫で決める = implement(注文する, {
     cases: {

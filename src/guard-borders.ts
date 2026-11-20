@@ -80,7 +80,7 @@ export interface BorderForm {
 
 export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
   const variant = definition.input.variants[tag] as ObjectSchema<ObjectShape>;
-  const values = Object.entries(definition.requires).flatMap(([name, declared]) =>
+  const values = Object.entries(definition.dependencies).flatMap(([name, declared]) =>
     declared.takes === "nothing" ? [[name, declared.output as AnySchema] as const] : [],
   );
   if (values.length === 0) {

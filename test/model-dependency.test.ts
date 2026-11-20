@@ -3,10 +3,10 @@ import * as c from "../src/index.js";
 
 it("rejects inherited value dependencies in conditions", () => {
   const declarations = { enabled: c.dependency(c.boolean()) };
-  const requires: typeof declarations = Object.create(declarations);
+  const dependencies: typeof declarations = Object.create(declarations);
   const definition = c.behavior("inherited value", {
     input: c.variants("kind", { request: c.object({}) }),
-    result: c.int().min(1).max(1), effects: c.variants("kind", {}), requires,
+    result: c.int().min(1).max(1), effects: c.variants("kind", {}), dependencies,
   });
   expect(() => c.implement(definition, { cases: { request: c.model("choose", (_, deps) => ({
     result: c.choose(deps.enabled.$eq(true), 1, 0), effects: [],
@@ -15,10 +15,10 @@ it("rejects inherited value dependencies in conditions", () => {
 
 it.each(["direct", "linear", "quantified"] as const)("rejects inherited value dependencies in %s expressions", mode => {
   const declarations = { minimum: c.dependency(c.int()) };
-  const requires: typeof declarations = Object.create(declarations);
+  const dependencies: typeof declarations = Object.create(declarations);
   const definition = c.behavior("inherited expression value", {
     input: c.variants("kind", { request: c.object({ values: c.array(c.int()) }) }),
-    result: c.int(), effects: c.variants("kind", {}), requires,
+    result: c.int(), effects: c.variants("kind", {}), dependencies,
   });
   expect(() => c.implement(definition, { cases: { request: c.model("read", (input, deps) => ({
     result: mode === "direct" ? deps.minimum : mode === "linear" ? deps.minimum.$plus(1) : c.choose(input.values.$all(value => value.$gte(deps.minimum)), 1, 0),
@@ -27,26 +27,26 @@ it.each(["direct", "linear", "quantified"] as const)("rejects inherited value de
 });
 
 it("does not prove or execute conditions whose value declaration became inherited", async () => {
-  const requires = { enabled: c.dependency(c.boolean()) };
+  const dependencies = { enabled: c.dependency(c.boolean()) };
   const definition = c.behavior("changed value declaration", {
     input: c.variants("kind", { request: c.object({}) }),
-    result: c.int().min(0).max(1), effects: c.variants("kind", {}), requires,
+    result: c.int().min(0).max(1), effects: c.variants("kind", {}), dependencies,
   });
   const impl = c.implement(definition, { cases: { request: c.model("choose", (_, deps) => ({
     result: c.choose(deps.enabled.$eq(true), 1, 0), effects: [],
   })) } });
-  Object.setPrototypeOf(requires, { enabled: requires.enabled });
-  Reflect.deleteProperty(requires, "enabled");
+  Object.setPrototypeOf(dependencies, { enabled: dependencies.enabled });
+  Reflect.deleteProperty(dependencies, "enabled");
   expect(c.verify(impl).status).toBe("undetermined");
   await expect(c.perform(impl, { kind: "request" }, { enabled: false })).rejects.toThrow("Model requires a declared value dependency enabled");
 });
 
 it("rejects function dependencies inherited from the declaration map prototype", () => {
   const declarations = { lookup: c.dependency(c.boolean(), c.boolean()) };
-  const requires: typeof declarations = Object.create(declarations);
+  const dependencies: typeof declarations = Object.create(declarations);
   const definition = c.behavior("inherited declaration", {
     input: c.variants("kind", { request: c.object({}) }),
-    result: c.boolean(), effects: c.variants("kind", {}), requires,
+    result: c.boolean(), effects: c.variants("kind", {}), dependencies,
   });
   expect(() => c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({
     result: c.call(deps.lookup, true), effects: [],
@@ -54,16 +54,16 @@ it("rejects function dependencies inherited from the declaration map prototype",
 });
 
 it("does not prove or execute calls whose declaration was moved to a prototype", async () => {
-  const requires = { lookup: c.dependency(c.boolean(), c.boolean()) };
+  const dependencies = { lookup: c.dependency(c.boolean(), c.boolean()) };
   const definition = c.behavior("changed declaration", {
     input: c.variants("kind", { request: c.object({}) }),
-    result: c.boolean(), effects: c.variants("kind", {}), requires,
+    result: c.boolean(), effects: c.variants("kind", {}), dependencies,
   });
   const impl = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({
     result: c.call(deps.lookup, true), effects: [],
   })) } });
-  Object.setPrototypeOf(requires, { lookup: requires.lookup });
-  Reflect.deleteProperty(requires, "lookup");
+  Object.setPrototypeOf(dependencies, { lookup: dependencies.lookup });
+  Reflect.deleteProperty(dependencies, "lookup");
   expect(c.verify(impl).status).toBe("undetermined");
   await expect(c.perform(impl, { kind: "request" }, { lookup: value => value })).rejects.toThrow("call requires a declared function dependency");
 });
@@ -72,7 +72,7 @@ it("proves a function dependency call from its declared contract", async () => {
   const definition = c.behavior("pricing", {
     input: c.variants("kind", { request: c.object({ quantity: c.int().min(1).max(100) }) }),
     result: c.int().min(1).max(101), effects: c.variants("kind", {}),
-    requires: { price: c.dependency(c.int().min(1).max(100), c.int().min(0).max(100)) },
+    dependencies: { price: c.dependency(c.int().min(1).max(100), c.int().min(0).max(100)) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("pricing", (input, deps) => ({
     result: c.arithmetic("add", c.call(deps.price, input.quantity), 1), effects: [],
@@ -86,7 +86,7 @@ it("does not certify a dependency argument outside its input contract", async ()
   const definition = c.behavior("invalid call", {
     input: c.variants("kind", { request: c.object({ quantity: c.int() }) }),
     result: c.int(), effects: c.variants("kind", {}),
-    requires: { price: c.dependency(c.int().min(1), c.int()) },
+    dependencies: { price: c.dependency(c.int().min(1), c.int()) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("invalid call", (input, deps) => ({ result: c.call(deps.price, input.quantity), effects: [] })) } });
   expect(c.verify(impl).status).toBe("undetermined");
@@ -104,7 +104,7 @@ it("checks and uses a dependency's postcondition", async () => {
   const definition = c.behavior("uses bounded", {
     input: c.variants("kind", { request: c.object({}) }),
     result: c.int().min(1), effects: c.variants("kind", {}),
-    requires: { bounded: c.dependency(bounded) },
+    dependencies: { bounded: c.dependency(bounded) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("call", (input, deps) => ({ result: c.call(deps.bounded, { kind: "request", minimum: 1 }), effects: [] })) } });
   expect(c.verify(impl).status).toBe("verified");
@@ -115,7 +115,7 @@ it("does not require an unused function dependency to be invoked for a proof", (
   const definition = c.behavior("unused", {
     input: c.variants("kind", { request: c.object({}) }),
     result: c.int(), effects: c.variants("kind", {}),
-    requires: { lookup: c.dependency(c.string(), c.int()) },
+    dependencies: { lookup: c.dependency(c.string(), c.int()) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("constant", () => ({ result: 1, effects: [] })) } });
   expect(c.verify(impl).status).toBe("verified");
@@ -125,7 +125,7 @@ it("isolates values returned by a dependency from later calls", async () => {
   const definition = c.behavior("stable dependency values", {
     input: c.variants("kind", { request: c.object({}) }),
     result: c.decimal(0).min(new Decimal(2)).max(new Decimal(2)), effects: c.variants("kind", {}),
-    requires: { amount: c.dependency(c.boolean(), c.decimal(0).min(new Decimal(1)).max(new Decimal(1))) },
+    dependencies: { amount: c.dependency(c.boolean(), c.decimal(0).min(new Decimal(1)).max(new Decimal(1))) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("sum", (_, deps) => ({
     result: c.arithmetic("add", c.call(deps.amount, false), c.call(deps.amount, true)), effects: [],
@@ -143,7 +143,7 @@ it("does not assume two dependency calls return the same value", () => {
   const definition = c.behavior("independent calls", {
     input: c.variants("kind", { request: c.object({}) }),
     result: c.object({ first: c.boolean(), second: c.boolean() }).refine(value => value.first.$eq(value.second)),
-    effects: c.variants("kind", {}), requires: { flag: c.dependency(c.boolean(), c.boolean()) },
+    effects: c.variants("kind", {}), dependencies: { flag: c.dependency(c.boolean(), c.boolean()) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("twice", (_, deps) => ({
     result: { first: c.call(deps.flag, true), second: c.call(deps.flag, true) }, effects: [],
@@ -155,7 +155,7 @@ it("uses a path condition to establish a dependency's input contract", () => {
   const definition = c.behavior("guarded dependency", {
     input: c.variants("kind", { request: c.object({ n: c.int() }) }),
     result: c.int().min(0), effects: c.variants("kind", {}),
-    requires: { price: c.dependency(c.int().min(1), c.int().min(0)) },
+    dependencies: { price: c.dependency(c.int().min(1), c.int().min(0)) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("guarded call", (input, deps) => ({
     result: c.choose(input.n.$gte(1), c.call(deps.price, input.n), 0), effects: [],
@@ -167,7 +167,7 @@ it("strictly checks a function dependency model using its fake table", async () 
   const definition = c.behavior("toggle", {
     input: c.variants("kind", { request: c.object({ enabled: c.boolean() }) }),
     result: c.boolean(), effects: c.variants("kind", {}),
-    requires: { toggle: c.dependency(c.boolean(), c.boolean()) },
+    dependencies: { toggle: c.dependency(c.boolean(), c.boolean()) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("toggle", (input, deps) => ({ result: c.call(deps.toggle, input.enabled), effects: [] })) } });
   const specification = c.spec("toggle", {
@@ -184,7 +184,7 @@ it("passes the input value without internal dependency bindings", async () => {
   const shape = c.variants("kind", { request: c.object({ n: c.int().min(1) }) });
   const definition = c.behavior("whole input", {
     input: shape, result: c.int().min(1), effects: c.variants("kind", {}),
-    requires: { lookup: c.dependency(shape, c.int().min(1)) },
+    dependencies: { lookup: c.dependency(shape, c.int().min(1)) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("whole", (input, deps) => ({ result: c.call(deps.lookup, input), effects: [] })) } });
   await expect(c.perform(impl, { kind: "request", n: 1 }, { lookup: input => input.n })).resolves.toStrictEqual({ result: 1, effects: [] });
@@ -195,7 +195,7 @@ it("rejects a dependency namespace that collides with an input field", () => {
   expect(() => c.behavior("collision", {
     input: c.variants("kind", { request: c.object({ "#deps": c.boolean() }) }),
     result: c.boolean(), effects: c.variants("kind", {}),
-    requires: { flag: c.dependency(c.boolean()) },
+    dependencies: { flag: c.dependency(c.boolean()) },
   })).toThrow("#deps is reserved");
 });
 
@@ -205,7 +205,7 @@ it("keeps input and value dependencies stable when a callback mutates retained v
   const definition = c.behavior("stable model scope", {
     input: c.variants("kind", { request: c.object({ amount: one }) }),
     result: c.decimal(0).min(new Decimal(3)).max(new Decimal(3)), effects: c.variants("kind", {}),
-    requires: { amount: c.dependency(one), mutate: c.dependency(c.boolean(), one) },
+    dependencies: { amount: c.dependency(one), mutate: c.dependency(c.boolean(), one) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("sum", (input, deps) => ({
     result: c.arithmetic("add", c.call(deps.mutate, true), c.arithmetic("add", input.amount, deps.amount)), effects: [],
@@ -235,7 +235,7 @@ it("rejects mutable host objects instead of sharing them across dependency bound
   const definition = c.behavior("host object", {
     input: c.variants("kind", { request: c.object({}) }),
     result: hostDate, effects: c.variants("kind", {}),
-    requires: { date: c.dependency(c.boolean(), hostDate) },
+    dependencies: { date: c.dependency(c.boolean(), hostDate) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("date", (_, deps) => ({ result: c.call(deps.date, true), effects: [] })) } });
   await expect(c.perform(impl, { kind: "request" }, { date: () => new Date(0) })).rejects.toThrow("Cannot snapshot an unsupported host object");
@@ -245,7 +245,7 @@ it("rejects a dependency namespace collision with the input discriminant", () =>
   expect(() => c.behavior("reserved discriminant", {
     input: c.variants("#deps", { request: c.object({}) }),
     result: c.boolean(), effects: c.variants("kind", {}),
-    requires: { enabled: c.dependency(c.boolean()) },
+    dependencies: { enabled: c.dependency(c.boolean()) },
   })).toThrow("#deps is reserved");
 });
 
@@ -253,7 +253,7 @@ it("does not resolve a missing function dependency from Object.prototype", async
   const definition = c.behavior("own dependency", {
     input: c.variants("kind", { request: c.object({}) }),
     result: c.string(), effects: c.variants("kind", {}),
-    requires: { toString: c.dependency(c.boolean(), c.string()) },
+    dependencies: { toString: c.dependency(c.boolean(), c.string()) },
   });
   const implementation = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({ result: c.call(deps.toString, true), effects: [] })) } });
   await expect(c.perform(implementation, { kind: "request" }, {})).rejects.toThrow("Missing function dependency toString");
@@ -263,7 +263,7 @@ it("does not resolve a missing function dependency from Object.prototype", async
 it("distinguishes dependency contract failures from callback exceptions", async () => {
   const definition = c.behavior("dependency errors", {
     input: c.variants("kind", { request: c.object({}) }), result: c.int(), effects: c.variants("kind", {}),
-    requires: { lookup: c.dependency(c.boolean(), c.int().min(1)) },
+    dependencies: { lookup: c.dependency(c.boolean(), c.int().min(1)) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({ result: c.call(deps.lookup, true), effects: [] })) } });
   await expect(c.perform(impl, { kind: "request" }, { lookup: () => 0 })).rejects.toBeInstanceOf(c.SpecificationError);
@@ -278,7 +278,7 @@ it("uses specification errors for missing functions, arguments, and postconditio
   });
   const definition = c.behavior("checked boundary", {
     input: c.variants("kind", { request: c.object({ minimum: c.int() }) }), result: c.int(), effects: c.variants("kind", {}),
-    requires: { lookup: c.dependency(lookup) },
+    dependencies: { lookup: c.dependency(lookup) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("call", (input, deps) => ({ result: c.call(deps.lookup, input), effects: [] })) } });
   await expect(c.perform(impl, { kind: "request", minimum: 1 })).rejects.toBeInstanceOf(c.SpecificationError);

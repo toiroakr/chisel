@@ -4,7 +4,7 @@ const lookup = c.behavior("lookup", {
   input: c.variants("type", { query: c.object({}) }),
   result: c.int(),
   effects: c.variants("type", {}),
-  requires: { stock: c.dependency(c.int()) },
+  dependencies: { stock: c.dependency(c.int()) },
 });
 
 export const implementation = c.implement(lookup, {

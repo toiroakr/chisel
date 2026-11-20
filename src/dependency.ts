@@ -48,7 +48,7 @@ type ResultOf<B> = B extends { readonly result: Schema<infer Result> } ? Result 
 
 export type AnyDependency = ValueDependency<any> | FunctionDependency<any, any>;
 
-export type Requirements = Readonly<Record<string, AnyDependency>>;
+export type DeclaredDependencies = Readonly<Record<string, AnyDependency>>;
 
 export type Resolved<R> = {
   readonly [K in keyof R]: R[K] extends FunctionDependency<infer Input, infer Output>
@@ -140,13 +140,13 @@ type FakeOutput<R, K extends keyof R> = R[K] extends { readonly output: Schema<i
   : never;
 
 export function fake<
-  const B extends { readonly name: string; readonly requires: Requirements },
-  const K extends FunctionDependencyNames<B["requires"]>,
+  const B extends { readonly name: string; readonly dependencies: DeclaredDependencies },
+  const K extends FunctionDependencyNames<B["dependencies"]>,
 >(
   definition: B,
   name: K,
-  rows: readonly (readonly [FakeInput<B["requires"], K>, FakeOutput<B["requires"], K>])[],
-  options?: { readonly otherwise: FakeOutput<B["requires"], K> },
+  rows: readonly (readonly [FakeInput<B["dependencies"], K>, FakeOutput<B["dependencies"], K>])[],
+  options?: { readonly otherwise: FakeOutput<B["dependencies"], K> },
 ): FakeTable {
   return {
     kind: "fake",
@@ -178,14 +178,14 @@ export function answerFrom(table: FakeTable): (input: unknown) => unknown {
 }
 
 export function fakeIssuesOf(
-  requires: Requirements,
+  dependencies: DeclaredDependencies,
   behavior: string,
   tables: readonly FakeTable[],
 ): readonly { readonly table: FakeTable; readonly issue: string }[] {
   const issues: { table: FakeTable; issue: string }[] = [];
   for (const table of tables) {
     const name = table.dependency;
-    const declared = requires[name];
+    const declared = dependencies[name];
     const written = tables.filter(other => other.dependency === name).length;
     if (declared === undefined) {
       issues.push({ table, issue: `Fake ${name} names no dependency of ${behavior}` });
@@ -256,9 +256,9 @@ function brokenBy(behavior: InjectedBehavior, input: unknown, value: unknown): s
   )?.name;
 }
 
-export function fakeWarningsOf(requires: Requirements, tables: readonly FakeTable[]): readonly string[] {
+export function fakeWarningsOf(dependencies: DeclaredDependencies, tables: readonly FakeTable[]): readonly string[] {
   return tables.flatMap(table => {
-    const declared = requires[table.dependency];
+    const declared = dependencies[table.dependency];
     if (declared?.takes !== "input" || declared.injected === undefined) {
       return [];
     }

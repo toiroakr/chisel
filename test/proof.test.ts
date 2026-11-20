@@ -269,7 +269,7 @@ it("checks optional wrapper invariants on a symbolic construction", () => {
   const definition = c.behavior("optional result bound", {
     input: c.variants("kind", { input: c.object({ n: c.int().min(0) }) }),
     result: c.int().optional().refine(value => ({ kind: "compare", left: value, operator: ">=", right: 1 })),
-    effects: c.variants("kind", {}), requires: { lookup: c.dependency(c.int(), c.int().min(0)) },
+    effects: c.variants("kind", {}), dependencies: { lookup: c.dependency(c.int(), c.int().min(0)) },
   });
   const impl = c.implement(definition, { cases: { input: c.model("optional result", (input, deps) => ({ result: c.call(deps.lookup, input.n), effects: [] })) } });
   expect(c.verify(impl).status).toBe("undetermined");

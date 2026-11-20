@@ -675,7 +675,7 @@ describe("a guard quantifying over a dependency", () => {
       input: variants("状態", { 提出済み: object({ 至急: boolean() }) }),
       result: variants("結果", { 承認: object({}), 保留: object({}) }),
       effects: variants("種類", {}),
-      requires: { 許可: dependency(array(boolean())) },
+      dependencies: { 許可: dependency(array(boolean())) },
       disregards: { $default: r => [r.至急] },
     });
     const 実装 = implement(承認する, {
