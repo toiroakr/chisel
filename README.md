@@ -203,7 +203,7 @@ const pricing = c.behavior("pricing", {
   }),
   result: c.int().min(1).max(101),
   effects: c.variants("kind", {}),
-  requires: {
+  dependencies: {
     price: c.dependency(c.int().min(1).max(100), c.int().min(0).max(100)),
   },
 });
@@ -372,7 +372,7 @@ A behavior can state what it ensures of its answer, and declare the outside worl
 ```ts
 const findMember = c.behavior("find-member", {
   input, result, effects,
-  requires: { now: c.dependency(c.instant()), lookup: c.dependency(c.string(), c.boolean()) },
+  dependencies: { now: c.dependency(c.instant()), lookup: c.dependency(c.string(), c.boolean()) },
   ensures: clause => [
     clause.when("a found member is the one asked for", ["found"], (asked, answer) =>
       asked.id.$gt(0).$and(answer.id.$eq(asked.id)),
@@ -381,7 +381,7 @@ const findMember = c.behavior("find-member", {
 });
 ```
 
-Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }` (`generate` writes one on every row it offers, the placeholder of the dependency's type under what the row it moved from writes, so a generated row runs as it is pasted), and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [deps.now.$lt(request.at).$else(...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `requires: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
+Every answer an example writes, the model produces or a conformance subject returns is held to the clauses, and a comparison of the input with a constant draws a border. Clause names must be distinct, and `check` says of every part of every rule how much of it the checker can read (`derivable`, `exact match`, `always holds`, `never holds` or `runtime only`) and which answer cases no clause states anything about. Example rows stand in for value dependencies with `with: { now: ... }` (`generate` writes one on every row it offers, the placeholder of the dependency's type under what the row it moved from writes, so a generated row runs as it is pasted), and a specification stands in for function dependencies with `fakes: [fake(findMember, "lookup", [["m-1", true]], { otherwise: false })]`. An action reads a value dependency in a guard condition through the second argument of its `guards` builder, `action("future only", { guards: (request, deps) => [deps.now.$lt(request.at).$else(...)], run: ... })`: the condition is evaluated against the stand-in a row writes with `with`, and the comparison is measured like any other (here, a border on `deps.now − @case.at`). Function dependencies stay out of conditions. A function dependency can be another behavior, `dependencies: { stock: dependency(checkStockExamples) }`: a fake table for it is then held to that behavior's `ensures` (a row that breaks one is an error) and to its recorded rows (a row answering differently from one is a warning).
 
 `check` now enforces feasible pairs of classes as obligations (`measures.pairs`), and retains the older reached counts in `pairs` for display, over the same classes the report lists (including those guard thresholds draw, and leaving excluded classes out), and `check --json` writes the whole report as one document, described by the closed JSON Schema in [`schema/report.schema.json`](schema/report.schema.json) (published as `@toiroakr/chisel/report.schema.json`). The arms, rules, and comparisons measures retain their availability and weakening metadata; pairs record each obligation and constructions record each proof; every border point, arm, way, and pair carries a stable `obligationId`; `incompleteness` lists the rows that were not observed (not run for want of a stand-in, or not come back); and `sources` names the spec file each report's `source` refers to. `schemaVersion` is raised only when a field is removed or renamed.
 
@@ -445,6 +445,10 @@ checkMachine(specification); // { status: "held", states: 3, transitions: 6 }
 
 [`examples/order-machine.ts`](examples/order-machine.ts) shows a typed order workflow with `submit`, internal `allocate`, and `receive` commands. [`examples/order-machine.spec.ts`](examples/order-machine.spec.ts) declares its invariant and transition property. `runMachine` returns each intermediate step, while `checkMachine` checks every command from every reachable state. A receipt before issuance or beyond the ordered quantity intentionally leaves the state unchanged; the invariant checks state safety rather than command acceptance.
 
+`requires` in `specifyMachine` states, per command, the states and commands in which the command is meant to change the state (`requires: { allocate: order => order.phase.$eq("approved") }`). `checkMachine` is `broken` when a step changes the state although its precondition is false, or leaves the state unchanged although it holds, and the counterexample is the shortest command sequence that reaches such a step. A command without an entry is not held to one.
+
+`columns` in `specifyMachine` (`columns: ["phase"]`) names the state fields that tell the rows of a table apart. Then `checkMachine` adds `matrix` to its report: for each value of the columns reached and each command, whether the command `changes` the state (`always`, `sometimes` or `never`, over every reachable state that shares those column values) and, where `requires` has an entry, whether its `precondition` holds. `model-check` prints it, and `--json` carries it. For the order workflow, `receive` with one unit in `phase=issued` reads `changes sometimes, precondition sometimes`, since it takes effect only while the ordered quantity has room. A cell no run reached, such as one cut off by `maxCommands`, reads `unknown` rather than `never`. The table lists each command as it is invoked from a state, so a state that exists only between a command and the commands it emits (`approved` in the order workflow) has no row; the precondition of an emitted command is still checked at every step. A `sometimes` that you expected to be `always` or `never` is a row to read. Columns are always chosen by you: a state field with many values (a counter, an id) would give one row per value.
+
 To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh
@@ -457,6 +461,8 @@ chisel run-machine examples/order-machine.ts --state '{"phase":"draft","ordered"
 ```
 
 `run-machine` returns the next state and all internal steps as JSON; it does not save them. When a module exports multiple machines, `--name` selects one for `run-machine`. `model-check` checks all exported machines by default and exits nonzero for `broken` or `undetermined`. Give multiple specifications of one machine distinct `name` values in `specifyMachine(machine, { name, invariants, transitions })` to select them with `--name`.
+
+`--engine tla` also checks `requires` (a step whose precondition disagrees with whether it changes the state is a violation), and `prove-machine` proves each precondition as two obligations, one for "changes only if it holds" and one for "holds only if it changes". The matrix is produced by the native checker only. The proof compares object states field by field; any other value, such as a state that is a sum, an array field or a sum held in a field, is compared as a whole, which the prover may not discharge, so those obligations can stay `undetermined`.
 
 `--engine tla` compiles the same expression-based update and invariant into a TLA+ `Step`, `Init`, and `Next` and checks them with `tla-ts`. It models emitted commands as a pending queue, so intermediate states are checked. `chisel tla` returns the module and config as JSON, or writes both `.tla` and `.cfg` files with `--output-dir`. TLA+ translation requires exhaustively enumerable state and command schemas and refuses unsupported operators instead of claiming a result. For open state spaces the native `model-check` remains the available finite reachability check when commands can be enumerated; its result is `undetermined` if exploration does not complete. Existing output files are preserved; pass `--force` to replace both files. Use `--max-commands` to choose the generated command budget.
 

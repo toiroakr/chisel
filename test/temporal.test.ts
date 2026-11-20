@@ -100,7 +100,7 @@ describe("proofs", () => {
       input: c.variants("kind", { given: c.object({ at: c.date().min(date("2000-01-01")).max(date("+275760-09-11")) }) }),
       result: c.variants("outcome", { ok: c.object({ on: c.date(), days: c.int(), n: c.int() }) }),
       effects: c.variants("type", {}),
-      requires: { f: c.dependency(c.int(), c.int()) },
+      dependencies: { f: c.dependency(c.int(), c.int()) },
     });
     const implementation = c.implement(definition, { cases: { given: c.model("there and back", (r, deps) => ({
       result: { outcome: "ok" as const, on: c.minus(c.plus(r.at, 30, "days"), 30, "days"), days: c.between(r.at, c.plus(r.at, 30, "days"), "days"), n: c.call(deps.f, 1) },
@@ -168,7 +168,7 @@ describe("a move by an amount a dependency answers", () => {
       input: c.variants("kind", { given: c.object({ at: c.date() }) }),
       result: c.variants("outcome", { ok: c.object({ due: c.date() }) }),
       effects: c.variants("type", {}),
-      requires: { lead: c.dependency(c.object({}), c.object({ days: c.int().min(0).max(30) })) },
+      dependencies: { lead: c.dependency(c.object({}), c.object({ days: c.int().min(0).max(30) })) },
     });
     const implementation = c.implement(due, {
       cases: {
@@ -200,7 +200,7 @@ describe("what the review found", () => {
       input: c.variants("kind", { given: c.object({ at: c.time() }) }),
       result: c.variants("outcome", { ok: c.object({ at: c.time(), n: c.int().min(0).max(1) }) }),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+      dependencies: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
     });
     const shifting = c.implement(shift, {
       cases: {
@@ -223,7 +223,7 @@ describe("what the review found", () => {
       input: c.variants("kind", { given: c.object({ at: c.date().min(date("2000-01-01")).max(date("2000-12-31")), t: c.time(), i: c.instant().min(instant("2000-01-01T00:00:00Z")).max(instant("2000-12-31T00:00:00Z")) }) }),
       result: c.variants("outcome", { ok: c.object({ value: result as never, n: c.int().min(0).max(1) }) }),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+      dependencies: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
     });
     const implementation = c.implement(definition, {
       cases: { given: c.model("proving", (given: any, deps: any) => c.bind(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), (got: any) =>
@@ -266,7 +266,7 @@ describe("what the review found", () => {
       input: c.variants("kind", { given: c.object({ slot: c.object({ at: c.time() }).optional() }) }),
       result: c.variants("outcome", { ok: c.object({ at: c.time(), moved: c.time(), n: c.int().min(0).max(1) }) }),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+      dependencies: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
     });
     const implementation = c.implement(lateness, {
       cases: {

@@ -151,7 +151,7 @@ export function childrenOf(value: unknown): readonly unknown[] {
   return Object.values(value as object);
 }
 export function modelDependencyIssue(template: unknown, definition: AnyBehavior, tags: readonly string[]): string | undefined {
-  const inputOwnsRoot = Object.keys(definition.requires).length === 0 && tags.every(tag =>
+  const inputOwnsRoot = Object.keys(definition.dependencies).length === 0 && tags.every(tag =>
     definition.input.discriminant === DEPS || Object.hasOwn(definition.input.variants[tag]!.shape, DEPS));
   const declared = new Set<string>();
   if (tags.some(tag => definition.input.discriminant.startsWith(LOCAL) || Object.keys(definition.input.variants[tag]!.shape).some(key => key.startsWith(LOCAL)))) return "Model input uses a reserved local name";
@@ -163,13 +163,13 @@ export function modelDependencyIssue(template: unknown, definition: AnyBehavior,
       for (const path of paths) {
         if (path[0] !== DEPS) continue;
         const name = path[1];
-        if (name === undefined || !Object.hasOwn(definition.requires, name) || definition.requires[name]?.takes !== "nothing") return `Model requires a declared value dependency ${name ?? "<root>"}`;
+        if (name === undefined || !Object.hasOwn(definition.dependencies, name) || definition.dependencies[name]?.takes !== "nothing") return `Model requires a declared value dependency ${name ?? "<root>"}`;
       }
     }
     const node = nodeOf(value);
     if (node?.kind === "call") {
       const name = dependencyName(node.dependency);
-      if (!Object.hasOwn(definition.requires, name) || definition.requires[name]?.takes !== "input") return "call requires a declared function dependency";
+      if (!Object.hasOwn(definition.dependencies, name) || definition.dependencies[name]?.takes !== "input") return "call requires a declared function dependency";
     }
     if (node?.kind === "bind" || node?.kind === "map" || node?.kind === "fold") {
       const names = node.kind === "fold" ? [node.name, node.accumulator] : [node.name];

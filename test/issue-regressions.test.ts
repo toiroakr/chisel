@@ -70,7 +70,7 @@ describe("issue regressions", () => {
       input: c.variants("kind", { go: c.object({ at: c.date().max(Temporal.PlainDate.from("2000-12-31")) }) }),
       result: c.variants("outcome", { ok: c.object({ at: c.date().refine(v => v.$lt(Temporal.PlainDateTime.from("2000-12-31T12:00") as never)) }) }),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+      dependencies: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
     });
     const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
       c.bind<{ n: number }, c.Execution<c.Infer<typeof pass.result>, never>>(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), () =>
@@ -83,7 +83,7 @@ describe("issue regressions", () => {
       input: c.variants("kind", { go: c.object({ x: c.int().min(0).max(3) }) }),
       result: c.variants("outcome", { ok: c.object({ v: c.int().refine(v => v.$lte(bound as never)) }) }),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
+      dependencies: { n: c.dependency(c.object({}), c.object({ n: c.int().min(0).max(1) })) },
     });
     const implementation = c.implement(inc, { cases: { go: c.model("inc", (given, deps) =>
       c.bind<{ n: number }, c.Execution<c.Infer<typeof inc.result>, never>>(c.object({ n: c.int().min(0).max(1) }), c.call(deps.n, {}), () =>
@@ -96,7 +96,7 @@ describe("issue regressions", () => {
       input: c.variants("kind", { go: c.object({ x: c.int().min(0).max(3) }) }),
       result: c.int().refine(v => v.$lte(bound as never)),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.int(), c.int()) },
+      dependencies: { n: c.dependency(c.int(), c.int()) },
     });
     const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
       c.bind<number, c.Execution<number, never>>(c.int(), c.call(deps.n, 0), () =>
@@ -109,7 +109,7 @@ describe("issue regressions", () => {
       input: c.variants("kind", { go: c.object({ x: c.string().max(3) }) }),
       result: c.string().refine(v => v.$length().$lte("5" as never)),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.int(), c.int()) },
+      dependencies: { n: c.dependency(c.int(), c.int()) },
     });
     const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
       c.bind<number, c.Execution<string, never>>(c.int(), c.call(deps.n, 0), () =>
@@ -122,7 +122,7 @@ describe("issue regressions", () => {
       input: c.variants("kind", { go: c.object({ x: c.int().min(0).max(3) }) }),
       result: c.int().refine(v => v.$lte(Number.NaN)),
       effects: c.variants("type", {}),
-      requires: { n: c.dependency(c.int(), c.int()) },
+      dependencies: { n: c.dependency(c.int(), c.int()) },
     });
     const implementation = c.implement(pass, { cases: { go: c.model("pass", (given, deps) =>
       c.bind<number, c.Execution<number, never>>(c.int(), c.call(deps.n, 0), () =>
@@ -136,7 +136,7 @@ it.each([new Decimal(1), 1, "1", 1n])("proves a decimal against its accepted bou
     input: c.variants("kind", { go: c.object({ amount: c.decimal(0).min(new Decimal(1)).max(new Decimal(3)) }) }),
     result: c.decimal(0).min(bound as never),
     effects: c.variants("type", {}),
-    requires: { n: c.dependency(c.int(), c.int()) },
+    dependencies: { n: c.dependency(c.int(), c.int()) },
   });
   const implementation = c.implement(definition, { cases: { go: c.model("decimal bound", (given, deps) =>
     c.bind<number, c.Execution<Decimal, never>>(c.int(), c.call(deps.n, 0), () =>
@@ -149,7 +149,7 @@ it.each([new Decimal(NaN), NaN, "NaN"])("leaves a decimal against its unordered 
     input: c.variants("kind", { go: c.object({ amount: c.decimal(0).min(new Decimal(1)).max(new Decimal(3)) }) }),
     result: c.decimal(0).refine(v => v.$lte(bound as never)),
     effects: c.variants("type", {}),
-    requires: { n: c.dependency(c.int(), c.int()) },
+    dependencies: { n: c.dependency(c.int(), c.int()) },
   });
   const implementation = c.implement(definition, { cases: { go: c.model("decimal bound", (given, deps) =>
     c.bind<number, c.Execution<Decimal, never>>(c.int(), c.call(deps.n, 0), () =>

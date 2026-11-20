@@ -9,7 +9,7 @@ it("evaluates a bound dependency once and projects its result into a condition a
   const answer = c.object({ accepted: c.boolean(), amount: c.int().min(1) });
   const definition = c.behavior("bound lookup", {
     input: request, result: c.int().min(0), effects: emptyEffects,
-    requires: { lookup: c.dependency(c.boolean(), answer) },
+    dependencies: { lookup: c.dependency(c.boolean(), answer) },
   });
   const impl = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({
     result: c.bind(answer, c.call(deps.lookup, true), value => c.choose(value.accepted.$eq(true), value.amount, 0)), effects: [],
@@ -23,7 +23,7 @@ it("evaluates a bound dependency once and projects its result into a condition a
 
 it("does not use a binding's later guard to prove its own construction", () => {
   const definition = c.behavior("circular binding", { input: request, result: c.int().min(0), effects: emptyEffects,
-    requires: { lookup: c.dependency(c.boolean(), c.int()) } });
+    dependencies: { lookup: c.dependency(c.boolean(), c.int()) } });
   const impl = c.implement(definition, { cases: { request: c.model("lookup", (_, deps) => ({
     result: c.bind(c.int().min(0), c.call(deps.lookup, true), value => c.choose(value.$gte(0), value, 0)), effects: [],
   })) } });
@@ -77,7 +77,7 @@ it("checks a fold invariant at initialization and after each iteration", async (
 
 it("does not certify an unsafe iteration just because supplied arrays are empty", () => {
   const definition = c.behavior("unsafe map", { input: request, result: c.array(c.int().min(0)), effects: emptyEffects,
-    requires: { values: c.dependency(c.boolean(), c.array(c.int())) } });
+    dependencies: { values: c.dependency(c.boolean(), c.array(c.int())) } });
   const impl = c.implement(definition, { cases: { request: c.model("unsafe", (_, deps) => ({
     result: c.map(c.int(), c.int().min(0), c.call(deps.values, true), value => value), effects: [],
   })) } });
@@ -92,7 +92,7 @@ it("uses a case-scoped dependency guarantee only in that result case", async () 
   const answer = c.variants("kind", { ok: c.object({ amount: c.int() }), missing: c.object({ amount: c.int() }) });
   const lookup = c.behavior("lookup", { input: c.variants("kind", { request: c.object({ minimum: c.int().min(1) }) }), result: answer, effects: emptyEffects,
     ensures: ensure => [ensure.when("positive answer", ["ok"], (input, value) => value.amount.$gte(input.minimum))] });
-  const definition = c.behavior("conditional contract", { input: request, result: c.int().min(1), effects: emptyEffects, requires: { lookup: c.dependency(lookup) } });
+  const definition = c.behavior("conditional contract", { input: request, result: c.int().min(1), effects: emptyEffects, dependencies: { lookup: c.dependency(lookup) } });
   const impl = c.implement(definition, { cases: { request: c.model("lookup", (input, deps) => ({
     result: c.bind(answer, c.call(deps.lookup, { kind: "request", minimum: 1 }), value => c.choose(value.kind.$eq("ok"), value.amount, 1)), effects: [],
   })) } });
@@ -141,7 +141,7 @@ it("proves nested loops and captured input fields without conflating iteration s
 it("does not leak a mapped call's facts into a separate call", async () => {
   const output = c.int().min(1);
   const definition = c.behavior("independent calls", { input: request, result: output, effects: emptyEffects,
-    requires: { lookup: c.dependency(c.boolean(), c.int()) } });
+    dependencies: { lookup: c.dependency(c.boolean(), c.int()) } });
   const impl = c.implement(definition, { cases: { request: c.model("independent", (_, deps) => ({
     result: c.bind(c.array(output), c.map(c.boolean(), output, [true], flag => c.bind(c.int(), c.call(deps.lookup, flag), value => c.choose(value.$gte(1), value, 1))), () => c.call(deps.lookup, false)), effects: [],
   })) } });
@@ -152,7 +152,7 @@ it("does not leak a mapped call's facts into a separate call", async () => {
 it("rejects a fold whose update breaks its accumulator contract", async () => {
   const accumulator = c.int64().min(0n).max(100n);
   const definition = c.behavior("bounded sum", { input: request, result: accumulator, effects: emptyEffects,
-    requires: { values: c.dependency(c.boolean(), c.array(accumulator)) } });
+    dependencies: { values: c.dependency(c.boolean(), c.array(accumulator)) } });
   const impl = c.implement(definition, { cases: { request: c.model("sum", (_, deps) => ({
     result: c.fold(accumulator, accumulator, c.call(deps.values, true), 0n, (sum, value) => c.arithmetic("add", sum, value)), effects: [],
   })) } });
@@ -162,7 +162,7 @@ it("rejects a fold whose update breaks its accumulator contract", async () => {
 
 it("charges nested iteration proof paths to the same budget", () => {
   const definition = c.behavior("path budget", { input: request, result: c.array(c.int()), effects: emptyEffects,
-    requires: { values: c.dependency(c.boolean(), c.array(c.int())) } });
+    dependencies: { values: c.dependency(c.boolean(), c.array(c.int())) } });
   const impl = c.implement(definition, { cases: { request: c.model("map", (_, deps) => ({ result: c.map(c.int(), c.int(), c.call(deps.values, true), value => value), effects: [] })) } });
   expect(c.verify(impl, { ways: 1 }).status).toBe("undetermined");
   expect(c.verify(impl, { ways: 2 }).status).toBe("verified");
@@ -183,7 +183,7 @@ it("never applies one result case's guarantee to a different case", () => {
   const answer = c.variants("kind", { ok: c.object({ amount: c.int() }), missing: c.object({ amount: c.int() }) });
   const lookup = c.behavior("conditional lookup", { input: c.variants("kind", { request: c.object({ minimum: c.int().min(1) }) }), result: answer, effects: emptyEffects,
     ensures: ensure => [ensure.when("positive", ["ok"], (input, value) => value.amount.$gte(input.minimum))] });
-  const definition = c.behavior("wrong case", { input: request, result: c.int().min(1), effects: emptyEffects, requires: { lookup: c.dependency(lookup) } });
+  const definition = c.behavior("wrong case", { input: request, result: c.int().min(1), effects: emptyEffects, dependencies: { lookup: c.dependency(lookup) } });
   const impl = c.implement(definition, { cases: { request: c.model("wrong case", (_, deps) => ({
     result: c.bind(answer, c.call(deps.lookup, { kind: "request", minimum: 1 }), value => c.choose(value.kind.$eq("missing"), value.amount, 1)), effects: [],
   })) } });
@@ -202,7 +202,7 @@ it("does not turn an unresolved case guarantee into an unconditional fact throug
   const answer = c.variants("kind", { ok: c.object({ amount: c.int() }), missing: c.object({ amount: c.int() }) });
   const lookup = c.behavior("aliased lookup", { input: c.variants("kind", { request: c.object({ minimum: c.int().min(1) }) }), result: answer, effects: emptyEffects,
     ensures: ensure => [ensure.when("positive", ["ok"], (input, value) => value.amount.$gte(input.minimum))] });
-  const definition = c.behavior("aliased case", { input: request, result: c.int().min(1), effects: emptyEffects, requires: { lookup: c.dependency(lookup) } });
+  const definition = c.behavior("aliased case", { input: request, result: c.int().min(1), effects: emptyEffects, dependencies: { lookup: c.dependency(lookup) } });
   const impl = c.implement(definition, { cases: { request: c.model("alias", (_, deps) => ({
     result: c.bind(answer, c.call(deps.lookup, { kind: "request", minimum: 1 }), first => c.bind(answer, first, second => c.choose(second.kind.$eq("missing"), second.amount, 1))), effects: [],
   })) } });
@@ -213,7 +213,7 @@ it("matches variant-specific fields with an exhaustive typed result match", asyn
   const answer = c.variants("kind", { missing: c.object({}), ok: c.object({ amount: c.int() }) });
   const lookup = c.behavior("variant lookup", { input: c.variants("kind", { request: c.object({ minimum: c.int().min(1) }) }), result: answer, effects: emptyEffects,
     ensures: ensure => [ensure.when("positive", ["ok"], (input, value) => value.amount.$gte(input.minimum))] });
-  const definition = c.behavior("matched lookup", { input: request, result: c.int().min(1), effects: emptyEffects, requires: { lookup: c.dependency(lookup) } });
+  const definition = c.behavior("matched lookup", { input: request, result: c.int().min(1), effects: emptyEffects, dependencies: { lookup: c.dependency(lookup) } });
   const impl = c.implement(definition, { cases: { request: c.model("match", (_, deps) => ({
     result: c.matchValue(answer, c.call(deps.lookup, { kind: "request", minimum: 1 }), {
       missing: () => 1,

@@ -136,6 +136,22 @@ describe("chisel machines", () => {
     expect(JSON.parse(stdoutOf(result))).toMatchObject([{ name: "order fulfillment", status: "held" }]);
   });
 
+  it("prints what each command does in each state of the declared columns", async () => {
+    const file = fixture("examples/order-machine.spec.ts");
+    const text = stdoutOf(await run(["model-check", file]));
+    expect(text).toContain("phase=draft");
+    expect(text).toContain('    {"type":"allocate"}: changes never, precondition never');
+    expect(text).toContain('    {"type":"receive","units":1}: changes sometimes, precondition sometimes');
+    const json = JSON.parse(stdoutOf(await run(["model-check", file, "--json"])));
+    expect(json[0].matrix.columns).toStrictEqual(["phase"]);
+  });
+
+  it("prints column values that are bigints or hold quotes as they are", async () => {
+    const result = await run(["model-check", fixture("test/fixtures/matrix-columns.spec.ts")]);
+    expect(result.exitCode).toBe(0);
+    expect(stdoutOf(result)).toContain('count=0, label=a"b');
+  });
+
   it("fails the command when a proof is incomplete", async () => {
     const result = await run(["model-check", fixture("examples/order-machine.spec.ts"), "--max-states", "1"]);
     expect(result.exitCode).toBe(1);

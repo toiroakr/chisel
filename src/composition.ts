@@ -1,6 +1,6 @@
 import type { AnyBehavior, AnyImplementation, Behavior, Implementation } from "./behavior.js";
 import { SpecificationError } from "./behavior.js";
-import type { Requirements } from "./dependency.js";
+import type { DeclaredDependencies } from "./dependency.js";
 import type {
   AnySchema,
   AnyVariantsSchema,
@@ -24,7 +24,7 @@ type DiscriminantOf<S> = S extends VariantsSchema<infer Discriminant, any> ? Dis
 type DepartedOf<B> = B extends { readonly departed: readonly (infer Tag extends string)[] }
   ? Tag
   : never;
-type RequiresOf<B> = B extends { readonly requires: infer Requires } ? Requires : never;
+type DependenciesOf<B> = B extends { readonly dependencies: infer Requires } ? Requires : never;
 
 type Flowing<First extends AnyBehavior, Second extends AnyBehavior> = Exclude<
   keyof VariantsOf<First["result"]> & string,
@@ -48,7 +48,7 @@ type Joined<First extends AnyBehavior, Second extends AnyBehavior> = Behavior<
     DiscriminantOf<First["effects"]>,
     VariantsOf<First["effects"]> & VariantsOf<Second["effects"]>
   >,
-  RequiresOf<First> & RequiresOf<Second>
+  DependenciesOf<First> & DependenciesOf<Second>
 > & { readonly departed: readonly Departing<First, Second>[] };
 
 type Folded<Acc extends AnyBehavior, Rest extends readonly AnyBehavior[]> = Rest extends readonly [
@@ -171,7 +171,7 @@ function join(first: AnyBehavior, second: AnyBehavior, name: string): AnyBehavio
       ...secondResult.variants,
     }),
     effects: mergedEffects(first, second),
-    requires: mergedRequires(first, second),
+    dependencies: mergedDependencies(first, second),
     ensures: [],
     disregards: first.disregards,
     pair: [first, second],
@@ -393,12 +393,12 @@ function mergedEffects(first: AnyBehavior, second: AnyBehavior): AnyVariantsSche
   return variants(left.discriminant, { ...left.variants, ...right.variants });
 }
 
-function mergedRequires(first: AnyBehavior, second: AnyBehavior): Requirements {
-  const clash = Object.keys(second.requires).find(
-    name => name in first.requires && first.requires[name] !== second.requires[name],
+function mergedDependencies(first: AnyBehavior, second: AnyBehavior): DeclaredDependencies {
+  const clash = Object.keys(second.dependencies).find(
+    name => name in first.dependencies && first.dependencies[name] !== second.dependencies[name],
   );
   if (clash !== undefined) {
     throw new SpecificationError(`${first.name} and ${second.name} require ${clash} apart`);
   }
-  return { ...first.requires, ...second.requires };
+  return { ...first.dependencies, ...second.dependencies };
 }

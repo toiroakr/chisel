@@ -48,27 +48,32 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
     formula: transition.each
       ? compiler.paired(transition.holds, transition.each, schemaAtPath(machine.state as never, transition.each.path)?.kind)
       : compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
+  const discriminant = (machine.command as unknown as Partial<AnyVariantsSchema>).discriminant === undefined ? "" : identifier((machine.command as unknown as AnyVariantsSchema).discriminant);
+  const preconditions = Object.entries(specification.requires).map(([tag, holds], index) => ({ name: `Req${index}`,
+    formula: `IF depth = 0 THEN TRUE ELSE IF last.${discriminant} = ${JSON.stringify(tag)} THEN (${compiler.condition(holds, new Map([["state", "previous"], ["command", "last"]]), "previous")}) <=> previous # state ELSE TRUE` }));
+  const last = (command: string) => preconditions.length > 0 ? ` /\\ last' = ${command}` : "";
   const stateSet = set(states.values.map(value => compiler.value(value, new Map())));
   const commandSet = set(commands.values.map(value => compiler.value(value, new Map())));
   const initial = set(machine.initial.map(value => compiler.value(value, new Map())));
   const source = [
     `---- MODULE ${name} ----`,
     "EXTENDS Naturals, Integers, Sequences",
-    "VARIABLES state, pending, previous, depth",
+    `VARIABLES state, pending, previous, depth${preconditions.length > 0 ? ", last" : ""}`,
     `MaxCommands == ${maxCommands}`,
     `StateDomain == ${stateSet}`,
     `CommandDomain == ${commandSet}`,
     `Step(s, c) == ${step}`,
-    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0`,
-    "Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1)",
-    "        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1)",
+    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
+    `Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1${last("c")})`,
+    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1${last("Head(pending)")})`,
     "TypeOK == /\\ state \\in StateDomain /\\ \\A i \\in 1..Len(pending): pending[i] \\in CommandDomain",
     "Budget == pending = <<>> \\/ depth < MaxCommands",
     ...properties.map(item => `${item.name} == ${item.formula}`),
     ...transitions.map(item => `${item.name} == previous = state \\/ (${item.formula})`),
+    ...preconditions.map(item => `${item.name} == ${item.formula}`),
     "====",
   ].join("\n");
-  const config = `INIT Init NEXT Next INVARIANT TypeOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} INVARIANT Budget CHECK_DEADLOCK FALSE`;
+  const config = `INIT Init NEXT Next INVARIANT TypeOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} ${preconditions.map(item => `INVARIANT ${item.name}`).join(" ")} INVARIANT Budget CHECK_DEADLOCK FALSE`;
   return { name, source, config, states: states.values.length, commands: commands.values.length };
 }
 
@@ -93,11 +98,14 @@ export async function checkMachineTla<State, Command>(machine: MachineSpecificat
     status: "undetermined", states: result.distinctStates, generatedStates: result.generatedStates,
     reason: `TLA+ exploration exceeded maxCommands (${options.maxCommands ?? 1000})`, module,
   };
+  const violated = result.violation?.name ?? "";
   if (result.status === "invariant-violation") return { status: "broken", states: result.distinctStates,
     generatedStates: result.generatedStates,
-    reason: /^Inv\d+$/.test(result.violation?.name ?? "")
-      ? machine.invariants[Number(result.violation!.name.slice(3))]?.name ?? result.violation!.name
-      : result.violation?.name ?? "An invariant was violated",
+    reason: /^Inv\d+$/.test(violated)
+      ? machine.invariants[Number(violated.slice(3))]?.name ?? violated
+      : /^Req\d+$/.test(violated)
+        ? `${Object.keys(machine.requires)[Number(violated.slice(3))]}: its precondition disagrees with whether it changes the state`
+        : result.violation?.name ?? "An invariant was violated",
     ...(result.violation === undefined ? {} : { trace: result.violation.trace.map(step => ({
       ...(step.action === undefined ? {} : { action: step.action }),
       state: formatValue(step.state.state!), pending: formatValue(step.state.pending!),
@@ -118,7 +126,9 @@ export interface InductiveProof {
 export async function proveMachine<State, Command>(specification: MachineSpecification<State, Command>): Promise<InductiveProof> {
   const machine = { ...specification.machine, invariants: specification.invariants, transitions: specification.transitions };
   let source: string;
-  const names = ["initial", "state contract", "emitted commands", ...machine.invariants.map(item => item.name), ...machine.transitions.map(item => item.name)];
+  const requiredTags = Object.keys(specification.requires);
+  const names = ["initial", "state contract", "emitted commands", ...machine.invariants.map(item => item.name), ...machine.transitions.map(item => item.name),
+    ...requiredTags.flatMap(tag => [`${tag} precondition allows the change`, `${tag} precondition forces the change`])];
   try {
     const compiler = new Compiler(machine.state as AnySchema, machine.command as AnySchema);
     if (hasOptional(machine.state as AnySchema)) throw new SpecificationError("Inductive proof does not support optional state fields");
@@ -139,6 +149,13 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
       `\\A s, c: (${assumption}) => \\A i \\in 1..Len(${output}.commands): CommandOK(${output}.commands[i])`,
       ...invariants.map(item => `\\A s, c: (${assumption}) => ${item.name}(${output}.state)`),
       ...transitions.map(formula => `\\A s, c: (${assumption}) => (s = ${output}.state \\/ (${formula}))`),
+      ...requiredTags.flatMap(tag => {
+        const pre = compiler.condition(specification.requires[tag], new Map([["state", "s"], ["command", "c"]]), "s");
+        const isTag = `c.${identifier((machine.command as unknown as AnyVariantsSchema).discriminant)} = ${JSON.stringify(tag)}`;
+        const unchanged = unchangedFormula(machine.state as AnySchema, "s", `${output}.state`);
+        return [`\\A s, c: (${assumption}) => (${isTag} => (${unchanged} \\/ (${pre})))`,
+          `\\A s, c: (${assumption}) => (${isTag} => (~(${pre}) \\/ ~(${unchanged})))`];
+      }),
     ];
     source = [
       "---- MODULE ChiselInduction ----",
@@ -179,6 +196,14 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
   });
   return { status: !unmatched && theoremLines.length === names.length && result.missingProofCount === 0 && result.omittedProofCount === 0 && obligations.every(item => item.status === "proved") ? "proved" : "undetermined",
     obligations, source };
+}
+
+// Compared field by field: the prover cannot discharge a whole-record equality
+// of a step's result, but it can the same claim about each field.
+function unchangedFormula(schema: AnySchema, before: string, after: string): string {
+  if (schema.kind !== "object") return `${before} = ${after}`;
+  const fields = Object.entries((schema as ObjectSchema<ObjectShape>).shape);
+  return `(${fields.map(([field, child]) => unchangedFormula(child, `${before}.${identifier(field)}`, `${after}.${identifier(field)}`)).join(" /\\ ") || "TRUE"})`;
 }
 
 function set(values: readonly string[]): string {

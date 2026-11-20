@@ -139,7 +139,7 @@ describe("a recorded row of a dependency that states only the case of its answer
     input: variants("状態", { 入力済み: object({ 商品ID: string() }) }),
     result: object({ 在庫あり: boolean() }),
     effects: variants("種類", {}),
-    requires: { 在庫: dependency(照会の例) },
+    dependencies: { 在庫: dependency(照会の例) },
   });
   const warningsWith = async (answer: Parameters<typeof fake<typeof 注文する, "在庫">>[2][number][1]) =>
     (

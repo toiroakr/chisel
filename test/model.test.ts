@@ -57,7 +57,7 @@ it("certifies a complete expression model and every pair obligation", async () =
   expect(report.adequate).toBe(true);
 });
 it("proves value dependencies over their entire finite domain", () => {
-  const definition = c.behavior("dependent", { input: c.variants("kind", { input: c.object({}) }), result: c.boolean(), effects: c.variants("kind", {}), requires: { enabled: c.dependency(c.boolean()) } });
+  const definition = c.behavior("dependent", { input: c.variants("kind", { input: c.object({}) }), result: c.boolean(), effects: c.variants("kind", {}), dependencies: { enabled: c.dependency(c.boolean()) } });
   const impl = c.implement(definition, { cases: { input: c.model("enabled", (_, deps) => ({ result: deps.enabled, effects: [] })) } });
   expect(c.verify(impl).status).toBe("verified");
 });
@@ -72,7 +72,7 @@ it("does not prove overflowing intermediate arithmetic", () => {
   expect(c.verify(impl).status).not.toBe("verified");
 });
 it("enforces value dependency assumptions at the execution boundary", async () => {
-  const definition = c.behavior("dependent-bound", { input: c.variants("kind", { input: c.object({}) }), result: c.int().min(1), effects: c.variants("kind", {}), requires: { minimum: c.dependency(c.int().min(1)) } });
+  const definition = c.behavior("dependent-bound", { input: c.variants("kind", { input: c.object({}) }), result: c.int().min(1), effects: c.variants("kind", {}), dependencies: { minimum: c.dependency(c.int().min(1)) } });
   const impl = c.implement(definition, { cases: { input: c.model("minimum", (_, deps) => ({ result: c.choose(deps.minimum.$gte(1), deps.minimum, 1), effects: [] })) } });
   expect(c.verify(impl).status).toBe("verified");
   await expect(c.perform(impl, { kind: "input" }, { minimum: 0 })).rejects.toThrow("Invalid dependency minimum");

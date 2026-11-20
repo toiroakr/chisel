@@ -108,7 +108,7 @@ function answers(definition: AnyBehavior, expected: Expected<AnyBehavior>, actua
     deepEqual(canonicalEffects(received.effects), canonicalEffects(expected.effects));
 }
 
-export type BehaviorWith<B> = B extends { readonly requires: infer Requires }
+export type BehaviorWith<B> = B extends { readonly dependencies: infer Requires }
   ? Partial<ValueDependencies<Requires>>
   : never;
 
@@ -426,7 +426,7 @@ export async function check(
   }[] = [];
   const waysMet: WayTaken[] = [];
   const waysOwed: WayTaken[] = [];
-  const fakeIssues = fakeIssuesOf(definition.requires, definition.name, specification.fakes);
+  const fakeIssues = fakeIssuesOf(definition.dependencies, definition.name, specification.fakes);
   const tables = new Map(
     specification.fakes
       .filter(table => !fakeIssues.some(item => item.table.dependency === table.dependency))
@@ -452,7 +452,7 @@ export async function check(
   const unstoodFor = (row: Example<AnyBehavior>): string | undefined => {
     const written = (row.with ?? {}) as Readonly<Record<string, unknown>>;
     for (const [name, value] of Object.entries(written)) {
-      const declared = definition.requires[name];
+      const declared = definition.dependencies[name];
       if (declared === undefined) {
         return `with ${name} names no dependency of ${definition.name}`;
       }
@@ -461,7 +461,7 @@ export async function check(
         return `with ${name} is not a value the dependency answers: ${parsed.issues[0]!.message}`;
       }
     }
-    const missing = Object.keys(definition.requires).find(
+    const missing = Object.keys(definition.dependencies).find(
       name => !(name in written) && !tables.has(name),
     );
     return missing === undefined ? undefined : `No stand-in for dependency ${missing}`;
@@ -899,7 +899,7 @@ export async function check(
     borders,
     pairs: countPairs(pairablesOf(positions, guardPartitions), answeredGivens),
     fakeIssues: fakeIssues.map(item => item.issue),
-    fakeWarnings: fakeWarningsOf(definition.requires, specification.fakes),
+    fakeWarnings: fakeWarningsOf(definition.dependencies, specification.fakes),
     evidence: {
       input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,
@@ -967,7 +967,7 @@ export function generate(
   const answeredRows = rows.filter(row => !isTodo(row.expect));
   const origins = answeredRows.map(row => row.given);
   const standIns = Object.fromEntries(
-    Object.entries(definition.requires)
+    Object.entries(definition.dependencies)
       .filter(([, declared]) => declared.takes === "nothing")
       .map(([name, declared]) => [name, declared.output.placeholder(name)]),
   );

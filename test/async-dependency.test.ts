@@ -10,7 +10,7 @@ const order = c.behavior("order", {
   input: c.variants("kind", { place: c.object({ items: c.array(c.string()) }) }),
   result: c.variants("outcome", { placed: c.object({ quantities: c.array(c.int()) }), short: c.object({}) }),
   effects: c.variants("type", {}),
-  requires: { stock: c.dependency(stock) },
+  dependencies: { stock: c.dependency(stock) },
 });
 type Answer = c.Execution<c.BehaviorResult<typeof order>, c.BehaviorEffect<typeof order>>;
 // Asks the stock of every item, one after another, and is short when one is missing.
@@ -93,7 +93,7 @@ describe("a dependency that answers a promise", () => {
       input: c.variants("kind", { go: c.object({ at: c.int() }) }),
       result: c.int(),
       effects: c.variants("type", {}),
-      requires: { bounded: c.dependency(bounded) },
+      dependencies: { bounded: c.dependency(bounded) },
     });
     const implementation = c.implement(asking, {
       cases: { go: c.model("ask", (request, deps) => ({ result: c.call(deps.bounded, { kind: "ask", at: request.at }), effects: [] })) },
@@ -168,7 +168,7 @@ describe("a dependency that answers a promise", () => {
       input: c.variants("kind", { quote: c.object({ amount: c.int().min(0).max(1000) }) }),
       result: c.variants("outcome", { ok: c.object({ limit: c.int() }), over: c.object({}) }),
       effects: c.variants("type", {}),
-      requires: { limit: c.dependency(c.int()) },
+      dependencies: { limit: c.dependency(c.int()) },
     });
     const quoting = c.implement(quote, {
       cases: {

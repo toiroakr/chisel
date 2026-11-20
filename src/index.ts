@@ -55,7 +55,7 @@ export type {
   FakeTable,
   FunctionDependency,
   FunctionDependencyNames,
-  Requirements,
+  DeclaredDependencies,
   Resolved,
   Supplied,
   ValueDependencies,
