@@ -187,6 +187,15 @@ describe("chisel machines", () => {
     });
   });
 
+  it("stops a command where the process is told to die", async () => {
+    const file = fixture("test/fixtures/effects-machine.ts");
+    const result = await run(["run-machine", file, "--state", '{"label":"none","migrated":false}', "--command", '"deploy"', "--die-after", "1"]);
+    expect(JSON.parse(stdoutOf(result))).toMatchObject({
+      state: { label: "in-progress", migrated: false },
+      steps: [{ performed: [{ name: "writeLabel", outcome: "succeeded" }], died: { after: 1 } }],
+    });
+  });
+
   it("passes the command limit to runtime execution", async () => {
     const result = await run(["run-machine", fixture("examples/order-machine.ts"),
       "--state", '{"phase":"draft","ordered":2,"received":0}', "--command", '{"type":"submit"}', "--max-commands", "1"]);

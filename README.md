@@ -461,7 +461,30 @@ update: (state, command) => ({
 }),
 ```
 
-`checkMachine` explores both outcomes of every effect. A failed effect stops the command, drops the commands it would have emitted and leaves the state as it was before that effect, so the writes before it stay. Where a failure should leave something else, write it: `c.effect("runScript", after, { failure: state })` rolls the whole command back. Invariants, transition properties and preconditions are held on every outcome, the states a failure leaves are reachable states from which every command is explored (so an invariant such as "a half-finished deploy always has a label `resolve` accepts" is held there too), and a counterexample names the effect that failed (`... failed after runScript failed`). These properties are held on the state each outcome ends in, not on the state between two effects of one command that went on to fail, and the checker does not say whether a sequence of commands eventually converges. A command that stopped at a failed effect may have written nothing yet, so a precondition that held is not held against it for leaving the state unchanged. `runMachine(machine, state, command, { fails: effect => effect.name === "runScript" })` follows the machine with the effects you say failed, and each step lists what `performed`; `chisel run-machine ... --fail runScript` does the same. `maxOutcomes` bounds the outcomes explored for one command (default 1000). The TLA+ translation makes each effect a choice between its success and its failure, and `--engine tla` and `prove-machine` read effects the same way.
+`checkMachine` explores both outcomes of every effect. A failed effect stops the command, drops the commands it would have emitted and leaves the state as it was before that effect, so the writes before it stay. Where a failure should leave something else, write it: `c.effect("runScript", after, { failure: state })` rolls the whole command back. Invariants, transition properties and preconditions are held on every outcome, the states a failure leaves are reachable states from which every command is explored (so an invariant such as "a half-finished deploy always has a label `resolve` accepts" is held there too), and a counterexample names the effect that failed (`... failed after runScript failed`). These properties are held on the state each outcome ends in, not on the state between two effects of one command that went on to fail (see `crashes` below), and the checker does not say whether a sequence of commands eventually converges. A command that stopped at a failed effect may have written nothing yet, so a precondition that held is not held against it for leaving the state unchanged. `runMachine(machine, state, command, { fails: effect => effect.name === "runScript" })` follows the machine with the effects you say failed, and each step lists what `performed`; `chisel run-machine ... --fail runScript` does the same. `maxOutcomes` bounds the outcomes explored for one command (default 1000). The TLA+ translation makes each effect a choice between its success and its failure, and `--engine tla` and `prove-machine` read effects the same way.
+
+A process can also die between two effects, and then no failure handling runs. `specifyMachine(machine, { crashes: true })` makes `checkMachine` explore a death before the first effect of each command and after each effect. The state the death leaves is a reachable state from which every command is explored, a death skips the failure handling (a `failure` state names what a failed effect leaves, not what a death leaves, so the writes of the effects already done stay), a death after the last effect loses the commands the command would have emitted, and the commands still queued behind it die with the process, so the state a death leaves is where the next command starts. Take a checkout that reserves stock and then charges the customer, each effect rolling the whole command back when it fails:
+
+```ts
+import * as c from "@toiroakr/chisel";
+import { invariant, specifyMachine, checkMachine } from "@toiroakr/chisel/verification";
+
+const checkout = c.machine("checkout", {
+  state: c.object({ reserved: c.boolean(), charged: c.boolean() }),
+  command: c.enum(["checkout"]), initial: [{ reserved: false, charged: false }],
+  update: state => ({
+    effects: [
+      c.effect("reserve", { reserved: true, charged: state.charged }, { failure: state }),
+      c.effect("charge", { reserved: true, charged: true }, { failure: state }),
+    ],
+  }),
+});
+const leak = invariant("a reservation is never left unpaid", state => state.reserved.$eq(false).$or(state.charged.$eq(true)));
+checkMachine(specifyMachine(checkout, { invariants: [leak] }));                       // held
+checkMachine(specifyMachine(checkout, { invariants: [leak], crashes: true }));       // broken: checkout died after effect 1 (reserve)
+```
+
+A command without effects has no point to die at, and a command that stopped by dying is held to its precondition as a command that stopped at a failed effect is. `runMachine` takes `dies: point => point.completed === 1` to follow such a run, and `chisel run-machine ... --die-after 1` does the same. In TLA+ a death is one more outcome of the command, so `--engine tla` and `prove-machine` read it too.
 
 To fail CI unless the finite state check completes, export a machine and run:
 

@@ -198,4 +198,64 @@ describe("TLA+ translation of executable machines", () => {
       expect(broken.obligations.find(item => item.name === "no half-finished deploy")?.status).toBe("undetermined");
     }, 60000);
   });
+
+  describe("a process dying between effects", () => {
+    const State = c.object({ reserved: c.boolean(), charged: c.boolean() });
+    type Checkout = c.Infer<typeof State>;
+    const checkout = c.machine("tla checkout", {
+      state: State, command: c.enum(["checkout"] as const), initial: [{ reserved: false, charged: false }],
+      update: state => ({
+        effects: [
+          c.effect<Checkout>("reserve", { reserved: true, charged: state.charged }, { failure: state }),
+          c.effect<Checkout>("charge", { reserved: true, charged: true }, { failure: state }),
+        ],
+      }),
+    });
+    const leak = c.invariant<Checkout>("a reservation is never left unpaid", state => state.reserved.$eq(false).$or(state.charged.$eq(true)));
+    const paid = c.invariant<Checkout>("a charge implies a reservation", state => state.charged.$eq(false).$or(state.reserved.$eq(true)));
+
+    it("finds what a death leaves only when the specification asks for it", async () => {
+      expect((await c.checkMachineTla(c.specifyMachine(checkout, { invariants: [leak] }))).status).toBe("held");
+      expect(await c.checkMachineTla(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).toMatchObject({
+        status: "broken", reason: "a reservation is never left unpaid",
+      });
+    });
+
+    it("makes no death point of a command whose effects list is empty", async () => {
+      const Mixed = c.object({ n: c.int().min(0).max(1) });
+      const mixed = c.machine("tla mixed", {
+        state: Mixed, command: c.enum(["write", "skip"] as const), initial: [{ n: 0 }],
+        update: (_state, command) => ({
+          effects: c.choose<readonly c.Effect<c.Infer<typeof Mixed>>[]>(command.$eq("write"), [c.effect<c.Infer<typeof Mixed>>("write", { n: 1 })], []),
+        }),
+      });
+      const specification = c.specifyMachine(mixed, { crashes: true });
+      expect(c.toTla(specification).source).toContain("IF Len(r.effects) = 0 THEN {} ELSE 0..Len(r.effects)");
+      expect((await c.checkMachineTla(specification)).status).toBe("held");
+    });
+
+    it("starts commands from the state a death leaves, since the queued commands die with the process", async () => {
+      const Phase = c.enum(["idle", "starting", "busy", "corrupt"] as const);
+      const Cascade = c.object({ phase: Phase });
+      type Cascading = c.Infer<typeof Cascade>;
+      const cascade = c.machine("tla cascade", {
+        state: Cascade, command: c.enum(["start", "work", "cleanup", "poke"] as const), initial: [{ phase: "idle" }],
+        update: ((state: c.TermOf<Cascading>, command: c.TermOf<"start" | "work" | "cleanup" | "poke">) => c.choose(command.$eq("start"),
+          { state: { phase: "starting" }, commands: ["work", "cleanup"] } as never,
+          c.choose(command.$eq("work"),
+            { effects: c.choose<readonly c.Effect<Cascading>[]>(state.phase.$eq("starting"), [c.effect<Cascading>("mark", { phase: "busy" })], []) } as never,
+            c.choose(command.$eq("cleanup"),
+              { state: { phase: "idle" } } as never,
+              { state: { phase: c.choose<Cascading["phase"]>(state.phase.$eq("busy"), "corrupt", state.phase) } } as never)))) as never,
+      });
+      const healthy = c.invariant<Cascading>("never corrupt", state => state.phase.$ne("corrupt"));
+      expect((await c.checkMachineTla(c.specifyMachine(cascade, { invariants: [healthy] }))).status).toBe("held");
+      expect(await c.checkMachineTla(c.specifyMachine(cascade, { invariants: [healthy], crashes: true }))).toMatchObject({ status: "broken" });
+    });
+
+    it("proves an invariant over the states a death leaves", { timeout: 60000 }, async () => {
+      expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [paid], crashes: true }))).status).toBe("proved");
+      expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).status).toBe("undetermined");
+    });
+  });
 });

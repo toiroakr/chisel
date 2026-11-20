@@ -23,13 +23,18 @@ type Names = ReadonlyMap<string, string>;
 // substituted for it: tla-ts evaluates Step and the invariant independently.
 // What one command can do when each of its effects may fail: the state it ends in and the
 // commands it emits, for the run in which every effect succeeds and for the failure of each.
-const OUTCOMES = [
-  "Outcomes(s, c) == LET r == Step(s, c) IN",
-  "  IF \"effects\" \\in DOMAIN r THEN",
-  "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, failed |-> FALSE]}",
-  "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, failed |-> TRUE] : i \\in 1..Len(r.effects)}",
-  "  ELSE {[state |-> r.state, commands |-> r.commands, failed |-> FALSE]}",
-];
+// The outcomes of a command with effects: every effect succeeds, the failure of each effect, and with
+// `crashes` the process dying before the first effect and after each one.
+function outcomesDefinition(crashes: boolean): string[] {
+  return [
+    "Outcomes(s, c) == LET r == Step(s, c) IN",
+    "  IF \"effects\" \\in DOMAIN r THEN",
+    "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, stopped |-> FALSE, died |-> FALSE]}",
+    "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, stopped |-> TRUE, died |-> FALSE] : i \\in 1..Len(r.effects)}",
+    ...(crashes ? ["    \\cup {[state |-> IF i = 0 THEN s ELSE r.effects[i].state, commands |-> <<>>, stopped |-> TRUE, died |-> TRUE] : i \\in IF Len(r.effects) = 0 THEN {} ELSE 0..Len(r.effects)}"] : []),
+    "  ELSE {[state |-> r.state, commands |-> r.commands, stopped |-> FALSE, died |-> FALSE]}",
+  ];
+}
 
 export function toTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly domainLimit?: number;
@@ -62,14 +67,14 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
   const effectful = hasEffect(machine.update);
   const preconditions = Object.entries(specification.requires).map(([tag, holds], index) => {
     const precondition = `(${compiler.condition(holds, new Map([["state", "previous"], ["command", "last"]]), "previous")})`;
-    // A command that stopped at a failed effect may have written nothing yet, so only the other direction holds of it.
-    const agrees = effectful ? `IF failed THEN (~${precondition} => previous = state) ELSE (${precondition} <=> previous # state)` : `${precondition} <=> previous # state`;
+    // A command that stopped (at a failed effect, or by the process dying) may have written nothing yet, so only the other direction holds of it.
+    const agrees = effectful ? `IF stopped THEN (~${precondition} => previous = state) ELSE (${precondition} <=> previous # state)` : `${precondition} <=> previous # state`;
     return { name: `Req${index}`, formula: `IF depth = 0 THEN TRUE ELSE IF last.${discriminant} = ${JSON.stringify(tag)} THEN ${agrees} ELSE TRUE` };
   });
   const last = (command: string) => preconditions.length > 0 ? ` /\\ last' = ${command}` : "";
   const next = effectful ? [
-    `Next == \\/ (\\E c \\in CommandDomain: \\E r \\in Outcomes(state, c): /\\ pending = <<>> /\\ state' = r.state /\\ pending' = r.commands /\\ previous' = state /\\ depth' = 1 /\\ failed' = r.failed${last("c")})`,
-    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ \\E r \\in Outcomes(state, Head(pending)): /\\ state' = r.state /\\ pending' = Tail(pending) \\o r.commands /\\ previous' = state /\\ depth' = depth + 1 /\\ failed' = r.failed${last("Head(pending)")})`,
+    `Next == \\/ (\\E c \\in CommandDomain: \\E r \\in Outcomes(state, c): /\\ pending = <<>> /\\ state' = r.state /\\ pending' = r.commands /\\ previous' = state /\\ depth' = 1 /\\ stopped' = r.stopped${last("c")})`,
+    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ \\E r \\in Outcomes(state, Head(pending)): /\\ state' = r.state /\\ pending' = (IF r.died THEN <<>> ELSE Tail(pending) \\o r.commands) /\\ previous' = state /\\ depth' = depth + 1 /\\ stopped' = r.stopped${last("Head(pending)")})`,
   ] : [
     `Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1${last("c")})`,
     `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1${last("Head(pending)")})`,
@@ -80,13 +85,13 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
   const source = [
     `---- MODULE ${name} ----`,
     "EXTENDS Naturals, Integers, Sequences",
-    `VARIABLES state, pending, previous, depth${effectful ? ", failed" : ""}${preconditions.length > 0 ? ", last" : ""}`,
+    `VARIABLES state, pending, previous, depth${effectful ? ", stopped" : ""}${preconditions.length > 0 ? ", last" : ""}`,
     `MaxCommands == ${maxCommands}`,
     `StateDomain == ${stateSet}`,
     `CommandDomain == ${commandSet}`,
     `Step(s, c) == ${step}`,
-    ...(effectful ? OUTCOMES : []),
-    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${effectful ? " /\\ failed = FALSE" : ""}${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
+    ...(effectful ? outcomesDefinition(specification.crashes) : []),
+    `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${effectful ? " /\\ stopped = FALSE" : ""}${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
     ...next,
     "TypeOK == /\\ state \\in StateDomain /\\ \\A i \\in 1..Len(pending): pending[i] \\in CommandDomain",
     "Budget == pending = <<>> \\/ depth < MaxCommands",
@@ -178,14 +183,14 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
         const isTag = `c.${identifier((machine.command as unknown as AnyVariantsSchema).discriminant)} = ${JSON.stringify(tag)}`;
         const unchanged = unchangedFormula(machine.state as AnySchema, "s", `${output}.state`);
         return [over(`(${isTag} => (${unchanged} \\/ (${pre})))`),
-          over(`(${isTag} => (${effectful ? `${output}.failed \\/ ` : ""}~(${pre}) \\/ ~(${unchanged})))`)];
+          over(`(${isTag} => (${effectful ? `${output}.stopped \\/ ` : ""}~(${pre}) \\/ ~(${unchanged})))`)];
       }),
     ];
     source = [
       "---- MODULE ChiselInduction ----",
       "EXTENDS Naturals, Integers, Sequences",
       `Step(s, c) == ${step}`,
-      ...(effectful ? OUTCOMES : []),
+      ...(effectful ? outcomesDefinition(specification.crashes) : []),
       `StateOK(s) == ${stateOK}`,
       `CommandOK(c) == ${commandOK}`,
       `InitState(s) == s \\in ${set(machine.initial.map(value => compiler.value(value, new Map())))}`,

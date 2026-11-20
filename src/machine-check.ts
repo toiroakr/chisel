@@ -19,6 +19,7 @@ export interface MachineSpecification<State, Command> {
   readonly transitions: readonly Transition[];
   readonly requires: Readonly<Record<string, unknown>>;
   readonly columns: readonly string[];
+  readonly crashes: boolean;
 }
 
 // The key every command carries as a literal: the tag that tells the commands apart.
@@ -38,6 +39,8 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   readonly transitions?: readonly Transition[];
   readonly requires?: Requires<State, Command>;
   readonly columns?: readonly (keyof State & string)[];
+  // Also explore the process dying before the first effect of a command and after each effect.
+  readonly crashes?: boolean;
 } = {}): MachineSpecification<State, Command> {
   const names = [...properties.invariants ?? [], ...properties.transitions ?? []].map(item => item.name);
   const repeated = names.find((item, index) => names.indexOf(item) !== index);
@@ -58,7 +61,7 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
     if (!fields.includes(column)) throw new SpecificationError(`Machine ${machine.name} has no state field ${column} to use as a column`);
   }
   return { kind: "machine-specification", name: properties.name ?? machine.name, machine,
-    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires, columns: properties.columns ?? [] };
+    invariants: properties.invariants ?? [], transitions: properties.transitions ?? [], requires, columns: properties.columns ?? [], crashes: properties.crashes ?? false };
 }
 
 export function isMachineSpecification(value: unknown): value is MachineSpecification<unknown, unknown> {
@@ -98,22 +101,25 @@ export interface MachineReport<State, Command> {
 
 function violation<State, Command>(specification: MachineSpecification<State, Command>, steps: readonly MachineStep<State, Command>[]): string | undefined {
   for (const step of steps) {
-    const stopped = step.performed?.find(item => item.outcome === "failed");
-    const after = (reason: string) => stopped === undefined ? reason : `${reason} after ${stopped.name} failed`;
+    const failed = step.performed?.find(item => item.outcome === "failed");
+    const stopped = failed !== undefined || step.died !== undefined;
+    const tag = tagOf(specification.machine.command as never, step.command);
+    const cause = failed !== undefined ? `${failed.name} failed` : step.died === undefined ? undefined
+      : `${tag ?? (typeof step.command === "string" ? step.command : "the command")} died ${step.died.after === 0 ? "before its first effect" : `after effect ${step.died.after} (${step.performed![step.died.after - 1]!.name})`}`;
+    const after = (reason: string) => cause === undefined ? reason : `${reason} after ${cause}`;
     const broken = specification.invariants.find(invariant => !checks(invariant.holds, step.after));
     if (broken) return after(`Invariant ${broken.name} failed`);
     for (const transition of specification.transitions) {
       const reason = refusedBy(transition, specification.name, step.before, step.after);
       if (reason !== undefined) return after(reason);
     }
-    const tag = tagOf(specification.machine.command as never, step.command);
     const precondition = tag === undefined ? undefined : specification.requires[tag];
     if (precondition !== undefined) {
       const held = checks(precondition, { state: step.before, command: step.command });
       const changed = !deepEqual(step.before, step.after);
       if (!held && changed) return after(`${tag} changed the state although its precondition was false`);
       // A command that stopped at a failed effect may have written nothing yet.
-      if (held && !changed && stopped === undefined) return `${tag} left the state unchanged although its precondition held`;
+      if (held && !changed && !stopped) return `${tag} left the state unchanged although its precondition held`;
     }
   }
   return undefined;
@@ -191,7 +197,7 @@ export function checkMachine<State, Command>(specification: MachineSpecification
   for (let index = 0; index < queue.length; index++) {
     const path = queue[index]!;
     for (const [commandIndex, command] of commandList.entries()) {
-      for (const outcome of runMachineOutcomes(specification.machine, path.state, command, { maxCommands, maxOutcomes })) {
+      for (const outcome of runMachineOutcomes(specification.machine, path.state, command, { maxCommands, maxOutcomes, crashes: specification.crashes })) {
         transitions++;
         const result = outcome.result;
         const failure = outcome.error;

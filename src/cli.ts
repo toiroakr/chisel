@@ -12,7 +12,7 @@ import { z } from "zod";
 import { isBehavior, perform } from "./behavior.js";
 import type { AnyBehavior, AnyImplementation } from "./behavior.js";
 import { decode, encode } from "./codec.js";
-import { array, enumOf, object, string } from "./schema.js";
+import { array, enumOf, int, object, string } from "./schema.js";
 import type { Beside } from "./beside.js";
 import { formatKey, formatTypeScriptValue } from "./codegen.js";
 import {
@@ -380,6 +380,7 @@ const runMachineCommand = defineCommand({
     command: arg(z.string({ error: "Missing required option --command" }), { description: "コマンド（JSON）" }),
     maxCommands: arg(z.coerce.number().int().positive().optional(), { description: "後続コマンドの実行上限（既定1000）" }),
     fail: arg(z.string().optional(), { description: "失敗させるeffect名（カンマ区切り）" }),
+    dieAfter: arg(z.coerce.number().int().min(0).optional(), { description: "effectを持つコマンドをこの数のeffectの後でプロセスを死なせる（0なら最初のeffectの前）" }),
     timeout: arg(z.coerce.number().int().positive().default(30000), { description: "モジュール読込と実行の上限（ミリ秒）" }),
   }),
   run: async args => {
@@ -397,10 +398,12 @@ const runMachineCommand = defineCommand({
     }
     const failing = new Set((args.fail ?? "").split(",").map(name => name.trim()).filter(Boolean));
     const result = runMachine(declaration, decodedState.value, decodedCommand.value,
-      { ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }), fails: effect => failing.has(effect.name) });
+      { ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }), fails: effect => failing.has(effect.name),
+        ...(args.dieAfter === undefined ? {} : { dies: point => point.completed === args.dieAfter }) });
     const output = encode(object({ state: declaration.state, steps: array(object({
       command: declaration.command, before: declaration.state, after: declaration.state,
       performed: array(object({ name: string(), outcome: enumOf(["succeeded", "failed"] as const) })).optional(),
+      died: object({ after: int() }).optional(),
     })) }), result);
     if (!output.success) throw new Error(output.issues.map(issue => `${issue.path}: ${issue.message}`).join("\n"));
     console.log(JSON.stringify(output.value, undefined, 2));
