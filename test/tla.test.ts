@@ -114,4 +114,24 @@ describe("TLA+ translation of executable machines", () => {
     expect(await c.checkMachineTla(c.specifyMachine(declaration))).toMatchObject({ status: "undetermined" });
     expect((await c.proveMachine(c.specifyMachine(declaration))).status).toBe("undetermined");
   });
+
+  it("checks command preconditions in TLA+ and names the one that disagrees with the state change", async () => {
+    const wrong = c.specifyMachine(orderSpecification.machine, { requires: { allocate: state => state.phase.$ne("issued") } });
+    expect(await c.checkMachineTla(wrong)).toMatchObject({
+      status: "broken", reason: "allocate: its precondition disagrees with whether it changes the state",
+    });
+  });
+
+  it("proves each command precondition as two obligations", async () => {
+    const proof = await c.proveMachine(orderSpecification);
+    const named = proof.obligations.filter(item => item.name.includes("precondition"));
+    expect(named.map(item => item.name)).toStrictEqual([
+      "allocate precondition allows the change", "allocate precondition forces the change",
+      "receive precondition allows the change", "receive precondition forces the change",
+    ]);
+    expect(proof.status).toBe("proved");
+    const wrong = await c.proveMachine(c.specifyMachine(orderSpecification.machine, { requires: { allocate: state => state.phase.$ne("issued") } }));
+    expect(wrong.status).toBe("undetermined");
+    expect(wrong.obligations.find(item => item.name === "allocate precondition forces the change")?.status).toBe("undetermined");
+  }, 60000);
 });
