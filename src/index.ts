@@ -172,7 +172,7 @@ export { specifyMachine, isMachineSpecification, checkMachine } from "./machine-
 export { checkInterleavings } from "./interleave.js";
 export type { InterleavingReport, InterleavingStep, InterleavingTrace } from "./interleave.js";
 export type { MachineSpecification, MachineReport, MachineTrace } from "./machine-check.js";
-export { toTla, checkMachineTla, proveMachine } from "./tla.js";
+export { toTla, checkMachineTla, checkInterleavingsTla, proveMachine } from "./tla.js";
 export type { TlaModule, InductiveProof } from "./tla.js";
 export type { Composition } from "./composition.js";
 

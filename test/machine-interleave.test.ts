@@ -94,3 +94,29 @@ describe("two copies of a command interleaving on one shared state", () => {
       .toMatchObject({ status: "undetermined" });
   });
 });
+
+describe("copies interleaving on one shared state, in TLA+", () => {
+  it("finds the lost update of an unguarded write and holds for a guarded one", async () => {
+    const unguarded = c.specifyMachine(shop(), { invariants: [once] });
+    const guarded = c.specifyMachine(shop({ ifUnchanged: true }), { invariants: [once] });
+    expect(await c.checkInterleavingsTla(unguarded, { copies: both })).toMatchObject({ status: "broken", reason: "the last unit is sold once" });
+    expect((await c.checkInterleavingsTla(guarded, { copies: both })).status).toBe("held");
+  });
+
+  it("agrees with the native checker on the fields a write names", async () => {
+    const specification = c.specifyMachine(shop({ writes: ["stock"] }), { invariants: [once] });
+    expect(c.checkInterleavings(specification, { copies: both }).status).toBe("held");
+    expect((await c.checkInterleavingsTla(specification, { copies: both })).status).toBe("held");
+  });
+
+  it("stays undetermined for a command that emits commands, which the translation does not follow", async () => {
+    const Tally = c.object({ n: c.int().min(0).max(2) });
+    const emitting = c.machine("emitting", {
+      state: Tally, command: c.enum(["go", "more"] as const), initial: [{ n: 0 }],
+      update: ((_state: c.TermOf<c.Infer<typeof Tally>>, command: c.TermOf<"go" | "more">) => c.choose(command.$eq("go"),
+        { effects: [c.effect<c.Infer<typeof Tally>>("count", { n: 1 })], commands: ["more"] } as never,
+        { state: { n: 2 } } as never)) as never,
+    });
+    expect((await c.checkInterleavingsTla(c.specifyMachine(emitting), { copies: ["go", "go"] })).status).toBe("undetermined");
+  });
+});

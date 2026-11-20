@@ -28,8 +28,9 @@ import { isMachine, runMachine } from "./machine.js";
 import type { Machine } from "./machine.js";
 import { checkInterleavings } from "./interleave.js";
 import { checkMachine, isMachineSpecification } from "./machine-check.js";
+import type { MachineMatrix } from "./machine-check.js";
 import type { MachineSpecification } from "./machine-check.js";
-import { checkMachineTla, proveMachine, toTla } from "./tla.js";
+import { checkInterleavingsTla, checkMachineTla, proveMachine, toTla } from "./tla.js";
 import { reportDocument } from "./report-json.js";
 import type {
   AdequacyReport,
@@ -267,7 +268,11 @@ const modelCheckCommand = defineCommand({
       const { module: _module, ...report } = await checkMachineTla(declaration,
         { ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }),
           ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }) });
-      return [{ name: declaration.name, ...report }];
+      return [{ name: declaration.name, ...report },
+        ...(declaration.interleavings === undefined ? [] : [await (async () => {
+          const { module: _interleaved, ...interleaved } = await checkInterleavingsTla(declaration, { copies: declaration.interleavings!.copies });
+          return { name: `${declaration.name} (interleavings)`, ...interleaved };
+        })()])];
     }))).flat();
     if (args.json) console.log(JSON.stringify(reports, jsonReplacer, 2));
     else for (const report of reports) {
@@ -275,9 +280,10 @@ const modelCheckCommand = defineCommand({
       if (report.reason) console.log(`  ${report.reason}`);
       if ("counterexample" in report && report.counterexample) console.log(`  ${JSON.stringify(report.counterexample, jsonReplacer)}`);
       if ("trace" in report && report.trace) console.log(`  ${JSON.stringify(report.trace)}`);
-      if ("matrix" in report && report.matrix) for (const row of report.matrix.rows) {
+      const matrix = "matrix" in report ? report.matrix as MachineMatrix<unknown> | undefined : undefined;
+      if (matrix) for (const row of matrix.rows) {
         const show = (value: unknown) => typeof value === "string" || typeof value === "bigint" ? String(value) : JSON.stringify(value, jsonReplacer);
-        console.log(`  ${report.matrix.columns.map(column => `${column}=${show(row.state[column])}`).join(", ")}`);
+        console.log(`  ${matrix.columns.map(column => `${column}=${show(row.state[column])}`).join(", ")}`);
         for (const cell of row.cells) console.log(`    ${JSON.stringify(cell.command, jsonReplacer)}: changes ${cell.changes}${cell.precondition === undefined ? "" : `, precondition ${cell.precondition}`}`);
       }
     }
