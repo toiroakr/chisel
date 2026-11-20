@@ -23,13 +23,16 @@ type Names = ReadonlyMap<string, string>;
 // substituted for it: tla-ts evaluates Step and the invariant independently.
 // What one command can do when each of its effects may fail: the state it ends in and the
 // commands it emits, for the run in which every effect succeeds and for the failure of each.
-const OUTCOMES = [
-  "Outcomes(s, c) == LET r == Step(s, c) IN",
-  "  IF \"effects\" \\in DOMAIN r THEN",
-  "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, stopped |-> FALSE]}",
-  "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, stopped |-> TRUE] : i \\in 1..Len(r.effects)}",
-  "  ELSE {[state |-> r.state, commands |-> r.commands, stopped |-> FALSE]}",
-];
+function outcomesDefinition(crashes: boolean): string[] {
+  return [
+    "Outcomes(s, c) == LET r == Step(s, c) IN",
+    "  IF \"effects\" \\in DOMAIN r THEN",
+    "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, stopped |-> FALSE]}",
+    "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, stopped |-> TRUE] : i \\in 1..Len(r.effects)}",
+    ...(crashes ? ["    \\cup {[state |-> IF i = 0 THEN s ELSE r.effects[i].state, commands |-> <<>>, stopped |-> TRUE] : i \\in 0..Len(r.effects)}"] : []),
+    "  ELSE {[state |-> r.state, commands |-> r.commands, stopped |-> FALSE]}",
+  ];
+}
 
 export function toTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly domainLimit?: number;
@@ -85,7 +88,7 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
     `StateDomain == ${stateSet}`,
     `CommandDomain == ${commandSet}`,
     `Step(s, c) == ${step}`,
-    ...(effectful ? OUTCOMES : []),
+    ...(effectful ? outcomesDefinition(specification.crashes) : []),
     `Init == /\\ state \\in ${initial} /\\ pending = <<>> /\\ previous = state /\\ depth = 0${effectful ? " /\\ stopped = FALSE" : ""}${preconditions.length > 0 ? " /\\ last = <<>>" : ""}`,
     ...next,
     "TypeOK == /\\ state \\in StateDomain /\\ \\A i \\in 1..Len(pending): pending[i] \\in CommandDomain",
@@ -185,7 +188,7 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
       "---- MODULE ChiselInduction ----",
       "EXTENDS Naturals, Integers, Sequences",
       `Step(s, c) == ${step}`,
-      ...(effectful ? OUTCOMES : []),
+      ...(effectful ? outcomesDefinition(specification.crashes) : []),
       `StateOK(s) == ${stateOK}`,
       `CommandOK(c) == ${commandOK}`,
       `InitState(s) == s \\in ${set(machine.initial.map(value => compiler.value(value, new Map())))}`,

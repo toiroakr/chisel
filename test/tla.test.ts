@@ -198,4 +198,32 @@ describe("TLA+ translation of executable machines", () => {
       expect(broken.obligations.find(item => item.name === "no half-finished deploy")?.status).toBe("undetermined");
     }, 60000);
   });
+
+  describe("a process dying between effects", () => {
+    const State = c.object({ reserved: c.boolean(), charged: c.boolean() });
+    type Checkout = c.Infer<typeof State>;
+    const checkout = c.machine("tla checkout", {
+      state: State, command: c.enum(["checkout"] as const), initial: [{ reserved: false, charged: false }],
+      update: state => ({
+        effects: [
+          c.effect<Checkout>("reserve", { reserved: true, charged: state.charged }, { failure: state }),
+          c.effect<Checkout>("charge", { reserved: true, charged: true }, { failure: state }),
+        ],
+      }),
+    });
+    const leak = c.invariant<Checkout>("a reservation is never left unpaid", state => state.reserved.$eq(false).$or(state.charged.$eq(true)));
+    const paid = c.invariant<Checkout>("a charge implies a reservation", state => state.charged.$eq(false).$or(state.reserved.$eq(true)));
+
+    it("finds what a death leaves only when the specification asks for it", async () => {
+      expect((await c.checkMachineTla(c.specifyMachine(checkout, { invariants: [leak] }))).status).toBe("held");
+      expect(await c.checkMachineTla(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).toMatchObject({
+        status: "broken", reason: "a reservation is never left unpaid",
+      });
+    });
+
+    it("proves an invariant over the states a death leaves", { timeout: 60000 }, async () => {
+      expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [paid], crashes: true }))).status).toBe("proved");
+      expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).status).toBe("undetermined");
+    });
+  });
 });
