@@ -154,6 +154,7 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
         if (!stopped && declaredEffects.length > 0 && options.dies?.({ completed: declaredEffects.length, command: input })) { died = { after: declaredEffects.length }; stopped = true; }
       } else next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
       steps.push({ command: input, before: current, after: next, ...(performed === undefined ? {} : { performed }), ...(died === undefined ? {} : { died }) });
+      if (died !== undefined) pending.length = 0;
       const emitted = output.commands === undefined || stopped ? [] : output.commands;
       if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
       const validated = emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));

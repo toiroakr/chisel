@@ -234,6 +234,25 @@ describe("TLA+ translation of executable machines", () => {
       expect((await c.checkMachineTla(specification)).status).toBe("held");
     });
 
+    it("starts commands from the state a death leaves, since the queued commands die with the process", async () => {
+      const Phase = c.enum(["idle", "starting", "busy", "corrupt"] as const);
+      const Cascade = c.object({ phase: Phase });
+      type Cascading = c.Infer<typeof Cascade>;
+      const cascade = c.machine("tla cascade", {
+        state: Cascade, command: c.enum(["start", "work", "cleanup", "poke"] as const), initial: [{ phase: "idle" }],
+        update: ((state: c.TermOf<Cascading>, command: c.TermOf<"start" | "work" | "cleanup" | "poke">) => c.choose(command.$eq("start"),
+          { state: { phase: "starting" }, commands: ["work", "cleanup"] } as never,
+          c.choose(command.$eq("work"),
+            { effects: c.choose<readonly c.Effect<Cascading>[]>(state.phase.$eq("starting"), [c.effect<Cascading>("mark", { phase: "busy" })], []) } as never,
+            c.choose(command.$eq("cleanup"),
+              { state: { phase: "idle" } } as never,
+              { state: { phase: c.choose<Cascading["phase"]>(state.phase.$eq("busy"), "corrupt", state.phase) } } as never)))) as never,
+      });
+      const healthy = c.invariant<Cascading>("never corrupt", state => state.phase.$ne("corrupt"));
+      expect((await c.checkMachineTla(c.specifyMachine(cascade, { invariants: [healthy] }))).status).toBe("held");
+      expect(await c.checkMachineTla(c.specifyMachine(cascade, { invariants: [healthy], crashes: true }))).toMatchObject({ status: "broken" });
+    });
+
     it("proves an invariant over the states a death leaves", { timeout: 60000 }, async () => {
       expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [paid], crashes: true }))).status).toBe("proved");
       expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).status).toBe("undetermined");

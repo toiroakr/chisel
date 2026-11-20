@@ -73,6 +73,28 @@ describe("a process that dies between the effects of a command", () => {
     expect(rows(true)).toStrictEqual(["false/false", "false/true", "true/false", "true/true"]);
   });
 
+  it("drops the queued commands too when the process dies, so the state it leaves is where commands start from", () => {
+    const Phase = c.enum(["idle", "starting", "busy", "corrupt"] as const);
+    const Cascade = c.object({ phase: Phase });
+    type Cascading = c.Infer<typeof Cascade>;
+    const cascade = c.machine("cascade", {
+      state: Cascade, command: c.enum(["start", "work", "cleanup", "poke"] as const), initial: [{ phase: "idle" }],
+      update: ((state: c.TermOf<Cascading>, command: c.TermOf<"start" | "work" | "cleanup" | "poke">) => c.choose(command.$eq("start"),
+        { state: { phase: "starting" }, commands: ["work", "cleanup"] } as never,
+        c.choose(command.$eq("work"),
+          { effects: c.choose<readonly c.Effect<Cascading>[]>(state.phase.$eq("starting"), [c.effect<Cascading>("mark", { phase: "busy" })], []) } as never,
+          c.choose(command.$eq("cleanup"),
+            { state: { phase: "idle" } } as never,
+            { state: { phase: c.choose<Cascading["phase"]>(state.phase.$eq("busy"), "corrupt", state.phase) } } as never)))) as never,
+    });
+    const settled = (crashes: boolean) => c.checkMachine(c.specifyMachine(cascade, { columns: ["phase"], crashes }));
+    expect(settled(false).matrix?.rows.map(row => row.state.phase).sort()).toStrictEqual(["idle"]);
+    expect(settled(true).matrix?.rows.map(row => row.state.phase).sort()).toStrictEqual(["busy", "corrupt", "idle", "starting"]);
+    const died = c.runMachine(cascade, { phase: "idle" }, "start", { dies: point => point.completed === 1 });
+    expect(died.steps.map(step => step.command)).toStrictEqual(["start", "work"]);
+    expect(died.state).toStrictEqual({ phase: "busy" });
+  });
+
   it("does not hold a command that stopped before writing anything to its precondition", () => {
     const Command = c.variants("type", { checkout: c.object({}) });
     const guarded = c.machine("guarded checkout", {

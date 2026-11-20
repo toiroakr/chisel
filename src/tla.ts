@@ -29,10 +29,10 @@ function outcomesDefinition(crashes: boolean): string[] {
   return [
     "Outcomes(s, c) == LET r == Step(s, c) IN",
     "  IF \"effects\" \\in DOMAIN r THEN",
-    "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, stopped |-> FALSE]}",
-    "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, stopped |-> TRUE] : i \\in 1..Len(r.effects)}",
-    ...(crashes ? ["    \\cup {[state |-> IF i = 0 THEN s ELSE r.effects[i].state, commands |-> <<>>, stopped |-> TRUE] : i \\in IF Len(r.effects) = 0 THEN {} ELSE 0..Len(r.effects)}"] : []),
-    "  ELSE {[state |-> r.state, commands |-> r.commands, stopped |-> FALSE]}",
+    "    {[state |-> IF Len(r.effects) = 0 THEN s ELSE r.effects[Len(r.effects)].state, commands |-> r.commands, stopped |-> FALSE, died |-> FALSE]}",
+    "    \\cup {[state |-> IF r.effects[i].hasFailure THEN r.effects[i].failure ELSE (IF i = 1 THEN s ELSE r.effects[i - 1].state), commands |-> <<>>, stopped |-> TRUE, died |-> FALSE] : i \\in 1..Len(r.effects)}",
+    ...(crashes ? ["    \\cup {[state |-> IF i = 0 THEN s ELSE r.effects[i].state, commands |-> <<>>, stopped |-> TRUE, died |-> TRUE] : i \\in IF Len(r.effects) = 0 THEN {} ELSE 0..Len(r.effects)}"] : []),
+    "  ELSE {[state |-> r.state, commands |-> r.commands, stopped |-> FALSE, died |-> FALSE]}",
   ];
 }
 
@@ -74,7 +74,7 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
   const last = (command: string) => preconditions.length > 0 ? ` /\\ last' = ${command}` : "";
   const next = effectful ? [
     `Next == \\/ (\\E c \\in CommandDomain: \\E r \\in Outcomes(state, c): /\\ pending = <<>> /\\ state' = r.state /\\ pending' = r.commands /\\ previous' = state /\\ depth' = 1 /\\ stopped' = r.stopped${last("c")})`,
-    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ \\E r \\in Outcomes(state, Head(pending)): /\\ state' = r.state /\\ pending' = Tail(pending) \\o r.commands /\\ previous' = state /\\ depth' = depth + 1 /\\ stopped' = r.stopped${last("Head(pending)")})`,
+    `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ \\E r \\in Outcomes(state, Head(pending)): /\\ state' = r.state /\\ pending' = (IF r.died THEN <<>> ELSE Tail(pending) \\o r.commands) /\\ previous' = state /\\ depth' = depth + 1 /\\ stopped' = r.stopped${last("Head(pending)")})`,
   ] : [
     `Next == \\/ (\\E c \\in CommandDomain: /\\ pending = <<>> /\\ state' = Step(state, c).state /\\ pending' = Step(state, c).commands /\\ previous' = state /\\ depth' = 1${last("c")})`,
     `        \\/ (/\\ Len(pending) > 0 /\\ depth < MaxCommands /\\ state' = Step(state, Head(pending)).state /\\ pending' = Tail(pending) \\o Step(state, Head(pending)).commands /\\ previous' = state /\\ depth' = depth + 1${last("Head(pending)")})`,
