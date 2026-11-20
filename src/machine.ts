@@ -20,7 +20,7 @@ export interface Effect<State> {
 }
 
 export function effect<State>(name: string, state: Template<NoInfer<State>>, options: { readonly failure?: Template<NoInfer<State>> } = {}): Template<Effect<State>> {
-  return { kind: "effect", name, state, ...(options.failure === undefined ? {} : { failure: options.failure }) } as Template<Effect<State>>;
+  return { kind: "effect", name, state, ...(Object.hasOwn(options, "failure") ? { failure: options.failure } : {}) } as Template<Effect<State>>;
 }
 
 export type MachineCommand<State, Command> = Template<{
@@ -134,7 +134,7 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
           if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
           if (options.fails?.({ name: declared.name, index, command: input })) {
             performed.push({ name: declared.name, outcome: "failed" });
-            if (declared.failure !== undefined) next = parse(definition.state, declared.failure, `Effect ${declared.name} failure state`);
+            if (Object.hasOwn(declared, "failure")) next = parse(definition.state, declared.failure, `Effect ${declared.name} failure state`);
             stopped = true;
             break;
           }

@@ -395,7 +395,7 @@ const runMachineCommand = defineCommand({
       throw new Error([...(!decodedState.success ? decodedState.issues : []), ...(!decodedCommand.success ? decodedCommand.issues : [])]
         .map(issue => `${issue.path}: ${issue.message}`).join("\n"));
     }
-    const failing = new Set((args.fail ?? "").split(",").filter(Boolean));
+    const failing = new Set((args.fail ?? "").split(",").map(name => name.trim()).filter(Boolean));
     const result = runMachine(declaration, decodedState.value, decodedCommand.value,
       { ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }), fails: effect => failing.has(effect.name) });
     const output = encode(object({ state: declaration.state, steps: array(object({

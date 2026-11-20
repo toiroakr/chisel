@@ -178,6 +178,9 @@ describe("chisel machines", () => {
       state: { label: "checkpoint", migrated: true },
       steps: [{ performed: [{ name: "writeLabel", outcome: "succeeded" }, { name: "runScript", outcome: "succeeded" }, { name: "writeLabel", outcome: "succeeded" }] }],
     });
+    expect(JSON.parse(stdoutOf(await run([...args, "--fail", "none, runScript"])))).toMatchObject({
+      state: { label: "in-progress", migrated: false },
+    });
     expect(JSON.parse(stdoutOf(await run([...args, "--fail", "runScript"])))).toMatchObject({
       state: { label: "in-progress", migrated: false },
       steps: [{ performed: [{ name: "writeLabel", outcome: "succeeded" }, { name: "runScript", outcome: "failed" }] }],

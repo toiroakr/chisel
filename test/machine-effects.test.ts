@@ -106,6 +106,14 @@ describe("machine effects", () => {
     expect(row("none")?.cells.find(cell => JSON.stringify(cell.command) === '{"type":"deploy"}')?.changes).toBe("sometimes");
   });
 
+  it("lets a failure leave an undefined state when the state may be undefined", () => {
+    const declaration = c.machine("maybe", {
+      state: c.int().min(0).max(1).optional(), command: c.boolean(), initial: [0],
+      update: () => ({ effects: [c.effect<number | undefined>("write", 1, { failure: undefined })] }),
+    });
+    expect(c.runMachine(declaration, 0, true, { fails: () => true }).state).toBeUndefined();
+  });
+
   it("refuses an effect that names nothing", () => {
     const declaration = c.machine("nameless", {
       state: c.int().min(0).max(1), command: c.boolean(), initial: [0],
