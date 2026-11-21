@@ -152,6 +152,7 @@ const generateCommand = defineCommand({
           ways: args.ways,
           feasibility: feasibilityOptions(args),
           pairs: pairOptions(args),
+          fakes: target.specification.fakes,
         },
       );
       return [

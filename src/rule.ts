@@ -924,6 +924,13 @@ function ordering(left: unknown, right: unknown): number {
   return Number.NaN;
 }
 
+// A local bound to a dependency's answer reads as the call, any other by its number.
+export function localLabel(name: string): string {
+  const rest = name.slice("#local:".length);
+  const call = rest.lastIndexOf(":");
+  return call === -1 ? `local${rest}` : `${rest.slice(0, call)}()`;
+}
+
 export function describeTerm(term: Term<unknown>, path = "$"): string {
   return describeOperand(term, path);
 }
@@ -941,7 +948,9 @@ function describeOperand(operand: unknown, path: string, elements: ElementLabels
   const location = (
     first === DEPS
       ? ["deps", ...rest]
-      : elements[first] !== undefined
+      : first.startsWith("#local:")
+        ? [localLabel(first), ...rest]
+        : elements[first] !== undefined
         ? [elements[first], ...rest]
         : [path, ...keys]
   )

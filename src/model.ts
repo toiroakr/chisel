@@ -34,15 +34,20 @@ function expression<T>(node: Node): Expression<T> {
 }
 const LOCAL = "#local:";
 let nextLocal = 0;
-function localName(): string { return `${LOCAL}${nextLocal++}`; }
+// A local bound to a dependency's answer is named after the dependency, so a
+// report reads it as that call.
+function localName(value?: unknown): string {
+  const node = nodeOf(value);
+  return node?.kind === "call" ? `${LOCAL}${dependencyName(node.dependency)}:${nextLocal++}` : `${LOCAL}${nextLocal++}`;
+}
 export function bind<Value, Result>(schema: Schema<Value>, value: NoInfer<Template<Value>>, build: (value: TermOf<Value>) => Template<Result>): Expression<Result> {
-  const name = localName();
+  const name = localName(value);
   return expression({ kind: "bind", name, schema: schema as Schema<unknown>, value, body: build(rootTerm<Value>(name)) });
 }
 export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value: NoInfer<Template<Infer<S>>>, cases: { readonly [Tag in Tags<S>]: (value: TermOf<VariantOf<S, Tag>>) => Template<Result> }): Expression<Result> {
   const tags = schema.variantTags as readonly Tags<S>[];
   if (tags.length === 0 || Object.keys(cases).length !== tags.length || tags.some(tag => !Object.hasOwn(cases, tag) || typeof cases[tag] !== "function")) throw new Error("matchValue requires exactly one body for every variant");
-  const name = localName();
+  const name = localName(value);
   const handlers = cases as unknown as Readonly<Record<string, (value: TermOf<unknown>) => unknown>>;
   const bodies = tags.map(tag => handlers[tag]!(rootTerm(name)));
   let body: unknown = bodies.at(-1);
@@ -57,11 +62,35 @@ export function fold<Element, Accumulator>(element: Schema<Element>, output: Sch
   const name = localName(), accumulator = localName();
   return expression({ kind: "fold", name, accumulator, element: element as Schema<unknown>, output: output as Schema<unknown>, values, initial, body: build(rootTerm<Accumulator>(accumulator), rootTerm<Element>(name)) });
 }
+// A choice repeated for each element of a map or a fold is not one way through
+// the model, and one on a value the model computes is settled by the input in a
+// way no position shows. A choice on a dependency's answer is a way: the answer
+// is read as a position of its own, which a fake answers.
 export function hasScopedChoices(value: unknown): boolean {
   const node = nodeOf(value);
-  if (node?.kind === "choose" && localRoots(node.condition).length > 0) return true;
+  if (node?.kind === "choose" && localRoots(node.condition).some(name => !isAnswer(name))) return true;
   if ((node?.kind === "map" || node?.kind === "fold") && choicesOf(node.body).length > 0) return true;
   return childrenOf(value).some(hasScopedChoices);
+}
+
+export function isAnswer(local: string): boolean {
+  return local.startsWith(LOCAL) && local.slice(LOCAL.length).includes(":");
+}
+
+// Each dependency's answer a bind holds outside a map or a fold, by its local's
+// name, with the schema it is bound under and the call it holds the answer of.
+export function bindingsOf(template: unknown): readonly (readonly [string, Schema<unknown>])[] {
+  return answersOf(template).map(({ name, schema }) => [name, schema] as const);
+}
+
+export function answersOf(template: unknown): readonly { readonly name: string; readonly schema: Schema<unknown>; readonly dependency: string; readonly input: unknown }[] {
+  const node = nodeOf(template);
+  if (node?.kind === "map" || node?.kind === "fold") return [];
+  const call = node?.kind === "bind" ? nodeOf(node.value) : undefined;
+  const own = node?.kind === "bind" && call?.kind === "call" && isAnswer(node.name)
+    ? [{ name: node.name, schema: node.schema, dependency: dependencyName(call.dependency), input: call.input }]
+    : [];
+  return [...own, ...childrenOf(template).flatMap(answersOf)];
 }
 export function localRoots(value: unknown): readonly string[] {
   if (isTerm(value)) {
@@ -439,4 +468,48 @@ export function inlineInputBindings(template: unknown, schemaAt: (path: readonly
 
 export function guardsOf(template: unknown): RulesDecision<unknown, unknown, unknown>["guards"] {
   return choicesOf(template).map(node => ({ kind: "guard" as const, condition: node.condition, orElse: () => { throw new Error("Expression guards are interpreted"); } }));
+}
+
+// The calls a model makes, by dependency, with the argument each is written with.
+export function callsIn(template: unknown): readonly { readonly dependency: string; readonly input: unknown }[] {
+  const node = nodeOf(template);
+  const own = node?.kind === "call" ? [{ dependency: dependencyName(node.dependency), input: node.input }] : [];
+  return [...own, ...childrenOf(template).flatMap(callsIn)];
+}
+
+// The input with an argument written so it reads `value`: each field of the
+// input the argument reads takes the part of `value` it stands at, and a
+// constant must already be `value`. Undefined where the argument is computed
+// or reads anything but the input.
+export function writtenArgument(input: unknown, argument: unknown, value: unknown): unknown {
+  if (isTerm(argument)) {
+    const position = positionData(argument);
+    if (position === undefined || position.measure !== "value") return undefined;
+    const [first] = position.path;
+    if (first !== undefined && (first === DEPS || first.startsWith(LOCAL))) return undefined;
+    return writePath(input, position.path, value);
+  }
+  if (nodeOf(argument) !== undefined) return undefined;
+  if (atom(argument)) return deepEqualValue(argument, value) ? input : undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(argument) !== Array.isArray(value)) return undefined;
+  const keys = Object.keys(argument as object);
+  if (keys.length !== Object.keys(value).length) return undefined;
+  let written: unknown = input;
+  for (const key of keys) {
+    if (!Object.hasOwn(value, key)) return undefined;
+    written = writtenArgument(written, (argument as Record<string, unknown>)[key], (value as Record<string, unknown>)[key]);
+    if (written === undefined) return undefined;
+  }
+  return written;
+}
+
+function writePath(value: unknown, path: readonly string[], leaf: unknown): unknown {
+  const [key, ...rest] = path;
+  if (key === undefined) return leaf;
+  const record = (typeof value === "object" && value !== null ? value : {}) as Readonly<Record<string, unknown>>;
+  return { ...record, [key]: writePath(record[key], rest, leaf) };
+}
+
+function deepEqualValue(left: unknown, right: unknown): boolean {
+  return left === right || (isDecimal(left) && isDecimal(right) && left.equals(right));
 }

@@ -124,7 +124,7 @@ function leftOutAt(path: readonly string[], roots: Roots, facts: readonly Fact[]
   return undefined;
 }
 
-function casesLeft(sum: { readonly discriminant: string; readonly variants: VariantTable }, at: readonly string[], facts: readonly Fact[]): readonly string[] {
+export function casesLeft(sum: { readonly discriminant: string; readonly variants: VariantTable }, at: readonly string[], facts: readonly Fact[]): readonly string[] {
   let tags = Object.keys(sum.variants);
   for (const { rule, outcome } of facts) {
     if (rule.kind !== "compare" || (rule.operator !== "==" && rule.operator !== "!=")) continue;

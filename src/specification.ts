@@ -1,5 +1,5 @@
-import { hasScopedChoices } from "./model.js";
-import { verify } from "./proof.js";
+import { callsIn, hasScopedChoices, localRoots, writtenArgument } from "./model.js";
+import { selectedTag, taggedCase, verify } from "./proof.js";
 import type { ProofReport } from "./proof.js";
 import { constantsOf, domainOf } from "./domain.js";
 import { pairCoverage, PAIR_LIMIT } from "./pairs.js";
@@ -42,7 +42,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
+import { DEPS, localLabel, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -935,6 +935,9 @@ export interface GenerationReport {
 
 export interface GenerationOptions {
   readonly pairs?: { readonly obligations?: number; readonly candidates?: number };
+  // The specification's fakes: rows are traced with them, and a way or a point
+  // turning on a dependency's answer is composed by asking what a fake row asks.
+  readonly fakes?: readonly FakeTable[];
   readonly ways?: boolean;
   // How many combinations of finite values are tried against the invariants
   // relating them, and how many ways are listed, as in CheckOptions.
@@ -982,6 +985,38 @@ export function generate(
     origins.find(given => position.valuesIn(given).length > 0) ??
     definition.input.placeholder();
 
+  const fakeTables = new Map(
+    (options.fakes ?? [])
+      .filter(table => table.behavior === definition.name)
+      .filter(table => !fakeIssuesOf(definition.dependencies, definition.name, options.fakes ?? []).some(item => item.table.dependency === table.dependency))
+      .map(table => [table.dependency, table] as const),
+  );
+  const answering = Object.fromEntries([...fakeTables].map(([name, table]) => [name, answerFrom(table)]));
+  const tracedWith = (stand: unknown): unknown => ({ ...answering, ...(stand as object | undefined) });
+  // A row asking each dependency what one of its fake rows asks: the call's
+  // argument written into the input where the argument reads the input.
+  const askingFakes = (tag: string, decision: unknown, origins: readonly unknown[], reaches: (given: unknown) => boolean): unknown => {
+    const expression = (decision as { readonly expression?: unknown }).expression;
+    if (expression === undefined) return undefined;
+    for (const call of callsIn(expression)) {
+      const table = fakeTables.get(call.dependency);
+      for (const [asked] of table?.rows ?? []) {
+        for (const origin of origins) {
+          const given = writtenArgument(origin, call.input, asked);
+          if (given !== undefined && tagOf(definition.input, given) === tag && definition.input.parse(given).success && reaches(given)) {
+            return given;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+  // What a point or a way that turns on a dependency's answer still needs: a
+  // fake row answering there, asked by an input the row can write.
+  const askedOf = (locals: readonly string[]): string => {
+    const called = [...new Set(locals.map(localLabel).filter(label => label.endsWith("()")))];
+    return called.length === 0 ? "" : ` — ${called.join("・")}がそう答えるfakeの行がない`;
+  };
   const generated: GeneratedExample[] = [];
   const notComposed: string[] = [];
   // A row moved from `from` that breaks an invariant relating finite positions
@@ -1100,7 +1135,7 @@ export function generate(
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
       tagOf(definition.input, given) === drawn.origin?.tag
-        ? comparisonsReached(implementation!, given, deps).filter(item => item.rule === drawn.comparison)
+        ? comparisonsReached(implementation!, given, tracedWith(deps)).filter(item => item.rule === drawn.comparison)
         : [];
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
@@ -1124,10 +1159,14 @@ export function generate(
         reachedBy(candidate, withFrom(origin).with).some(item => point.contains(drawn.coordinateOf(item)));
       const given =
         candidates.find(candidate => definition.input.parse(candidate).success && reaches(candidate)) ??
+        askingFakes(drawn.origin?.tag ?? "", drawn.origin?.decision, [
+          ...origins.filter(candidate => tagOf(definition.input, candidate) === drawn.origin?.tag),
+          ...(drawn.origin === undefined ? [] : [definition.input.placeholderFor(drawn.origin.tag)]),
+        ], reaches) ??
         candidates.find(candidate => !definition.input.parse(candidate).success) ??
         candidates.find(candidate => definition.input.parse(candidate).success);
       if (given === undefined) {
-        notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})${askedOf(drawn.segments.flatMap(segment => segment.startsWith(".#local:") ? [segment.slice(1)] : []))}`);
       } else {
         offer({
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
@@ -1204,7 +1243,7 @@ export function generate(
     if (decision.kind !== "rules") {
       continue;
     }
-    const wayOf = (given: unknown, deps: unknown) => traceSync(implementation!, given, deps).way;
+    const wayOf = (given: unknown, deps: unknown) => traceSync(implementation!, given, tracedWith(deps)).way;
     const takes = (given: unknown, deps: unknown, way: Way) => {
       const taken = wayOf(given, deps);
       return taken !== undefined && sameSteps(taken.steps, way.steps);
@@ -1257,7 +1296,7 @@ export function generate(
       }
       if (
         witness === undefined &&
-        feasibilityOf(way, scopeOf(implementation!, tag), undefined, combinations).kind === "infeasible"
+        feasibilityOf(way, scopeOf(implementation!, tag, decision, way), undefined, combinations).kind === "infeasible"
       ) {
         continue;
       }
@@ -1265,7 +1304,9 @@ export function generate(
         candidate !== undefined && takes(candidate.given, withFrom(candidate.origin).with, way)
           ? candidate
           : undefined;
+      const throughFakes = askingFakes(tag, decision, origins_, given => takes(given, withFrom(given).with, way));
       const composed =
+        (throughFakes === undefined ? undefined : { given: throughFakes, origin: throughFakes }) ??
         taken(composeForWay(way, tag)) ??
         (options.ways !== true
           ? undefined
@@ -1280,7 +1321,7 @@ export function generate(
           ...withFrom(composed.origin),
         });
       } else {
-        notComposed.push(`${decision.id}: ${describeWay(way)}`);
+        notComposed.push(`${decision.id}: ${describeWay(way)}${askedOf(way.steps.flatMap(step => localRoots(step.distinction)))}`);
       }
     }
 
@@ -1300,7 +1341,7 @@ export function generate(
 
     function composeFromWitnesses(way: Way): { readonly given: unknown; readonly origin: unknown } | undefined {
       for (const origin of origins_) {
-        const witnesses = witnessesOf(way, scopeOf(implementation!, tag), { discriminant, tag }, combinations);
+        const witnesses = witnessesOf(way, scopeOf(implementation!, tag, decision as { readonly expression?: unknown }), { discriminant, tag }, combinations);
         if (witnesses === undefined) {
           break;
         }
@@ -1587,7 +1628,7 @@ function measureRules(
         ? { ...base, status: "gap" }
         : {
             ...base,
-            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations))),
+            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag, decision, way), undefined, combinations))),
           };
     });
   });
@@ -1631,7 +1672,7 @@ function measureArms(
         : tags.flatMap(tag =>
             plan.ways.map(way => ({
               way,
-              feasibility: feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations),
+              feasibility: feasibilityOf(way, scopeOf(implementation, tag, decision, way), undefined, combinations),
             })),
           );
     const through = (index: number, arm: string) =>
@@ -1898,8 +1939,30 @@ function reachOf(
     : prefixes.map(steps => feasibilityOf({ steps }, scope, placement, combinations));
 }
 
-function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnySchema {
-  return feasibilityScope(implementation.behavior, tag);
+function scopeOf(
+  implementation: Implementation<AnyBehavior>,
+  tag: string,
+  decision?: { readonly expression?: unknown },
+  way?: Way,
+): AnySchema {
+  const scope = feasibilityScope(implementation.behavior, tag, decision, way?.steps ?? []);
+  return way === undefined ? scope : settledBy(scope, way.steps);
+}
+
+// The scope with each sum field the way settles to one case read as that case,
+// so a field of the case is read with the kind it has there.
+function settledBy(scope: AnySchema, steps: Way["steps"], path: readonly string[] = []): AnySchema {
+  if (scope.kind !== "object") return scope;
+  const { shape } = scope as unknown as { readonly shape: Readonly<Record<string, AnySchema>> };
+  let changed = false;
+  const settled = Object.fromEntries(Object.entries(shape).map(([key, field]: [string, AnySchema]) => {
+    const at = [...path, key];
+    const tag = isVariantsSchema(field) ? selectedTag(field, at, steps) : undefined;
+    const next = tag === undefined ? settledBy(field, steps, at) : settledBy(taggedCase(field as AnyVariantsSchema, tag), steps, at);
+    if (next !== field) changed = true;
+    return [key, next];
+  }));
+  return changed ? ({ ...scope, shape: settled } as AnySchema) : scope;
 }
 
 function coverage(

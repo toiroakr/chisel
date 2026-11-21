@@ -1,3 +1,5 @@
+import { answersOf } from "./model.js";
+import { casesLeft, factsOf } from "./absence.js";
 import { temporalNeighbor, timelineOf } from "./temporal.js";
 import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
@@ -38,6 +40,8 @@ import {
   decimalUnits,
   counts,
   measured,
+  localLabel,
+  rebaseRule,
 } from "./rule.js";
 import { enumOf, holdsNoDecimal, int, isVariantsSchema, object, offGridEquality, schemaAtPath } from "./schema.js";
 import type {
@@ -79,23 +83,92 @@ export interface BorderForm {
   }[];
 }
 
-export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
+// The case a decision reads: its fields, the value dependencies under #deps, and
+// each dependency's answer a model binds under its local's name. No row writes an
+// answer; it may be any value the dependency declares it answers, and its ensures
+// relate it to the argument the call is made with.
+export function guardScope(
+  definition: AnyBehavior,
+  tag: string,
+  decision?: { readonly expression?: unknown },
+  steps: readonly { readonly distinction: unknown; readonly outcome: boolean | string }[] = [],
+): AnySchema {
   const variant = definition.input.variants[tag] as ObjectSchema<ObjectShape>;
   const values = Object.entries(definition.dependencies).flatMap(([name, declared]) =>
     declared.takes === "nothing" ? [[name, declared.output as AnySchema] as const] : [],
   );
-  if (values.length === 0) {
+  const answers = decision?.expression === undefined ? [] : answersOf(decision.expression);
+  if (values.length === 0 && answers.length === 0) {
     return variant;
   }
-  const deps = { ...object(Object.fromEntries(values)) } as AnySchema;
-  return { ...variant, shape: { ...variant.shape, [DEPS]: deps } } as AnySchema;
+  const deps = values.length === 0 ? {} : { [DEPS]: { ...object(Object.fromEntries(values)) } as AnySchema };
+  const answered = answers.map(answer => {
+    const declared = Object.hasOwn(definition.dependencies, answer.dependency) ? definition.dependencies[answer.dependency] : undefined;
+    return [answer.name, (declared?.takes === "input" ? declared.output : answer.schema) as AnySchema] as const;
+  });
+  const ensured = answers.flatMap(answer => {
+    const declared = Object.hasOwn(definition.dependencies, answer.dependency) ? definition.dependencies[answer.dependency] : undefined;
+    const output = declared?.takes === "input" ? declared.output as AnySchema : undefined;
+    const facts = steps.flatMap(step =>
+      typeof step.outcome === "boolean" && isRule(step.distinction) ? factsOf(step.distinction, step.outcome) : []);
+    const left = output !== undefined && isVariantsSchema(output) ? casesLeft(output, [answer.name], facts) : undefined;
+    return (declared?.takes === "input" ? declared.injected?.behavior.ensures ?? [] : []).flatMap(clause =>
+      clause.cases !== undefined && left !== undefined && left.every(tag => !clause.cases!.includes(tag))
+        ? []
+        : answeredEnsures(clause.rule, clause.cases !== undefined && left !== undefined && left.every(tag => clause.cases!.includes(tag)) ? undefined : clause.cases, answer.name, answer.input, output));
+  });
+  return {
+    ...variant,
+    shape: { ...variant.shape, ...deps, ...Object.fromEntries(answered) },
+    invariants: [...variant.invariants, ...ensured],
+  } as AnySchema;
+}
+
+function isRule(value: unknown): value is Rule {
+  const kind = (value as { readonly kind?: unknown } | null)?.kind;
+  return ["compare", "and", "or", "not", "all", "any"].includes(kind as string);
+}
+
+// A dependency's ensures read of one call: `value` is the answer's local, and
+// `input` the input fields the argument is written with. A clause naming cases
+// holds where the answer is of another case. A clause reading a part of the
+// argument that is not an input field is left out.
+function answeredEnsures(rule: Rule, cases: readonly string[] | undefined, local: string, argument: unknown, output: AnySchema | undefined): readonly Rule[] {
+  const argumentAt = (keys: readonly string[]): readonly string[] | undefined => {
+    let at: unknown = argument;
+    for (const [index, key] of keys.entries()) {
+      if (isTerm(at)) {
+        const data = positionData(at);
+        return data?.measure === "value" ? [...data.path, ...keys.slice(index)] : undefined;
+      }
+      if (at === null || typeof at !== "object" || !Object.hasOwn(at, key)) return undefined;
+      at = (at as Record<string, unknown>)[key];
+    }
+    const data = isTerm(at) ? positionData(at) : undefined;
+    return data?.measure === "value" ? data.path : undefined;
+  };
+  const move = (path: readonly string[]): readonly string[] | undefined =>
+    path[0] === "value" ? [local, ...path.slice(1)] : path[0] === "input" ? argumentAt(path.slice(1)) : undefined;
+  if (termPaths(rule).some(path => move(path) === undefined)) return [];
+  const read = rebaseRule(rule, path => move(path)!);
+  if (cases === undefined || output === undefined || !isVariantsSchema(output)) return [read];
+  const otherCase: Rule = {
+    kind: "and",
+    rules: cases.map(tag => ({ kind: "compare", left: positionTerm([local, output.discriminant], "value"), operator: "!=", right: tag })),
+  };
+  return [{ kind: "or", rules: [otherCase, read] }];
 }
 
 // The case as feasibility reads it: the invariants written on the input sum
 // hold of every case, as the partition passes them down, and read the
 // discriminant as the one value it has under this case.
-export function feasibilityScope(definition: AnyBehavior, tag: string): AnySchema {
-  const scope = guardScope(definition, tag) as ObjectSchema<ObjectShape>;
+export function feasibilityScope(
+  definition: AnyBehavior,
+  tag: string,
+  decision?: { readonly expression?: unknown },
+  steps: readonly { readonly distinction: unknown; readonly outcome: boolean | string }[] = [],
+): AnySchema {
+  const scope = guardScope(definition, tag, decision, steps) as ObjectSchema<ObjectShape>;
   const { discriminant } = definition.input;
   return {
     ...scope,
@@ -117,13 +190,13 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
       : decision.guards.flatMap(candidate =>
           walk(
             candidate.condition,
-            framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$"),
+            framesAt(guardScope(implementation.behavior, tag, decision), `@${tag}`, "$"),
             at,
             asGuard,
           ).map(
             drawn => ({
               ...drawn,
-              origin: { decision, scope: feasibilityScope(implementation.behavior, tag), tag },
+              origin: { decision, scope: feasibilityScope(implementation.behavior, tag, decision), tag },
             }),
           ),
         ),
@@ -370,7 +443,7 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
       : decision.guards.flatMap(candidate =>
           thresholdsIn(
             candidate.condition,
-            framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$"),
+            framesAt(guardScope(implementation.behavior, tag, decision), `@${tag}`, "$"),
           ),
         ),
   );
@@ -395,7 +468,7 @@ export function offGridEqualityIn(
   tag: string,
   decision: RulesDecision<unknown, unknown, unknown, unknown>,
 ): string | undefined {
-  const frames = framesAt(guardScope(definition, tag), `@${tag}`, "$");
+  const frames = framesAt(guardScope(definition, tag, decision), `@${tag}`, "$");
   for (const threshold of decision.guards.flatMap(candidate => thresholdsIn(candidate.condition, frames))) {
     const { operator, bound } = normalize(threshold.rule)!;
     if (holdsNoDecimal(threshold.schema, operator, bound)) {
@@ -403,7 +476,7 @@ export function offGridEqualityIn(
       return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
     }
   }
-  const scope = guardScope(definition, tag);
+  const scope = guardScope(definition, tag, decision);
   return decision.guards
     .map(candidate => offGridEquality(candidate.condition, path => schemaAtPath(scope, path), "$"))
     .find(found => found !== undefined);
@@ -464,7 +537,7 @@ function labelsOf(frames: Frames): ElementLabels {
 }
 
 function pathOf(frame: Frame, keys: readonly string[]): string {
-  return `${frame.path}${stepsOf(frame.scope, keys).join("")}`;
+  return `${frame.path}${stepsOf(frame.scope, keys).map(step => step.startsWith(".#local:") ? `.${localLabel(step.slice(1))}` : step).join("")}`;
 }
 
 // The rendered path is for reports; positions are found by segments, since a
@@ -1078,7 +1151,7 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          unreadIn(candidate.condition, framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$")).map(
+          unreadIn(candidate.condition, framesAt(guardScope(implementation.behavior, tag, decision), `@${tag}`, "$")).map(
             text => `${decision.id}: ${text}`,
           ),
         ),

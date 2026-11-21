@@ -283,7 +283,7 @@ These builders run at declaration time; the interpreter executes the resulting e
 
 Locals cannot escape their body. Declare each binding separately rather than reusing its expression in multiple locations. Top-level input names starting with `#local:` are reserved in models. Reading the whole input inside a body excludes local bindings.
 
-Construction proofs and example coverage are separate. `verify` can prove a body with local or iterated branches, but those branches' coverage is currently unmeasured: `check --strict` cannot succeed for such a model. Branch-free collection expressions remain eligible for strict checking. Array-length relationships and arbitrary fold postconditions beyond the declared accumulator contract are not inferred.
+Construction proofs and example coverage are separate. A branch on a dependency's answer (`matchValue` or `choose` over what `c.call` answers) is measured like a guard: the answer is read as a position of its own, written `lookup()` in reports, that may be any value the dependency declares it answers and is held to its `ensures` (a way they leave no value is owed no row). Rows reach such a way through the specification's `fakes`, and `generate` (given `fakes`, as `chisel generate` passes them) offers the input a fake row asks for each way or border point no row reaches yet, or names the answer a fake row must give. `verify` can prove a body with branches on a value the model computes, or inside `map` and `fold`, but those branches' coverage is unmeasured: `check --strict` cannot succeed for such a model. Branch-free collection expressions remain eligible for strict checking. Array-length relationships and arbitrary fold postconditions beyond the declared accumulator contract are not inferred.
 
 
 ## Commands

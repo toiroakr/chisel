@@ -179,7 +179,7 @@ function selectedCase(schema: AnySchema, path: readonly string[], steps: readonl
   const selected = selectedTag(schema, path, steps);
   return selected === undefined ? schema : taggedCase(schema, selected);
 }
-function selectedTag(schema: AnyVariantsSchema, path: readonly string[], steps: readonly Step[]): string | undefined {
+export function selectedTag(schema: AnyVariantsSchema, path: readonly string[], steps: readonly Step[]): string | undefined {
   let candidates = schema.variantTags as readonly string[];
   for (const step of steps) {
     const rule = step.distinction;
@@ -212,7 +212,7 @@ function pipelineBoundary(first: AnyImplementation, second: AnyImplementation, l
     reason: verified ? "Every forwarded result satisfies the next stage's input" : "The next stage's input is not proved for every forwarded result",
   };
 }
-function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
+export function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
   const variant = sum.variants[tag] as ObjectSchema<ObjectShape>;
   const declared = Object.hasOwn(variant.shape, sum.discriminant) ? variant.shape[sum.discriminant] : undefined;
   const discriminant = declared ? declared.refine(value => ({ kind: "compare", left: value, operator: "==", right: tag })) : literal(tag);
