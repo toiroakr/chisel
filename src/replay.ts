@@ -3,8 +3,8 @@ import { SpecificationError } from "./behavior.js";
 import { domainOf } from "./domain.js";
 import { deepEqual } from "./equal.js";
 import { EvaluationLimit } from "./exact.js";
-import { isMachine, positiveLimit, runMachineOutcomes } from "./machine.js";
-import type { Machine, MachineStep } from "./machine.js";
+import { isMachine, positiveLimit, runMachine, runMachineOutcomes } from "./machine.js";
+import type { Machine, MachineOutcome, MachineStep } from "./machine.js";
 import { isMachineSpecification, specifyMachine } from "./machine-check.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { tagOf } from "./schema.js";
@@ -12,10 +12,12 @@ import type { AnySchema } from "./schema.js";
 import { checks } from "./world.js";
 
 // What the machine did to a command that the code is asked to do the same to: an effect that failed
-// (`index` is its place in the command's effects) or the process dying after `after` effects.
+// (`index` is its place in the command's effects) or the process dying after `after` effects. `step`
+// is the place of `command` among the commands the run executed (0 is the one replayed, the rest are
+// the ones it emitted), which tells apart the occurrences of a command emitted more than once.
 export type ReplayFault<Command> =
-  | { readonly kind: "fails"; readonly effect: string; readonly index: number; readonly command: Command }
-  | { readonly kind: "dies"; readonly after: number; readonly command: Command };
+  | { readonly kind: "fails"; readonly effect: string; readonly index: number; readonly command: Command; readonly step: number }
+  | { readonly kind: "dies"; readonly after: number; readonly command: Command; readonly step: number };
 
 export interface MachineSubject<State, Command> {
   // Puts the code, with its external parts faked, in `state`: every sequence is replayed from a start of the machine.
@@ -56,10 +58,18 @@ interface Node<State, Command> {
 
 const show = (value: unknown) => JSON.stringify(value, (_key, item) => typeof item === "bigint" ? `${item}n` : item) ?? "undefined";
 
+// A key that does not depend on the order fields were written in, since two states `deepEqual` takes as one may differ in it.
+const bucketOf = (value: unknown) => JSON.stringify(value, (_key, item) => {
+  if (typeof item === "bigint") return `${item}n`;
+  return item !== null && typeof item === "object" && !Array.isArray(item) && Object.getPrototypeOf(item) === Object.prototype
+    ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
+    : item;
+}) ?? "undefined";
+
 function faultsOf<State, Command>(steps: readonly MachineStep<State, Command>[]): ReplayFault<Command>[] {
-  return steps.flatMap(step => [
-    ...(step.performed ?? []).flatMap((item, index) => item.outcome === "failed" ? [{ kind: "fails" as const, effect: item.name, index, command: step.command }] : []),
-    ...(step.died === undefined ? [] : [{ kind: "dies" as const, after: step.died.after, command: step.command }]),
+  return steps.flatMap((step, position) => [
+    ...(step.performed ?? []).flatMap((item, index) => item.outcome === "failed" ? [{ kind: "fails" as const, effect: item.name, index, command: step.command, step: position }] : []),
+    ...(step.died === undefined ? [] : [{ kind: "dies" as const, after: step.died.after, command: step.command, step: position }]),
   ]);
 }
 
@@ -92,11 +102,17 @@ export async function replayMachine<State, Command>(target: Machine<State, Comma
 
   const nodes: Node<State, Command>[] = [];
   const known = new Map<string, State[]>();
-  const contains = (state: State) => (known.get(show(state)) ?? []).some(other => deepEqual(other, state));
-  const remember = (state: State) => known.set(show(state), [...known.get(show(state)) ?? [], state]);
+  const contains = (state: State) => (known.get(bucketOf(state)) ?? []).some(other => deepEqual(other, state));
+  const remember = (state: State) => known.set(bucketOf(state), [...known.get(bucketOf(state)) ?? [], state]);
   let incomplete: string | undefined;
   let replayed = 0;
 
+  // A state the subject may change in place, parsed afresh so the stored one stays what the machine says.
+  const copyOf = (state: State): State => {
+    const parsed = machine.state.parse(state);
+    if (!parsed.success) throw new SpecificationError(`State ${show(state)} is no state of ${machine.name}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
+    return parsed.value;
+  };
   const labelOf = (command: Command) => tagOf(machine.command as never, command) ?? (typeof command === "string" ? command : show(command));
   const chainTo = (index: number | undefined, last?: Node<State, Command>): Node<State, Command>[] => {
     const chain: Node<State, Command>[] = last === undefined ? [] : [last];
@@ -107,7 +123,7 @@ export async function replayMachine<State, Command>(target: Machine<State, Comma
   };
 
   const replay = async (start: State, chain: readonly Node<State, Command>[]): Promise<MachineReplayReport<State, Command>["failure"]> => {
-    await subject.reset(start);
+    await subject.reset(copyOf(start));
     const steps: ReplayStep<State, Command>[] = [];
     const fail = (reason: string) => ({ start, steps, reason });
     const sequence = () => steps.map(step => labelOf(step.command)).join(", ");
@@ -126,6 +142,12 @@ export async function replayMachine<State, Command>(target: Machine<State, Comma
     return undefined;
   };
 
+  const outcomesOf = (state: State, command: Command): MachineOutcome<State, Command>[] => {
+    if (injectFaults) return runMachineOutcomes(machine, state, command, { maxCommands, maxOutcomes, crashes: specification.crashes });
+    try { return [{ result: runMachine(machine, state, command, { maxCommands }) }]; }
+    catch (error) { return [{ error }]; }
+  };
+
   for (const start of machine.initial) {
     if (contains(start)) continue;
     if (nodes.length === maxStates) { incomplete ??= `Reached maxStates (${maxStates}) before exploring every initial state`; continue; }
@@ -135,7 +157,7 @@ export async function replayMachine<State, Command>(target: Machine<State, Comma
   for (let index = 0; index < nodes.length; index++) {
     const path = nodes[index]!;
     for (const command of commands.values as Command[]) {
-      for (const outcome of runMachineOutcomes(machine, path.state, command, { maxCommands, maxOutcomes, crashes: specification.crashes })) {
+      for (const outcome of outcomesOf(path.state, command)) {
         if (outcome.result === undefined) {
           incomplete ??= outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
           continue;

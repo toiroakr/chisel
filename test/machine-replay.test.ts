@@ -152,7 +152,7 @@ describe("replaying a machine against the production code", () => {
     const { subject, log } = subjectOf();
     const report = await c.replayMachine(flow, subject);
     expect(report).toMatchObject({ status: "passed", states: 4 });
-    expect(log.runs.map(run => run.faults).filter(faults => faults.length > 0)).toContainEqual([{ kind: "fails", effect: "markPaid", index: 1, command: pay }]);
+    expect(log.runs.map(run => run.faults).filter(faults => faults.length > 0)).toContainEqual([{ kind: "fails", effect: "markPaid", index: 1, command: pay, step: 0 }]);
     expect(log.resets).toContainEqual(created);
   });
 
@@ -206,7 +206,61 @@ describe("replaying a machine against the production code", () => {
       requires: { pay: state => state.status.$eq("created"), ship: state => state.status.$eq("paid") }, crashes: true,
     });
     expect(await c.replayMachine(crashing, subject)).toMatchObject({ status: "passed" });
-    expect(log.runs.flatMap(run => run.faults)).toContainEqual({ kind: "dies", after: 1, command: pay });
+    expect(log.runs.flatMap(run => run.faults)).toContainEqual({ kind: "dies", after: 1, command: pay, step: 0 });
+  });
+
+  it("tells apart the occurrences of an emitted command that fail, by the step each belongs to", async () => {
+    const Count = c.object({ n: c.int().min(0).max(2) });
+    const Steps = c.variants("type", { start: c.object({}), bump: c.object({}) });
+    type Counted = c.Infer<typeof Count>;
+    const counting = c.machine("counting", {
+      state: Count, command: Steps, initial: [{ n: 0 }],
+      update: (state, command) => c.matchValue<typeof Steps, never>(Steps, command, {
+        start: () => ({ state: { n: state.n }, commands: [{ type: "bump" as const }, { type: "bump" as const }] }),
+        bump: () => ({ effects: [c.effect<Counted>("write", { n: c.choose<number>(state.n.$lt(2), state.n.$plus(1), state.n) }, { failure: { n: 0 } })] }),
+      } as never),
+    });
+    let current: Counted = { n: 0 };
+    const seen: (readonly c.ReplayFault<c.Infer<typeof Steps>>[])[] = [];
+    const subject: c.MachineSubject<Counted, c.Infer<typeof Steps>> = {
+      reset: state => { current = state; },
+      run: (command, faults) => {
+        seen.push(faults);
+        // only `bump` writes, and `start` is step 0, so its first emitted bump is step 1
+        let step = command.type === "start" ? 1 : 0;
+        current = c.runMachine(counting, current, command, { fails: () => { const here = step++; return faults.some(fault => fault.kind === "fails" && fault.step === here); } }).state;
+      },
+      read: () => current,
+    };
+    expect(await c.replayMachine(counting, subject)).toMatchObject({ status: "passed" });
+    expect(seen.filter(faults => faults.length === 1).map(faults => faults[0]!.kind === "fails" ? faults[0]!.step : -1).sort()).toContain(1);
+    expect(seen.some(faults => faults.some(fault => fault.kind === "fails" && fault.step === 2))).toBe(true);
+  });
+
+  it("gives reset a state of its own, so a subject that changes it in place cannot corrupt the starts of later replays", async () => {
+    const { subject } = subjectOf();
+    const inPlace: c.MachineSubject<Order, OrderCommand> = {
+      ...subject,
+      reset: async state => { await subject.reset(state); (state as { charged: boolean }).charged = true; },
+    };
+    expect(await c.replayMachine(flow, inPlace, { faults: false })).toMatchObject({ status: "passed", states: 3 });
+  });
+
+  it("does not enumerate failure outcomes when faults are off, so an outcomes limit of one is enough", async () => {
+    const { subject } = subjectOf();
+    expect(await c.replayMachine(flow, subject, { faults: false, maxOutcomes: 1 })).toMatchObject({ status: "passed" });
+  });
+
+  it("takes two states with the same fields in another order as one state", async () => {
+    const Tags = c.object({ tags: c.record(c.int().min(0).max(2)) });
+    const Reorder = c.variants("type", { reorder: c.object({}) });
+    const tagged = c.machine("tagged", {
+      state: Tags, command: Reorder, initial: [{ tags: { a: 1, b: 2 } }],
+      update: () => ({ state: { tags: { b: 2, a: 1 } } }),
+    });
+    let current: c.Infer<typeof Tags> = { tags: {} };
+    const subject: c.MachineSubject<c.Infer<typeof Tags>, c.Infer<typeof Reorder>> = { reset: state => { current = state; }, run: () => undefined, read: () => current };
+    expect(await c.replayMachine(tagged, subject, { maxStates: 1 })).toMatchObject({ status: "passed", states: 1 });
   });
 
   it("accepts a machine in place of its specification", async () => {
