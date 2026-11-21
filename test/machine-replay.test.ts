@@ -173,7 +173,7 @@ describe("replaying a machine against the production code", () => {
     });
   });
 
-  it("accepts a throw from a command the machine emitted where that command's precondition is false", async () => {
+  it("accepts a throw from a run in which a command the machine emitted has a false precondition", async () => {
     const Phase = c.enum(["draft", "approved", "issued"] as const);
     const Flow = c.object({ phase: Phase });
     type Phased = c.Infer<typeof Flow>;

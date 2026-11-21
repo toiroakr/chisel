@@ -515,9 +515,9 @@ When the code you ship is an existing implementation, not a machine, the machine
 
 ```ts
 const subject = {
-  reset: state => { service = new OrderService(fakeStore(state)); },
+  reset: state => { store = fakeStore(state); service = new OrderService(store); },
   run: async (command, faults) => {
-    for (const fault of faults) fakeStore.inject(fault); // e.g. fail the effect `markPaid`, or die after one effect
+    for (const fault of faults) store.inject(fault); // e.g. fail the effect `markPaid`, or die after one effect
     await (command.type === "pay" ? service.pay() : service.ship());
   },
   read: () => service.snapshot(),
