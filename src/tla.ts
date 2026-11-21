@@ -148,6 +148,7 @@ export async function checkInterleavingsTla<State, Command>(specification: Machi
   readonly copies: readonly NoInfer<Command>[];
   readonly starts?: readonly NoInfer<State>[];
   readonly maxCopies?: number;
+  readonly domainLimit?: number;
 }): Promise<{ readonly status: "held" | "broken" | "undetermined"; readonly states: number; readonly reason?: string; readonly module?: TlaModule }> {
   const maxCopies = positiveLimit(options.maxCopies, 2, "maxCopies");
   if (options.copies.length > maxCopies) {
@@ -167,7 +168,7 @@ export async function checkInterleavingsTla<State, Command>(specification: Machi
   const violated = result.violation?.name ?? "";
   if (result.status === "invariant-violation" && violated === "WritesKnown") return { status: "undetermined", states: result.distinctStates, module,
     reason: "An effect writes a field the state does not have" };
-  if (result.status === "invariant-violation" && violated === "StateOK") return { status: "broken", states: result.distinctStates, module,
+  if (result.status === "invariant-violation" && (violated === "StateOK" || violated === "PlanOK")) return { status: "broken", states: result.distinctStates, module,
     reason: "A write left a value that is not a state" };
   if (result.status === "invariant-violation" && violated === "NoEmission") return { status: "undetermined", states: result.distinctStates, module,
     reason: "TLA+ translation of interleavings does not follow the commands a command emits" };
@@ -181,6 +182,7 @@ export async function checkInterleavingsTla<State, Command>(specification: Machi
 export function interleavingsToTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
   readonly copies: readonly NoInfer<Command>[];
   readonly starts?: readonly NoInfer<State>[];
+  readonly domainLimit?: number;
 }): TlaModule {
   const machine = specification.machine;
   if (machine.state.kind !== "object") throw new SpecificationError("TLA+ translation of interleavings needs a state that is an object");
@@ -193,11 +195,14 @@ export function interleavingsToTla<State, Command>(specification: MachineSpecifi
   if (options.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
   const initial = set((options.starts ?? machine.initial).map(value => compiler.value(value, new Map())));
   const properties = specification.invariants.map((invariant, index) => ({ name: `Inv${index}`, formula: compiler.condition(invariant.holds, new Map(), "state") }));
-  const states = domainOf(machine.state as never, 10000);
+  const states = domainOf(machine.state as never, positiveLimit(options.domainLimit, 10000, "domainLimit"));
   if (!states.exhaustive) throw new SpecificationError("TLA+ translation of interleavings requires a finite, exhaustively enumerated state schema");
-  const stateOK = `state \\in ${set(states.values.map(value => compiler.value(value, new Map())))}`;
+  const stateSet = set(states.values.map(value => compiler.value(value, new Map())));
+  const stateOK = `state \\in ${stateSet}`;
   const transitions = specification.transitions.map((transition, index) => ({ name: `Trans${index}`,
-    formula: compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
+    formula: transition.each
+      ? compiler.paired(transition.holds, transition.each, schemaAtPath(machine.state as never, transition.each.path)?.kind)
+      : compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
   const variables = ["state", "previous", "version", "status", "pc", "snap", "plan", "readVersion", "unsupported"];
   const keep = (...changed: string[]) => `UNCHANGED <<${variables.filter(item => !changed.includes(item)).join(", ")}>>`;
   const set1 = (variable: string, value: string) => `${variable}' = [${variable} EXCEPT ![p] = ${value}]`;
@@ -230,12 +235,13 @@ export function interleavingsToTla<State, Command>(specification: MachineSpecifi
     `Next == \\E p \\in 1..${copies}: Begin(p) \\/ Run(p)`,
     "NoEmission == ~unsupported",
     `StateOK == ${stateOK}`,
+    `PlanOK == \\A p \\in 1..${copies}: \\A i \\in 1..Len(plan[p]): plan[p][i].state \\in ${stateSet}`,
     `WritesKnown == \\A p \\in 1..${copies}: \\A i \\in 1..Len(plan[p]): \\A j \\in 1..Len(plan[p][i].writes): plan[p][i].writes[j] \\in DOMAIN state`,
     ...properties.map(item => `${item.name} == ${item.formula}`),
     ...transitions.map(item => `${item.name} == previous = state \\/ (${item.formula})`),
     "====",
   ].join("\n");
-  const config = `INIT Init NEXT Next INVARIANT NoEmission INVARIANT WritesKnown INVARIANT StateOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} CHECK_DEADLOCK FALSE`;
+  const config = `INIT Init NEXT Next INVARIANT NoEmission INVARIANT WritesKnown INVARIANT StateOK INVARIANT PlanOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} CHECK_DEADLOCK FALSE`;
   return { name, source, config, states: 0, commands: options.copies.length };
 }
 

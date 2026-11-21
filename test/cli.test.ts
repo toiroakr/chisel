@@ -204,6 +204,9 @@ describe("chisel machines", () => {
     const unguarded = await run(["model-check", file, "--name", "unguarded shop"]);
     expect(unguarded.exitCode).toBe(1);
     expect(stdoutOf(unguarded)).toContain("unguarded shop (interleavings): broken");
+    const three = await run(["model-check", file, "--name", "three shop"]);
+    expect(three.exitCode).toBe(0);
+    expect(stdoutOf(three)).toContain("three shop (interleavings): held");
     const tla = await run(["model-check", file, "--name", "guarded shop", "--engine", "tla"]);
     expect(tla.exitCode).toBe(0);
     expect(stdoutOf(tla)).toContain("guarded shop (interleavings): held");

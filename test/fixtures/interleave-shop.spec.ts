@@ -22,3 +22,7 @@ const interleavings = { copies: [{ type: "buy" as const, customer: "a" as const 
 
 export const unguarded = c.specifyMachine(shop(false, "unguarded shop"), { invariants: [once], interleavings });
 export const guarded = c.specifyMachine(shop(true, "guarded shop"), { invariants: [once], interleavings });
+export const three = c.specifyMachine(shop(true, "three shop"), {
+  invariants: [once],
+  interleavings: { copies: [...interleavings.copies, interleavings.copies[0]!], maxCopies: 3 },
+});

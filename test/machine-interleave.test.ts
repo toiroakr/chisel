@@ -184,4 +184,67 @@ describe("what an effect and an interleaving declaration are checked for", () =>
     expect(source).toContain("version' = (IF");
     expect(source).toContain("status' = (IF");
   });
+
+  it("reports a model evaluation error as a broken result instead of throwing", () => {
+    const Div = c.object({ n: c.int().min(0).max(1) });
+    const dividing = c.machine("dividing", {
+      state: Div, command: c.enum(["go"] as const), initial: [{ n: 0 }],
+      update: state => ({ effects: [c.effect<c.Infer<typeof Div>>("divide", { n: c.quotient(1, state.n) as never })] }),
+    });
+    expect(c.checkInterleavings(c.specifyMachine(dividing), { copies: ["go"] })).toMatchObject({ status: "broken" });
+  });
+
+  it("refuses a write name the state does not have even when the state has no fields", () => {
+    const Empty = c.object({});
+    const empty = c.machine("empty", {
+      state: Empty, command: c.enum(["go"] as const), initial: [{}],
+      update: () => ({ effects: [c.effect<c.Infer<typeof Empty>>("noop", {}, { writes: ["x"] })] }),
+    });
+    expect(c.checkInterleavings(c.specifyMachine(empty), { copies: ["go"] })).toMatchObject({
+      status: "broken", counterexample: { reason: expect.stringContaining("x") },
+    });
+  });
+
+  it("refuses a start that is not a state where the interleavings are declared", () => {
+    expect(() => c.specifyMachine(shop(), { interleavings: { copies: both, starts: [{ stock: 9, a: false, b: false }] } })).toThrow("Start 0");
+  });
+
+  it("takes the copy limit from the declaration", () => {
+    const three = [...both, both[0]!];
+    const specification = c.specifyMachine(shop({ ifUnchanged: true }), { interleavings: { copies: three, maxCopies: 3 } });
+    expect(c.checkInterleavings(specification, specification.interleavings!).status).toBe("held");
+  });
+});
+
+describe("the TLA+ translation of interleavings", () => {
+  it("holds each effect state to the state schema even when the write does not name the field", async () => {
+    const Pair = c.object({ stock: c.int().min(0).max(1), a: c.boolean() });
+    const sloppy = c.machine("sloppy", {
+      state: Pair, command: c.enum(["go"] as const), initial: [{ stock: 1, a: false }],
+      update: () => ({ effects: [c.effect<c.Infer<typeof Pair>>("write", { stock: 5 as never, a: true }, { writes: ["a"] })] }),
+    });
+    const specification = c.specifyMachine(sloppy);
+    expect(c.checkInterleavings(specification, { copies: ["go"] }).status).toBe("broken");
+    expect((await c.checkInterleavingsTla(specification, { copies: ["go"] })).status).toBe("broken");
+  });
+
+  it("applies a transition that pairs records to the pairs", async () => {
+    const Item = c.object({ id: c.enum(["a"] as const), n: c.int().min(0).max(1) });
+    const Board = c.object({ items: c.array(Item).max(1) });
+    type Boarded = c.Infer<typeof Board>;
+    const board = c.machine("board", {
+      state: Board, command: c.enum(["lower"] as const), initial: [{ items: [{ id: "a", n: 1 }] }],
+      update: () => ({ effects: [c.effect<Boarded>("lower", { items: [{ id: "a" as const, n: 0 }] })] }),
+    });
+    const specification = c.specifyMachine(board, {
+      transitions: [c.transition<c.Infer<typeof Item>>("an item never decreases", { each: "items", by: "id" }, (before, after) => after.n.$gte(before.n))],
+    });
+    expect(c.checkInterleavings(specification, { copies: ["lower"] }).status).toBe("broken");
+    expect((await c.checkInterleavingsTla(specification, { copies: ["lower"] })).status).toBe("broken");
+  });
+
+  it("enumerates the state schema within the domain limit it is given", async () => {
+    const report = await c.checkInterleavingsTla(c.specifyMachine(shop()), { copies: both, domainLimit: 2 });
+    expect(report.status).toBe("undetermined");
+  });
 });

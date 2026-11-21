@@ -100,7 +100,8 @@ export function checkInterleavings<State, Command>(specification: MachineSpecifi
     return { status: "undetermined", states: 0, reason: `${options.copies.length} copies exceed maxCopies (${maxCopies})`, terminals: [] };
   }
   if (options.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
-  const fieldNames = Object.keys((machine.state as { shape?: object }).shape ?? {});
+  const shape = (machine.state as { shape?: object }).shape;
+  const fieldNames = shape === undefined ? undefined : Object.keys(shape);
   const commands = options.copies.map((command, index) => {
     const parsed = machine.command.parse(command);
     if (!parsed.success) throw new SpecificationError(`Copy ${index}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
@@ -153,6 +154,10 @@ export function checkInterleavings<State, Command>(specification: MachineSpecifi
         return { joint: replace({ queue, status: ended(queue), started }, parseState(next.state), joint.version + (next.wrote ? 1 : 0)),
           step: { copy: index, action: "run", command, before: joint.state, after: next.state }, wrote: next.wrote };
       }
+      for (const declared of evaluated.effects) {
+        const unknown = fieldNames === undefined ? undefined : declared.writes?.find(key => !fieldNames.includes(key));
+        if (unknown !== undefined) throw new SpecificationError(`Effect ${declared.name} writes ${unknown}, which the state does not have`);
+      }
       if (evaluated.effects.length === 0) {
         const queue = [...rest, ...evaluated.commands];
         return { joint: replace({ queue, status: ended(queue), started }, joint.state, joint.version),
@@ -168,8 +173,6 @@ export function checkInterleavings<State, Command>(specification: MachineSpecifi
       return { joint: replace({ queue: [], status: "refused", started: copy.started }, joint.state, joint.version),
         step: { copy: index, action: "refused", command: label, effect: effect.name, before: joint.state, after: joint.state }, wrote: false };
     }
-    const unknown = effect.writes?.find(key => fieldNames.length > 0 && !fieldNames.includes(key));
-    if (unknown !== undefined) throw new SpecificationError(`Effect ${effect.name} writes ${unknown}, which the state does not have`);
     const next = written(active.seen, joint.state, effect.state, effect.writes);
     const last = active.index === active.effects.length - 1;
     const queue = last ? [...copy.queue, ...active.commands] : copy.queue;
@@ -219,7 +222,7 @@ export function checkInterleavings<State, Command>(specification: MachineSpecifi
       try { result = advance(node.joint, position); }
       catch (error) {
         if (error instanceof EvaluationLimit) { incomplete ??= error.message; continue; }
-        if (!(error instanceof SpecificationError)) throw error;
+        if (!(error instanceof Error)) throw error;
         return { status: "broken", states: nodes.length, terminals: [...terminals.values()],
           counterexample: trace(index, undefined, error.message) };
       }

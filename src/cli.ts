@@ -271,7 +271,7 @@ const modelCheckCommand = defineCommand({
           ...(args.maxCommands === undefined ? {} : { maxCommands: args.maxCommands }) });
       return [{ name: declaration.name, ...report },
         ...(declaration.interleavings === undefined ? [] : [await (async () => {
-          const { module: _interleaved, ...interleaved } = await checkInterleavingsTla(declaration, declaration.interleavings!);
+          const { module: _interleaved, ...interleaved } = await checkInterleavingsTla(declaration, { ...declaration.interleavings!, ...(args.domainLimit === undefined ? {} : { domainLimit: args.domainLimit }) });
           return { name: `${declaration.name} (interleavings)`, ...interleaved };
         })()])];
     }))).flat();

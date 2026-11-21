@@ -20,7 +20,7 @@ export interface MachineSpecification<State, Command> {
   readonly requires: Readonly<Record<string, unknown>>;
   readonly columns: readonly string[];
   readonly crashes: boolean;
-  readonly interleavings?: { readonly copies: readonly Command[]; readonly starts?: readonly State[] };
+  readonly interleavings?: { readonly copies: readonly Command[]; readonly starts?: readonly State[]; readonly maxCopies?: number };
 }
 
 // The key every command carries as a literal: the tag that tells the commands apart.
@@ -44,7 +44,7 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   readonly crashes?: boolean;
   // Also check copies of the machine running at once on one shared state (`checkInterleavings`),
   // one copy per command listed.
-  readonly interleavings?: { readonly copies: readonly NoInfer<Command>[]; readonly starts?: readonly NoInfer<State>[] };
+  readonly interleavings?: { readonly copies: readonly NoInfer<Command>[]; readonly starts?: readonly NoInfer<State>[]; readonly maxCopies?: number };
 } = {}): MachineSpecification<State, Command> {
   const names = [...properties.invariants ?? [], ...properties.transitions ?? []].map(item => item.name);
   const repeated = names.find((item, index) => names.indexOf(item) !== index);
@@ -67,6 +67,10 @@ export function specifyMachine<State, Command>(machine: Machine<State, Command>,
   if (properties.interleavings !== undefined) {
     if (properties.interleavings.copies.length === 0) throw new SpecificationError(`Machine ${machine.name} has no copy to run`);
     if (properties.interleavings.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
+    properties.interleavings.starts?.forEach((start, index) => {
+      const parsed = machine.state.parse(start);
+      if (!parsed.success) throw new SpecificationError(`Start ${index}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
+    });
     properties.interleavings.copies.forEach((command, index) => {
       const parsed = machine.command.parse(command);
       if (!parsed.success) throw new SpecificationError(`Copy ${index}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
