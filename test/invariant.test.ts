@@ -58,10 +58,9 @@ describe("arithmetic on numeric terms", () => {
     expect(parsed.success ? [] : parsed.issues.map(issue => issue.message)).toStrictEqual(["Invariant violated: 0 != 0"]);
   });
 
-  it("holds an expression one of whose positions is left out, as a comparison with an absent operand holds", () => {
-    const 任意 = object({ 甲: int(), 乙: int(), 丙: int().optional() }).refine(v => v.甲.$gte(v.乙.$minus(v.丙)));
-
-    expect(任意.parse({ 甲: 0, 乙: 5 }).success).toBe(true);
+  it("refuses an expression one of whose positions may be left out", () => {
+    expect(() => object({ 甲: int(), 乙: int(), 丙: int().optional() }).refine(v => v.甲.$gte(v.乙.$minus(v.丙))))
+      .toThrow("refine reads $.丙, which may be left out: write its absence as a case of a sum");
   });
 
   it("does not compile arithmetic on a string", () => {
@@ -227,10 +226,9 @@ describe("invariant", () => {
     });
   });
 
-  it("holds of an absent optional field, which has no value to compare", () => {
-    const 注文 = object({ 割引額: int().optional() }).refine(v => v.割引額.$gte(1));
-
-    expect(注文.parse({}).success).toBe(true);
+  it("refuses a comparison of an optional field, which would hold whenever it is left out", () => {
+    expect(() => object({ 割引額: int().optional() }).refine(v => v.割引額.$gte(1)))
+      .toThrow("refine reads $.割引額, which may be left out: write its absence as a case of a sum");
   });
 
   it("does not let a comparison mix values of different types", () => {

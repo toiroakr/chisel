@@ -131,8 +131,12 @@ type TermOperator =
   | "$plus"
   | "$minus";
 
+// A sum's term reaches the fields of every case: implement refuses a comparison
+// reading one where the guards before it leave other cases possible.
+type KeysOfCases<T> = T extends unknown ? keyof T : never;
+type FieldOfCases<T, K extends PropertyKey> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
 type Fields<T> = {
-  readonly [K in Exclude<keyof T & string, TermOperator>]-?: TermOf<Exclude<T[K], undefined>>;
+  readonly [K in Exclude<KeysOfCases<T> & string, TermOperator>]-?: TermOf<Exclude<FieldOfCases<T, K>, undefined>>;
 };
 
 export type TermOf<T> = Term<T> &
@@ -953,4 +957,30 @@ function isPlainDate(value: unknown): boolean {
   const constructor = (globalThis as { readonly Temporal?: { readonly PlainDate?: abstract new (...args: never[]) => unknown } })
     .Temporal?.PlainDate;
   return constructor !== undefined && value instanceof constructor;
+}
+
+export function rebaseTerm(term: Term<unknown>, move: (path: readonly string[]) => readonly string[]): Term<unknown> {
+  const data = termData(term);
+  return data.kind === "position"
+    ? termAt(move(data.path), data.measure)
+    : linearTerm({ ...data, parts: data.parts.map(part => ({ ...part, path: move(part.path) })) });
+}
+
+// The rule with every term moved by `move`, which takes a path and answers the
+// path to read instead; constants, operators, names and element roots are kept.
+export function rebaseRule(rule: Rule, move: (path: readonly string[]) => readonly string[]): Rule {
+  const term = (value: unknown): unknown => (isTerm(value) ? rebaseTerm(value, move) : value);
+  const named = <R extends Rule>(rebased: R): R => (rule.name === undefined ? rebased : { ...rebased, name: rule.name });
+  switch (rule.kind) {
+    case "compare":
+      return named({ kind: "compare", operator: rule.operator, left: term(rule.left), right: term(rule.right) });
+    case "all":
+    case "any":
+      return named({ ...rule, of: term(rule.of) as Term<readonly unknown[]>, each: rebaseRule(rule.each, move) });
+    case "and":
+    case "or":
+      return named({ kind: rule.kind, rules: rule.rules.map(part => rebaseRule(part, move)) });
+    case "not":
+      return named({ kind: "not", rule: rebaseRule(rule.rule, move) });
+  }
 }

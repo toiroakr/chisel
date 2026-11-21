@@ -332,41 +332,6 @@ describe("generateExamples for a guard on an array with no invariant", () => {
   });
 });
 
-describe("guard points generate cannot compose", () => {
-  it("names each point it could not compose instead of leaving it out", () => {
-    const 比べる = behavior("比べる", {
-      input: variants("状態", { 入力済み: object({ 数量: int().optional(), 上限: int().optional() }) }),
-      result: variants("結果", { 受付: object({}), 却下: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const 上限と比べる = implement(比べる, {
-      cases: {
-        入力済み: action("上限と比べる", {
-          guards: 入力 => [入力.数量.$lte(入力.上限).$else(() => ({ result: { 結果: "却下" }, effects: [] }))],
-          run: () => ({ result: { 結果: "受付" }, effects: [] }),
-        }),
-      },
-    });
-    const existing = examples(比べる, {
-      "どちらもなし": {
-        given: { 状態: "入力済み" },
-        expect: { result: { 結果: "受付" }, effects: [] },
-      },
-    });
-
-    expect(
-      generate(existing, 上限と比べる).notComposed.filter(line =>
-        line.startsWith("@入力済み.数量 − @入力済み.上限"),
-      ),
-    ).toStrictEqual([
-      "@入力済み.数量 − @入力済み.上限 ON (= 0)",
-      "@入力済み.数量 − @入力済み.上限 OFF (= 1)",
-      "@入力済み.数量 − @入力済み.上限 IN (< 0)",
-      "@入力済み.数量 − @入力済み.上限 OUT (> 1)",
-    ]);
-  });
-});
-
 describe("generateExamples for ways through finite values", () => {
   const 判定する = behavior("判定する", {
     input: variants("状態", {
@@ -477,66 +442,6 @@ describe("generateExamples for ways through finite values", () => {
     const generated = generate(確かめる, 確認済みの現金なら受け付ける, { ways: true });
     expect(generated.notComposed).toStrictEqual([]);
     expect(generated.rows.map(row => row.given)).toContainEqual({ 状態: "入力済み", 支払: { 方法: "現金", 確認: true }, 丙: true });
-  });
-
-  it("writes a value a way compares into a field that may be left out, not into whether it is left out", () => {
-    const 選ぶ = behavior("選ぶ", {
-      input: variants("状態", {
-        入力済み: object({ 甲: enumOf(["w", "x"]).optional(), 乙: boolean(), 丙: boolean() }),
-      }),
-      result: variants("結果", { 受付: object({}), 却下: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const 三つそろえば受け付ける = implement(選ぶ, {
-      cases: {
-        入力済み: action("三つそろえば受け付ける", {
-          guards: 入力 => [
-            入力.甲
-              .$eq("x")
-              .$and(入力.乙.$eq(true))
-              .$and(入力.丙.$eq(true))
-              .$else(() => ({ result: { 結果: "却下" }, effects: [] })),
-          ],
-          run: () => ({ result: { 結果: "受付" }, effects: [] }),
-        }),
-      },
-    });
-
-    expect(
-      generate(選ぶ, 三つそろえば受け付ける, { ways: true })
-        .rows.filter(row => row.name.endsWith("→ otherwise"))
-        .map(row => row.given),
-    ).toStrictEqual([{ 状態: "入力済み", 甲: "x", 乙: true, 丙: true }]);
-  });
-
-  it("writes a value a way compares into a field held by an object that may be left out", () => {
-    const 選ぶ = behavior("選ぶ", {
-      input: variants("状態", {
-        入力済み: object({ 丁: object({ 甲: enumOf(["w", "x"]) }).optional(), 乙: boolean(), 丙: boolean() }),
-      }),
-      result: variants("結果", { 受付: object({}), 却下: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const 三つそろえば受け付ける = implement(選ぶ, {
-      cases: {
-        入力済み: action("三つそろえば受け付ける", {
-          guards: 入力 => [
-            入力.丁.甲
-              .$eq("x")
-              .$and(入力.乙.$eq(true))
-              .$and(入力.丙.$eq(true))
-              .$else(() => ({ result: { 結果: "却下" }, effects: [] })),
-          ],
-          run: () => ({ result: { 結果: "受付" }, effects: [] }),
-        }),
-      },
-    });
-
-    expect(
-      generate(選ぶ, 三つそろえば受け付ける, { ways: true })
-        .rows.filter(row => row.name.endsWith("→ otherwise"))
-        .map(row => row.given),
-    ).toStrictEqual([{ 状態: "入力済み", 丁: { 甲: "x" }, 乙: true, 丙: true }]);
   });
 
   it("reads the input's own case from the case a way is composed under", () => {

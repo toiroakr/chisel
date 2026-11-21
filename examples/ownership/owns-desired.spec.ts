@@ -1,15 +1,15 @@
 import * as c from "../../src/index.js";
 import { ownsDesired, ownsDesiredModel } from "./owns-desired.js";
 
-const none = { given: false, value: "" } as const;
-const given = (value: string) => ({ given: true, value }) as const;
+const none = { state: "absent" } as const;
+const given = (value: string) => ({ state: "given", value }) as const;
 const attached = (labels: { workspaceManaged?: boolean; sdkName?: string; sdkAppId?: string }) => ({
-  attached: true,
+  metadata: "attached",
   workspaceManaged: labels.workspaceManaged ?? false,
   sdkName: labels.sdkName === undefined ? none : given(labels.sdkName),
   sdkAppId: labels.sdkAppId === undefined ? none : given(labels.sdkAppId),
-});
-const detached = { attached: false, workspaceManaged: false, sdkName: none, sdkAppId: none } as const;
+}) as const;
+const detached = { metadata: "none" } as const;
 const result = <R>(value: R) => ({ result: value, effects: [] });
 
 export const examples = c.examples(ownsDesired, {
@@ -18,7 +18,7 @@ export const examples = c.examples(ownsDesired, {
     expect: result({ verdict: "unmanaged" }),
   },
   "an application owns what carries its id": {
-    given: { owner: "application", name: "shop", appIdLabel: given("app-1"), labels: attached({ sdkName: "renamed", sdkAppId: "app-1" }) },
+    given: { owner: "application", name: "shop", appIdLabel: given("app-12"), labels: attached({ sdkName: "renamed", sdkAppId: "app-12" }) },
     expect: result({ verdict: "owned" }),
   },
   "another application's id is a conflict even under the same name": {
@@ -34,7 +34,7 @@ export const examples = c.examples(ownsDesired, {
     expect: result({ verdict: "unmanaged" }),
   },
   "an id with no name is unmanaged to another application": {
-    given: { owner: "application", name: "shop", appIdLabel: given("app-1"), labels: attached({ sdkAppId: "app-2" }) },
+    given: { owner: "application", name: "shop", appIdLabel: given("app-1"), labels: attached({ sdkAppId: "x" }) },
     expect: result({ verdict: "unmanaged" }),
   },
   "without an id label, the name decides": {
@@ -42,8 +42,8 @@ export const examples = c.examples(ownsDesired, {
     expect: result({ verdict: "owned" }),
   },
   "another name is a conflict": {
-    given: { owner: "application", name: "shop", appIdLabel: none, labels: attached({ sdkName: "blog" }) },
-    expect: result({ verdict: "conflict", currentOwner: "blog" }),
+    given: { owner: "application", name: "shop", appIdLabel: none, labels: attached({ sdkName: "b" }) },
+    expect: result({ verdict: "conflict", currentOwner: "b" }),
   },
   "labels from no SDK are unmanaged": {
     given: { owner: "application", name: "shop", appIdLabel: none, labels: attached({}) },
@@ -78,11 +78,11 @@ export const examples = c.examples(ownsDesired, {
     expect: result({ verdict: "owned" }),
   },
   "the workspace takes over what an application deployed": {
-    given: { owner: "workspace", labels: attached({ sdkName: "shop" }) },
-    expect: result({ verdict: "takeover", currentOwner: "shop" }),
+    given: { owner: "workspace", labels: attached({ sdkName: "s" }) },
+    expect: result({ verdict: "takeover", currentOwner: "s" }),
   },
   "the workspace takes over what an application deployed by id only": {
-    given: { owner: "workspace", labels: attached({ sdkAppId: "app-1" }) },
+    given: { owner: "workspace", labels: attached({ sdkAppId: "x" }) },
     expect: result({ verdict: "takeover" }),
   },
   "the workspace leaves labels from no SDK unmanaged": {

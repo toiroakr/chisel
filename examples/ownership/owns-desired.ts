@@ -1,24 +1,21 @@
 import * as c from "../../src/runtime.js";
 
-// What sdk-name, sdk-app-id and sdk-managed say, as the deploy reads them: a
-// label holding "" counts as absent, so "given" holds a non-empty value.
-const label = c.object({ given: c.boolean(), value: c.string() })
-  .refine("an absent label holds nothing", v => v.given.$eq(true).$or(v.value.$eq("")))
-  .refine("a given label holds a value", v => v.given.$eq(false).$or(v.value.$length().$gte(1)));
+// A label the deploy reads: absent, or holding a value. A label holding "" is
+// read as absent, as the deploy reads it.
+const label = c.variants("state", { absent: c.object({}), given: c.object({ value: c.string().min(1) }) });
+// The label an application's id is written as: "app-" and the id.
+const appIdLabel = c.variants("state", { absent: c.object({}), given: c.object({ value: c.string().min(5) }) });
 
-const labels = c.object({
-  attached: c.boolean(),
-  workspaceManaged: c.boolean(),
-  sdkName: label,
-  sdkAppId: label,
-}).refine("a resource without metadata carries no label", v =>
-  v.attached.$eq(true).$or(v.workspaceManaged.$eq(false).$and(v.sdkName.given.$eq(false)).$and(v.sdkAppId.given.$eq(false))));
+const metadata = c.variants("metadata", {
+  none: c.object({}),
+  attached: c.object({ workspaceManaged: c.boolean(), sdkName: label, sdkAppId: label }),
+});
 
 export const ownsDesired = c.behavior("owns-desired", {
   description: "Whether a deploy plans a same-named resource that already exists, and what it must confirm otherwise",
   input: c.variants("owner", {
-    application: c.object({ name: c.string(), appIdLabel: label, labels }),
-    workspace: c.object({ labels }),
+    application: c.object({ name: c.string(), appIdLabel, labels: metadata }),
+    workspace: c.object({ labels: metadata }),
   }),
   result: c.variants("verdict", {
     owned: c.object({}),
@@ -30,40 +27,52 @@ export const ownsDesired = c.behavior("owns-desired", {
 });
 
 type Verdict = c.Infer<typeof ownsDesired.result>;
+type Label = c.Infer<typeof label>;
+type Attached = Extract<c.Infer<typeof metadata>, { metadata: "attached" }>;
+
+const owned: Verdict = { verdict: "owned" };
+const unmanaged: Verdict = { verdict: "unmanaged" };
 
 export const ownsDesiredModel = c.implement(ownsDesired, {
   cases: {
     application: c.model("application owns", input => {
-      const { labels: l } = input;
-      const ownedById = l.sdkAppId.given.$eq(true).$and(input.appIdLabel.given.$eq(true)).$and(l.sdkAppId.value.$eq(input.appIdLabel.value));
-      const ownedByName = l.sdkAppId.given.$eq(false).$and(l.sdkName.given.$eq(true)).$and(l.sdkName.value.$eq(input.name));
+      const conflictOrUnmanaged = (name: c.TermOf<Label>) => c.matchValue<typeof label, Verdict>(label, name, {
+        given: owner => ({ verdict: "conflict", currentOwner: owner.value }),
+        absent: () => unmanaged,
+      });
       return {
-        result: c.choose<Verdict>(
-          l.attached.$eq(true).$and(ownedById.$or(ownedByName)),
-          { verdict: "owned" },
-          c.choose<Verdict>(
-            l.attached.$eq(true).$and(l.sdkName.given.$eq(true)),
-            { verdict: "conflict", currentOwner: l.sdkName.value },
-            { verdict: "unmanaged" },
-          ),
-        ),
+        result: c.matchValue<typeof metadata, Verdict>(metadata, input.labels, {
+          none: () => unmanaged,
+          attached: (labels: c.TermOf<Attached>) => c.matchValue<typeof label, Verdict>(label, labels.sdkAppId, {
+            given: appId => c.matchValue<typeof appIdLabel, Verdict>(appIdLabel, input.appIdLabel, {
+              given: id => c.choose(appId.value.$eq(id.value), owned, conflictOrUnmanaged(labels.sdkName)),
+              absent: () => conflictOrUnmanaged(labels.sdkName),
+            }),
+            absent: () => c.matchValue<typeof label, Verdict>(label, labels.sdkName, {
+              given: name => c.choose<Verdict>(name.value.$eq(input.name), owned, { verdict: "conflict", currentOwner: name.value }),
+              absent: () => unmanaged,
+            }),
+          }),
+        }),
         effects: [],
       };
     }),
-    workspace: c.model("workspace owns", input => {
-      const { labels: l } = input;
-      return {
-        result: c.choose<Verdict>(
-          l.attached.$eq(true).$and(l.workspaceManaged.$eq(true)),
-          { verdict: "owned" },
-          c.choose<Verdict>(
-            l.attached.$eq(true).$and(l.sdkName.given.$eq(true).$or(l.sdkAppId.given.$eq(true))),
-            c.choose<Verdict>(l.sdkName.given.$eq(true), { verdict: "takeover", currentOwner: l.sdkName.value }, { verdict: "takeover" }),
-            { verdict: "unmanaged" },
-          ),
+    workspace: c.model("workspace owns", input => ({
+      result: c.matchValue<typeof metadata, Verdict>(metadata, input.labels, {
+        none: () => unmanaged,
+        attached: (labels: c.TermOf<Attached>) => c.choose(
+          labels.workspaceManaged.$eq(true),
+          owned,
+          c.matchValue<typeof label, Verdict>(label, labels.sdkName, {
+            given: name => ({ verdict: "takeover", currentOwner: name.value }),
+            absent: () => c.matchValue<typeof label, Verdict>(label, labels.sdkAppId, {
+              given: () => ({ verdict: "takeover" }),
+              absent: () => unmanaged,
+            }),
+          }),
         ),
-        effects: [],
-      };
-    }),
+      }),
+      effects: [],
+    })),
   },
 });

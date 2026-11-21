@@ -1,8 +1,9 @@
 import { invokeDependency } from "./dependency.js";
 import { DATA, isPromiseLike, snapshotValue } from "./data.js";
-import { interpret, childrenOf, modelDependencyIssue, nodeOf } from "./model.js";
+import { interpret, childrenOf, guardsOf, inlineInputBindings, modelDependencyIssue, nodeOf } from "./model.js";
 import type { DeclaredDependencies, Resolved, Supplied } from "./dependency.js";
 import type {
+  AnySchema,
   AnyVariantsSchema,
   EnumSchema,
   Infer,
@@ -33,7 +34,8 @@ import {
   termData,
   rootsRead, positionOf, describeTerm,
 } from "./rule.js";
-import { offGridEqualityIn } from "./guard-borders.js";
+import { guardScope, offGridEqualityIn } from "./guard-borders.js";
+import { factsOf, leftOutReadIn, leftOutReadInModel } from "./absence.js";
 import { scopesOf } from "./ensures.js";
 import { isVariantsSchema, offGridEquality, schemaAtPath, tagOf } from "./schema.js";
 
@@ -316,6 +318,10 @@ export function behavior<
     if (offGrid !== undefined) {
       throw new SpecificationError(`Ensures ${clause.name} ${offGrid}`);
     }
+    const leftOut = leftOutReadIn(clause.rule, { scope: ensuresScope(clause, options) }, [], "");
+    if (leftOut !== undefined) {
+      throw new SpecificationError(`Ensures ${clause.name} ${leftOut}`);
+    }
   }
   return {
     kind: "behavior",
@@ -410,7 +416,25 @@ export function implement<B extends AnyBehavior>(
     readonly constructs?: readonly Schema<unknown>[];
   }>,
 ): Implementation<NoInfer<B>> {
-  const cases = casesWithoutDefault(definition, options.cases);
+  const written = casesWithoutDefault(definition, options.cases);
+  const writtenTags = new Map<unknown, string[]>();
+  for (const [tag, decision] of Object.entries(written) as [string, unknown][]) {
+    writtenTags.set(decision, [...(writtenTags.get(decision) ?? []), tag]);
+  }
+  const inlined = new Map<unknown, unknown>();
+  for (const [decision, tags] of writtenTags) {
+    const rules = decision as ImplementationCases<AnyBehavior>[string];
+    if (rules.kind !== "rules" || rules.expression === undefined) continue;
+    const schemaAt = (path: readonly string[]) => {
+      const found = tags.map(tag => declaredAt(definition.input.variants[tag], path));
+      return found.every(schema => schema !== undefined && schema === found[0]) ? found[0] : undefined;
+    };
+    const expression = inlineInputBindings(rules.expression, schemaAt);
+    if (expression !== rules.expression) inlined.set(decision, Object.freeze({ ...rules, expression, guards: guardsOf(expression) }));
+  }
+  const cases = Object.fromEntries(
+    Object.entries(written).map(([tag, decision]) => [tag, inlined.get(decision) ?? decision]),
+  ) as typeof written;
   const tagsOf = new Map<unknown, string[]>();
   for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
     tagsOf.set(decision, [...(tagsOf.get(decision) ?? []), tag]);
@@ -436,6 +460,30 @@ export function implement<B extends AnyBehavior>(
     cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+// The schema a path reaches, through a sum where every case declaring the next
+// key declares it with one schema; undefined where it reaches none or several.
+function declaredAt(schema: Schema<unknown>, keys: readonly string[]): Schema<unknown> | undefined {
+  const unwrapped = (schema as { readonly kind?: string }).kind === "optional" ? (schema as OptionalSchema<unknown>).schema : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) return unwrapped;
+  if (isVariantsSchema(unwrapped)) {
+    const found = (Object.values(unwrapped.variants) as ObjectSchema<ObjectShape>[]).flatMap(variant => Object.hasOwn(variant.shape, key) ? [variant.shape[key]!] : []);
+    return found.length > 0 && found.every(field => field === found[0]) ? declaredAt(found[0]!, rest) : undefined;
+  }
+  if ((unwrapped as { readonly kind?: string }).kind !== "object") return undefined;
+  const { shape } = unwrapped as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) ? declaredAt(shape[key]!, rest) : undefined;
+}
+
+// The roots an ensures clause reads, the answer narrowed to the cases it names.
+function ensuresScope(clause: EnsuresClause, definition: Pick<AnyBehavior, "input" | "result">): AnySchema {
+  const { result } = definition;
+  const value = clause.cases === undefined || !isVariantsSchema(result)
+    ? result
+    : { ...result, variants: Object.fromEntries(clause.cases.map(tag => [tag, result.variants[tag]])) };
+  return { kind: "object", shape: { input: definition.input, value } } as unknown as AnySchema;
 }
 
 // Not schemaAtPath: that stops at a sum so a match selects its discriminant,
@@ -566,6 +614,18 @@ function checkGuards(
     const offGrid = offGridEqualityIn(definition, tag, decision);
     if (offGrid !== undefined) {
       throw new SpecificationError(`guard in ${decision.id} ${offGrid}`);
+    }
+    const roots = { scope: guardScope(definition, tag) };
+    if (decision.expression !== undefined) {
+      const found = leftOutReadInModel(decision.expression, roots);
+      if (found !== undefined) throw new SpecificationError(`model ${decision.id} ${found}`);
+      continue;
+    }
+    const facts: ReturnType<typeof factsOf>[number][] = [];
+    for (const candidate of decision.guards) {
+      const found = leftOutReadIn(candidate.condition, roots, facts);
+      if (found !== undefined) throw new SpecificationError(`guard in ${decision.id} ${found}`);
+      facts.push(...factsOf(candidate.condition, true));
     }
   }
 }

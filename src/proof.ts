@@ -226,7 +226,24 @@ function intermediates(value: unknown, prove: (schema: AnySchema, value: unknown
   const node = nodeOf(value);
   return (node?.kind !== "construct" || prove(node.schema, node.value)) && childrenOf(value).every(child => intermediates(child, prove));
 }
-function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, steps: readonly Step[], limit: number): boolean {
+// The scope with each sum field the steps settle to one case read as that case,
+// so a field of the case is reached under a choice on its discriminant.
+function narrowedBy(scope: AnySchema, steps: readonly Step[], path: readonly string[] = []): AnySchema {
+  if (scope.kind !== "object") return scope;
+  const { shape } = scope as ObjectSchema<ObjectShape>;
+  let changed = false;
+  const narrowed = Object.fromEntries(Object.entries(shape).map(([key, field]) => {
+    const at = [...path, key];
+    const selected = isVariantsSchema(field) ? selectedTag(field, at, steps) : undefined;
+    const next = selected !== undefined ? narrowedBy(taggedCase(field as AnyVariantsSchema, selected), steps, at) : narrowedBy(field, steps, at);
+    if (next !== field) changed = true;
+    return [key, next];
+  }));
+  if (!changed) return scope;
+  return (scope as ObjectSchema<ObjectShape>).invariants.reduce((current, rule) => current.refine(() => rule), object(narrowed));
+}
+function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema, steps: readonly Step[], limit: number): boolean {
+  const scope = narrowedBy(unnarrowed, steps);
   const node = nodeOf(original);
   const value = node?.kind === "construct" ? node.value : original;
   if (!containsSymbolic(value)) return schema.parse(value).success;

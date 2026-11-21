@@ -1,4 +1,5 @@
 import { TEMPORAL_UNAVAILABLE } from "./temporal-global.js";
+import { leftOutReadIn } from "./absence.js";
 import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
@@ -271,6 +272,10 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       const offGrid = offGridEquality(refined, keys => fieldOf(schema as unknown as AnySchema, keys), "$");
       if (offGrid !== undefined) {
         throw new Error(`refine ${offGrid}`);
+      }
+      const leftOut = leftOutReadIn(refined, { scope: schema as unknown as AnySchema });
+      if (leftOut !== undefined) {
+        throw new Error(`refine ${leftOut}`);
       }
       return refinable<S>(core, [...invariants, refined]);
     },

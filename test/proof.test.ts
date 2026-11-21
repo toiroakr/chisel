@@ -237,23 +237,10 @@ it("proves optional-to-optional inclusion inside unbounded collections", () => {
   expect(c.verify(impl).status).toBe("verified");
 });
 
-it("keeps wrapper invariants when comparing optional schemas", () => {
-  const positive = c.int().optional().refine(value => ({ kind: "compare", left: value, operator: ">=", right: 1 }));
-  const definition = c.behavior("optional invariant", {
-    input: c.variants("kind", { input: c.object({ values: c.array(c.object({ n: positive })) }) }),
-    result: c.array(c.object({ n: c.int().min(1).optional() })), effects: c.variants("kind", {}),
-  });
-  const impl = c.implement(definition, { cases: { input: c.model("carry", input => ({ result: input.values, effects: [] })) } });
-  expect(c.verify(impl).status).toBe("verified");
-  const stronger = c.behavior("stronger optional invariant", {
-    input: definition.input,
-    result: c.array(c.object({ n: c.int().optional().refine(value => ({ kind: "compare", left: value, operator: ">=", right: 2 })) })),
-    effects: c.variants("kind", {}),
-  });
-  const unsafe = c.implement(stronger, { cases: { input: c.model("unsafe", input => ({ result: input.values, effects: [] })) } });
-  expect(c.verify(unsafe, { candidates: 1 }).status).not.toBe("verified");
+it("refuses an invariant on an optional schema, which would hold whenever it is left out", () => {
+  expect(() => c.int().optional().refine(value => ({ kind: "compare", left: value, operator: ">=", right: 1 })))
+    .toThrow("refine reads $, which may be left out: write its absence as a case of a sum");
 });
-
 it("proves optional fields at an unbounded pipeline handoff", () => {
   const first = c.behavior("optional producer", { input: c.variants("kind", { start: c.object({}) }),
     result: c.variants("kind", { next: c.object({ n: c.int().min(1).optional() }) }), effects: c.variants("kind", {}) });
@@ -265,12 +252,3 @@ it("proves optional fields at an unbounded pipeline handoff", () => {
   expect(c.verify(joined).status).toBe("verified");
 });
 
-it("checks optional wrapper invariants on a symbolic construction", () => {
-  const definition = c.behavior("optional result bound", {
-    input: c.variants("kind", { input: c.object({ n: c.int().min(0) }) }),
-    result: c.int().optional().refine(value => ({ kind: "compare", left: value, operator: ">=", right: 1 })),
-    effects: c.variants("kind", {}), dependencies: { lookup: c.dependency(c.int(), c.int().min(0)) },
-  });
-  const impl = c.implement(definition, { cases: { input: c.model("optional result", (input, deps) => ({ result: c.call(deps.lookup, input.n), effects: [] })) } });
-  expect(c.verify(impl).status).toBe("undetermined");
-});

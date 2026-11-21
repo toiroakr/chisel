@@ -992,32 +992,6 @@ describe("a border an input invariant draws between two positions", () => {
     }).toStrictEqual({ borders: [], modelIssues: ["@入力済み: 不変条件を満たす値がありません (invariant $.数量 < $.数量)"] });
   });
 
-  it("reports no model error for a self-cancelling invariant on a field that may be left out, which an input without it keeps", async () => {
-    const 省略できる = behavior("省略できる", {
-      input: variants("状態", { 入力済み: object({ 数量: int().optional() }).refine(v => v.数量.$lt(v.数量)) }),
-      result: variants("結果", { 受付: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const report = await check(spec("省略できる", { examples: examples(省略できる, {}) }));
-
-    expect(report.modelIssues).toStrictEqual([]);
-  });
-
-  it("reports no model error for a self-cancelling invariant on a field one case of a sum field may leave out", async () => {
-    const 選べる = behavior("選べる", {
-      input: variants("状態", {
-        入力済み: object({
-          選択: variants("種類", { 甲: object({ 数量: int() }), 乙: object({ 数量: int().optional() }) }),
-        }).refine(v => v.選択.数量.$lt(v.選択.数量)),
-      }),
-      result: variants("結果", { 受付: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const report = await check(spec("選べる", { examples: examples(選べる, {}) }));
-
-    expect(report.modelIssues).toStrictEqual([]);
-  });
-
   it("reports a self-cancelling invariant on decimals compared with a decimal that no value keeps as a model error", async () => {
     const 小数 = behavior("小数", {
       input: variants("状態", {
@@ -1114,21 +1088,6 @@ describe("a border an input invariant draws between two positions", () => {
     expect(report.modelIssues).toStrictEqual([
       "@入力済み.数量 − @入力済み.上限: 不変条件を満たす値がありません (invariant $.数量 <= $.上限, invariant $.上限 < $.数量)",
     ]);
-  });
-
-  it("reports no model error for invariants on two positions that leave no value, when one may be left out", async () => {
-    const 省略できる = behavior("省略できる", {
-      input: variants("状態", {
-        入力済み: object({ 数量: int().optional(), 上限: int() })
-          .refine(v => v.数量.$lte(v.上限))
-          .refine(v => v.上限.$lt(v.数量)),
-      }),
-      result: variants("結果", { 受付: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const report = await check(spec("省略できる", { examples: examples(省略できる, {}) }));
-
-    expect(report.modelIssues).toStrictEqual([]);
   });
 
   it("draws no border when the behavior disregards either of the two positions", async () => {
@@ -1574,30 +1533,6 @@ describe("a guard comparing an expression of positions", () => {
         .find(border => border.rule === "guard $.甲 + $.乙 >= 0")!
         .points.map(point => `${point.role} ${point.status}`),
     ).toStrictEqual(["ON gap", "OFF no row owed", "IN gap", "OUT no row owed"]);
-  });
-
-  it("leaves a way through an expression of a field that may be left out undecided, as a comparison with it absent holds", async () => {
-    const 省略 = behavior("省略", {
-      input: variants("状態", { 入力済み: object({ 甲: int().optional(), 乙: int() }) }),
-      result: variants("結果", { 受付: object({}), 却下: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const 両方 = implement(省略, {
-      cases: {
-        入力済み: action("両方", {
-          guards: 入力 => [
-            入力.甲.$plus(入力.乙).$gte(1).$else(却下),
-            入力.甲.$plus(入力.乙).$lt(1).$else(却下),
-          ],
-          run: () => ({ result: { 結果: "受付" }, effects: [] }),
-        }),
-      },
-    });
-    const report = await check(spec("両方", { examples: examples(省略, {}), implementation: 両方 }));
-
-    expect(
-      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status)[0] : undefined,
-    ).toBe("undecided");
   });
 
   it("writes a point of an expression by moving a part that still reaches the guard, past an earlier guard on another", () => {

@@ -3,7 +3,7 @@ import type { Decimal } from "decimal.js";
 import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
-import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, selfTerm, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
+import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, rebaseRule, rebaseTerm, selfTerm, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
@@ -238,7 +238,7 @@ export function model<Input, Result, Effect, Deps = unknown>(
   const template = checkedTemplate(build(selfTerm<NoInfer<Input>>(), depsTerm<NoInfer<Deps>>()));
   return Object.freeze({
     kind: "rules", id, expression: template,
-    guards: choicesOf(template).map(node => ({ kind: "guard" as const, condition: node.condition, orElse: () => { throw new Error("Expression guards are interpreted"); } })),
+    guards: guardsOf(template) as RulesDecision<Input, Result, Effect, Deps>["guards"],
     otherwise: () => { throw new Error("Expression models are interpreted"); },
   });
 }
@@ -386,4 +386,54 @@ export function replaceChildren(template: unknown, values: readonly unknown[]): 
   if (node?.kind === "construct") return expression({ ...node, value: values[0] });
   if (node?.kind === "operation" || node?.kind === "temporal") return expression({ ...node, left: values[0], right: values[1] });
   return Array.isArray(template) ? values : Object.fromEntries(Object.keys(template as object).map((key, index) => [key, values[index]]));
+}
+
+// A binding of a field the input already holds, under the schema it is
+// declared with, is the field itself: its local is replaced by the field's path,
+// so its choices read input positions and are measured like any guard on them.
+export function inlineInputBindings(template: unknown, schemaAt: (path: readonly string[]) => Schema<unknown> | undefined): unknown {
+  let inlined = false;
+  const visit = (value: unknown, aliases: ReadonlyMap<string, readonly string[]>): unknown => {
+    const move = (path: readonly string[]) => {
+      const target = path.length > 0 ? aliases.get(path[0]!) : undefined;
+      return target === undefined ? path : [...target, ...path.slice(1)];
+    };
+    if (isTerm(value)) return aliases.size === 0 ? value : rebaseTerm(value, move);
+    const node = nodeOf(value);
+    if (node === undefined) {
+      if (atom(value)) return value;
+      return Array.isArray(value) ? value.map(item => visit(item, aliases))
+        : Object.fromEntries(Object.entries(value as object).map(([key, child]) => [key, visit(child, aliases)]));
+    }
+    switch (node.kind) {
+      case "bind": {
+        const bound = visit(node.value, aliases);
+        const position = isTerm(bound) ? positionData(bound) : undefined;
+        if (position !== undefined && position.measure === "value" && position.path.length > 0 && !position.path[0]!.startsWith(LOCAL) && schemaAt(position.path) === node.schema) {
+          inlined = true;
+          return visit(node.body, new Map([...aliases, [node.name, position.path]]));
+        }
+        return expression({ ...node, value: bound, body: visit(node.body, aliases) });
+      }
+      case "choose":
+        return expression({ ...node, condition: aliases.size === 0 ? node.condition : rebaseRule(node.condition, move), yes: visit(node.yes, aliases), no: visit(node.no, aliases) });
+      case "map":
+        return expression({ ...node, values: visit(node.values, aliases), body: visit(node.body, aliases) });
+      case "fold":
+        return expression({ ...node, values: visit(node.values, aliases), initial: visit(node.initial, aliases), body: visit(node.body, aliases) });
+      case "call":
+        return expression({ ...node, input: visit(node.input, aliases) });
+      case "construct":
+        return expression({ ...node, value: visit(node.value, aliases) });
+      case "operation":
+      case "temporal":
+        return expression({ ...node, left: visit(node.left, aliases), right: visit(node.right, aliases) });
+    }
+  };
+  const result = visit(template, new Map());
+  return inlined ? result : template;
+}
+
+export function guardsOf(template: unknown): RulesDecision<unknown, unknown, unknown>["guards"] {
+  return choicesOf(template).map(node => ({ kind: "guard" as const, condition: node.condition, orElse: () => { throw new Error("Expression guards are interpreted"); } }));
 }

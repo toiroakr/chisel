@@ -1117,6 +1117,26 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
   }
 }
 
+// The schema a path reaches through the case of a sum that declares the next key.
+function throughCases(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
+  const unwrapped = schema.kind === "optional" ? ((schema as unknown as { schema: AnySchema }).schema) : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) return unwrapped;
+  if (isVariantsSchema(unwrapped)) {
+    const declaring = (Object.values(unwrapped.variants) as ObjectSchema<ObjectShape>[]).find(variant => Object.hasOwn(variant.shape, key));
+    return declaring === undefined ? undefined : throughCases(declaring.shape[key]!, rest);
+  }
+  if (unwrapped.kind !== "object") return undefined;
+  const { shape } = unwrapped as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) ? throughCases(shape[key]!, rest) : undefined;
+}
+
+// A sum field's discriminant reads as one of its tags, as a match selects it.
 function schemaAt(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
-  return schemaAtPath(schema, keys);
+  const found = schemaAtPath(schema, keys) ?? throughCases(schema, keys);
+  if (found !== undefined || keys.length === 0) return found;
+  const owner = throughCases(schema, keys.slice(0, -1));
+  return owner !== undefined && isVariantsSchema(owner) && owner.discriminant === keys.at(-1)
+    ? enumOf(owner.variantTags as [string, ...string[]])
+    : undefined;
 }
