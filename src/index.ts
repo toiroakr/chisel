@@ -169,8 +169,10 @@ export type { Draw, ExploredStep, ExploreReport, Invariant, Operation, Transitio
 export { machine, effect, isMachine, runMachine } from "./machine.js";
 export type { Effect, Machine, MachineCommand, MachineExecution, MachineStep, PerformedEffect } from "./machine.js";
 export { specifyMachine, isMachineSpecification, checkMachine } from "./machine-check.js";
+export { checkInterleavings } from "./interleave.js";
+export type { InterleavingReport, InterleavingStep, InterleavingTrace } from "./interleave.js";
 export type { MachineSpecification, MachineReport, MachineTrace } from "./machine-check.js";
-export { toTla, checkMachineTla, proveMachine } from "./tla.js";
+export { toTla, checkMachineTla, checkInterleavingsTla, proveMachine } from "./tla.js";
 export type { TlaModule, InductiveProof } from "./tla.js";
 export type { Composition } from "./composition.js";
 

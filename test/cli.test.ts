@@ -196,6 +196,27 @@ describe("chisel machines", () => {
     });
   });
 
+  it("checks the interleavings a specification declares", async () => {
+    const file = fixture("test/fixtures/interleave-shop.spec.ts");
+    const guarded = await run(["model-check", file, "--name", "guarded shop"]);
+    expect(guarded.exitCode).toBe(0);
+    expect(stdoutOf(guarded)).toContain("guarded shop (interleavings): held");
+    const unguarded = await run(["model-check", file, "--name", "unguarded shop"]);
+    expect(unguarded.exitCode).toBe(1);
+    expect(stdoutOf(unguarded)).toContain("unguarded shop (interleavings): broken");
+    const three = await run(["model-check", file, "--name", "three shop"]);
+    expect(three.exitCode).toBe(0);
+    expect(stdoutOf(three)).toContain("three shop (interleavings): held");
+    const tla = await run(["model-check", file, "--name", "guarded shop", "--engine", "tla"]);
+    expect(tla.exitCode).toBe(0);
+    expect(stdoutOf(tla)).toContain("guarded shop (interleavings): held");
+    const tlaBroken = await run(["model-check", file, "--name", "unguarded shop", "--engine", "tla"]);
+    expect(tlaBroken.exitCode).toBe(1);
+    expect(stdoutOf(tlaBroken)).toContain("unguarded shop (interleavings): broken");
+    const json = JSON.parse(stdoutOf(await run(["model-check", file, "--name", "unguarded shop", "--json"])));
+    expect(json.map((report: { name: string }) => report.name)).toStrictEqual(["unguarded shop", "unguarded shop (interleavings)"]);
+  });
+
   it("passes the command limit to runtime execution", async () => {
     const result = await run(["run-machine", fixture("examples/order-machine.ts"),
       "--state", '{"phase":"draft","ordered":2,"received":0}', "--command", '{"type":"submit"}', "--max-commands", "1"]);

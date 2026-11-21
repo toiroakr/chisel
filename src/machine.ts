@@ -12,15 +12,28 @@ import type { Schema } from "./schema.js";
 // An effect names a write to something outside the machine and the state the machine is
 // in once it has succeeded. A failure leaves the state as it was before the effect (the
 // writes before it stay), unless `failure` names another state.
+//
+// When several runs of the machine share one state, an effect writes only the fields it changes
+// from what its run last saw (or the fields `writes` names) onto the state as it is by then, and
+// `ifUnchanged` makes the write apply only if nothing was written since the run read the state.
 export interface Effect<State> {
   readonly kind: "effect";
   readonly name: string;
   readonly state: State;
   readonly failure?: State;
+  readonly ifUnchanged?: boolean;
+  readonly writes?: readonly string[];
 }
 
-export function effect<State>(name: string, state: Template<NoInfer<State>>, options: { readonly failure?: Template<NoInfer<State>> } = {}): Template<Effect<State>> {
-  return { kind: "effect", name, state, ...(Object.hasOwn(options, "failure") ? { failure: options.failure } : {}) } as Template<Effect<State>>;
+export function effect<State>(name: string, state: Template<NoInfer<State>>, options: {
+  readonly failure?: Template<NoInfer<State>>;
+  readonly ifUnchanged?: boolean;
+  readonly writes?: readonly string[];
+} = {}): Template<Effect<State>> {
+  return { kind: "effect", name, state,
+    ...(Object.hasOwn(options, "failure") ? { failure: options.failure } : {}),
+    ...(options.ifUnchanged === undefined ? {} : { ifUnchanged: options.ifUnchanged }),
+    ...(options.writes === undefined ? {} : { writes: options.writes }) } as Template<Effect<State>>;
 }
 
 export type MachineCommand<State, Command> = Template<{
@@ -166,6 +179,38 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
     }
   }
   return { state: current, steps };
+}
+
+export interface EvaluatedCommand<State, Command> {
+  // Present when the command declared effects, in order.
+  readonly effects?: readonly { readonly name: string; readonly state: State; readonly ifUnchanged: boolean; readonly writes?: readonly string[] }[];
+  // The state after a command that declared a state instead of effects.
+  readonly state?: State;
+  readonly commands: readonly Command[];
+}
+
+// What a command does in a state, read once and checked against the schemas.
+export function evaluateCommand<State, Command>(definition: Machine<State, Command>, state: State, command: Command): EvaluatedCommand<State, Command> {
+  const output = interpret(definition.update, { state, command }) as { state?: unknown; effects?: unknown; commands?: unknown };
+  if (output === null || typeof output !== "object" || (!Object.hasOwn(output, "state") && !Object.hasOwn(output, "effects"))) {
+    throw new SpecificationError("A machine transition must return a state");
+  }
+  const emitted = output.commands === undefined ? [] : output.commands;
+  if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
+  const commands = emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));
+  if (!Object.hasOwn(output, "effects")) return { state: parse(definition.state, output.state, "Next state"), commands };
+  if (!Array.isArray(output.effects)) throw new SpecificationError("Effects must be an array");
+  const effects = (output.effects as unknown[]).map(item => {
+    const declared = item as { name?: unknown; state?: unknown; ifUnchanged?: unknown; writes?: unknown } | null;
+    if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
+    if (declared.ifUnchanged !== undefined && typeof declared.ifUnchanged !== "boolean") throw new SpecificationError(`Effect ${declared.name}: ifUnchanged must be a boolean`);
+    if (declared.writes !== undefined && (!Array.isArray(declared.writes) || declared.writes.some(item => typeof item !== "string"))) {
+      throw new SpecificationError(`Effect ${declared.name}: writes must be a list of field names`);
+    }
+    return { name: declared.name, state: parse(definition.state, declared.state, `Effect ${declared.name} state`), ifUnchanged: declared.ifUnchanged === true,
+      ...(declared.writes === undefined ? {} : { writes: declared.writes as string[] }) };
+  });
+  return { effects, commands };
 }
 
 export interface MachineOutcome<State, Command> {

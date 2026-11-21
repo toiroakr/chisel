@@ -486,6 +486,31 @@ checkMachine(specifyMachine(checkout, { invariants: [leak], crashes: true }));  
 
 A command without effects has no point to die at, and a command that stopped by dying is held to its precondition as a command that stopped at a failed effect is. `runMachine` takes `dies: point => point.completed === 1` to follow such a run, and `chisel run-machine ... --die-after 1` does the same. In TLA+ a death is one more outcome of the command, so `--engine tla` and `prove-machine` read it too.
 
+Two runs of one flow can also work on the same state at once. `checkInterleavings(specification, { copies: [commandA, commandB] })` runs one copy per command against a single shared state. A copy reads the state when it starts a command, then performs that command's effects one step at a time, and every order in which the steps of the copies interleave is explored. An effect writes only the fields it changes from what its copy last saw (or the fields `writes: ["stock", "a"]` names, which must be fields of the state) onto the state as it is by then, so a write computed from a stale read overwrites what another copy wrote since, and `c.effect(name, after, { ifUnchanged: true })` applies only if nothing was written since the copy read the state, otherwise the copy ends `refused` with the shared state unchanged. Take two customers buying the last unit of a stock, each copy reading the stock and then writing it with its own flag:
+
+```ts
+const shop = c.machine("shop", {
+  state: c.object({ stock: c.int().min(0).max(1), a: c.boolean(), b: c.boolean() }),
+  command: c.variants("type", { buy: c.object({ customer: c.enum(["a", "b"]) }) }),
+  initial: [{ stock: 1, a: false, b: false }],
+  update: (state, command) => ({
+    effects: c.choose(state.stock.$gte(1), [
+      c.effect("take", {
+        stock: state.stock.$minus(1),
+        a: c.choose(command.customer.$eq("a"), true, state.a),
+        b: c.choose(command.customer.$eq("b"), true, state.b),
+      }, { ifUnchanged: true }),                                 // drop the option to see the lost update
+    ], []),
+  }),
+});
+const once = invariant("the last unit is sold once", state => state.a.$eq(false).$or(state.b.$eq(false)));
+const specification = specifyMachine(shop, { invariants: [once] });
+checkInterleavings(specification, { copies: [{ type: "buy", customer: "a" }, { type: "buy", customer: "b" }] });
+// held; terminals: finished/refused, refused/finished, and the sequential finished/finished
+```
+
+Without `ifUnchanged` both copies read a stock of 1 and both write, the report is `broken`, and the counterexample lists the order of the steps (`read`, `read`, `write`, `write`, each with its `copy`). The report's `terminals` list how each copy ended and the state left, so a claim such as "one copy always ends refused when they overlap" can be read off it. A command that declares a state instead of effects reads and writes in one step. `maxCopies` (default 2) and `maxStates` keep the search bounded and leave the result `undetermined` when exceeded, and failures and process deaths are not combined with interleavings. `checkInterleavingsTla` (and `chisel model-check --engine tla`) checks the same invariants and transition properties with each copy as a process of the TLA+ model; it needs a state that is an object, reports `undetermined` for a command that emits commands, and does not list the terminals. Declaring `interleavings: { copies: [...], starts?, maxCopies? }` in `specifyMachine` makes `chisel model-check` check them too, as `<name> (interleavings)`; the copies and starts are checked against the schemas where they are declared.
+
 To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh

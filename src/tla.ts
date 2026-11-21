@@ -3,6 +3,7 @@ import { SpecificationError } from "./behavior.js";
 import { domainOf, integralBounds } from "./domain.js";
 import { deepEqual } from "./equal.js";
 import { childrenOf, nodeOf } from "./model.js";
+import { positiveLimit } from "./machine.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { schemaAtPath } from "./schema.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape } from "./schema.js";
@@ -139,6 +140,111 @@ export async function checkMachineTla<State, Command>(machine: MachineSpecificat
     })) }), module };
   return { status: "undetermined", states: result.distinctStates, generatedStates: result.generatedStates,
     reason: `tla-ts could not complete the check: ${result.status}${result.failure ? `: ${result.failure.message}` : ""}`, module };
+}
+
+// Copies of the machine as processes sharing one state (see `checkInterleavings`). Only the
+// native checker follows the commands a command emits, so a translation that meets one is undetermined.
+export async function checkInterleavingsTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
+  readonly copies: readonly NoInfer<Command>[];
+  readonly starts?: readonly NoInfer<State>[];
+  readonly maxCopies?: number;
+  readonly domainLimit?: number;
+}): Promise<{ readonly status: "held" | "broken" | "undetermined"; readonly states: number; readonly reason?: string; readonly module?: TlaModule }> {
+  const maxCopies = positiveLimit(options.maxCopies, 2, "maxCopies");
+  if (options.copies.length > maxCopies) {
+    return { status: "undetermined", states: 0, reason: `${options.copies.length} copies exceed maxCopies (${maxCopies})` };
+  }
+  let module: TlaModule;
+  try { module = interleavingsToTla(specification, options); }
+  catch (error) {
+    if (error instanceof SpecificationError) return { status: "undetermined", states: 0, reason: error.message };
+    throw error;
+  }
+  let result: Awaited<ReturnType<typeof checkTla>>;
+  try { result = await checkTla({ source: module.source, config: module.config }); }
+  catch (error) { return { status: "undetermined", states: 0, module,
+    reason: `tla-ts could not complete the check: ${error instanceof Error ? error.message : String(error)}` }; }
+  if (result.status === "success") return { status: "held", states: result.distinctStates, module };
+  const violated = result.violation?.name ?? "";
+  if (result.status === "invariant-violation" && violated === "WritesKnown") return { status: "undetermined", states: result.distinctStates, module,
+    reason: "An effect writes a field the state does not have" };
+  if (result.status === "invariant-violation" && violated === "StateOK") return { status: "broken", states: result.distinctStates, module,
+    reason: "A write left a value that is not a state" };
+  if (result.status === "invariant-violation" && violated === "PlanOK") return { status: "broken", states: result.distinctStates, module,
+    reason: "An effect declares a state the state schema does not allow" };
+  if (result.status === "invariant-violation" && violated === "NoEmission") return { status: "undetermined", states: result.distinctStates, module,
+    reason: "TLA+ translation of interleavings does not follow the commands a command emits" };
+  if (result.status === "invariant-violation") return { status: "broken", states: result.distinctStates, module,
+    reason: /^Inv\d+$/.test(violated) ? specification.invariants[Number(violated.slice(3))]?.name ?? violated
+      : /^Trans\d+$/.test(violated) ? `${specification.name} moved the state in a way ${specification.transitions[Number(violated.slice(5))]?.name} does not allow` : violated };
+  return { status: "undetermined", states: result.distinctStates, module,
+    reason: `tla-ts could not complete the check: ${result.status}${result.failure ? `: ${result.failure.message}` : ""}` };
+}
+
+export function interleavingsToTla<State, Command>(specification: MachineSpecification<State, Command>, options: {
+  readonly copies: readonly NoInfer<Command>[];
+  readonly starts?: readonly NoInfer<State>[];
+  readonly domainLimit?: number;
+}): TlaModule {
+  const machine = specification.machine;
+  if (machine.state.kind !== "object") throw new SpecificationError("TLA+ translation of interleavings needs a state that is an object");
+  if (hasOptional(machine.state as AnySchema)) throw new SpecificationError("TLA+ translation does not support optional state fields");
+  if (options.copies.length === 0) throw new SpecificationError(`Machine ${machine.name} has no copy to run`);
+  const compiler = new Compiler(machine.state as AnySchema, machine.command as AnySchema);
+  const step = compiler.value(machine.update, new Map([["state", "s"], ["command", "c"]]), true);
+  const name = `ChiselInterleave${machine.name.replace(/[^A-Za-z0-9]+/g, " ").split(" ").filter(Boolean).map(part => part[0]!.toUpperCase() + part.slice(1)).join("") || "Machine"}`;
+  const copies = options.copies.length;
+  if (options.starts?.length === 0) throw new SpecificationError(`Machine ${machine.name} has no state to start from`);
+  const initial = set((options.starts ?? machine.initial).map(value => compiler.value(value, new Map())));
+  const properties = specification.invariants.map((invariant, index) => ({ name: `Inv${index}`, formula: compiler.condition(invariant.holds, new Map(), "state") }));
+  const states = domainOf(machine.state as never, positiveLimit(options.domainLimit, 10000, "domainLimit"));
+  if (!states.exhaustive) throw new SpecificationError("TLA+ translation of interleavings requires a finite, exhaustively enumerated state schema");
+  const stateSet = set(states.values.map(value => compiler.value(value, new Map())));
+  const stateOK = `state \\in ${stateSet}`;
+  const transitions = specification.transitions.map((transition, index) => ({ name: `Trans${index}`,
+    formula: transition.each
+      ? compiler.paired(transition.holds, transition.each, schemaAtPath(machine.state as never, transition.each.path)?.kind)
+      : compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
+  const variables = ["state", "previous", "version", "status", "pc", "snap", "plan", "readVersion", "unsupported"];
+  const keep = (...changed: string[]) => `UNCHANGED <<${variables.filter(item => !changed.includes(item)).join(", ")}>>`;
+  const set1 = (variable: string, value: string) => `${variable}' = [${variable} EXCEPT ![p] = ${value}]`;
+  const source = [
+    `---- MODULE ${name} ----`,
+    "EXTENDS Naturals, Integers, Sequences",
+    `VARIABLES ${variables.join(", ")}`,
+    `Copies == <<${options.copies.map(command => compiler.value(command, new Map())).join(", ")}>>`,
+    `Step(s, c) == ${step}`,
+    `Init == /\\ state \\in ${initial} /\\ previous = state /\\ version = 0 /\\ unsupported = FALSE`,
+    `        /\\ status = [p \\in 1..${copies} |-> "idle"] /\\ pc = [p \\in 1..${copies} |-> 0]`,
+    `        /\\ snap = [p \\in 1..${copies} |-> state] /\\ plan = [p \\in 1..${copies} |-> <<>>] /\\ readVersion = [p \\in 1..${copies} |-> 0]`,
+    "Seen(p) == IF pc[p] = 0 THEN snap[p] ELSE plan[p][pc[p]].state",
+    "Changed(p, e, k) == IF e.hasWrites THEN (\\E i \\in 1..Len(e.writes): e.writes[i] = k) ELSE e.state[k] # Seen(p)[k]",
+    "Patched(p, e) == [k \\in DOMAIN state |-> IF Changed(p, e, k) THEN e.state[k] ELSE state[k]]",
+    "Wrote(p, e) == \\E k \\in DOMAIN state: Changed(p, e, k)",
+    "Begin(p) == /\\ status[p] = \"idle\"",
+    "            /\\ LET r == Step(state, Copies[p]) IN",
+    "               /\\ unsupported' = (unsupported \\/ r.commands # <<>>)",
+    "               /\\ IF \"effects\" \\in DOMAIN r THEN",
+    `                    (IF Len(r.effects) = 0 THEN (/\\ ${set1("status", '"finished"')} /\\ ${keep("status", "unsupported")})`,
+    `                     ELSE (/\\ ${set1("status", '"running"')} /\\ ${set1("snap", "state")} /\\ ${set1("plan", "r.effects")} /\\ ${set1("pc", "0")} /\\ ${set1("readVersion", "version")} /\\ ${keep("status", "snap", "plan", "pc", "readVersion", "unsupported")}))`,
+    `                  ELSE (/\\ previous' = state /\\ state' = r.state /\\ version' = (IF r.state # state THEN version + 1 ELSE version) /\\ ${set1("status", '"finished"')} /\\ ${keep("previous", "state", "version", "status", "unsupported")})`,
+    "Run(p) == /\\ status[p] = \"running\"",
+    "          /\\ LET e == plan[p][pc[p] + 1] IN",
+    `             IF e.ifUnchanged /\\ version # readVersion[p] THEN (/\\ ${set1("status", '"refused"')} /\\ ${keep("status")})`,
+    `             ELSE (/\\ previous' = state /\\ state' = Patched(p, e) /\\ version' = (IF Wrote(p, e) THEN version + 1 ELSE version)`,
+    `                   /\\ ${set1("pc", "pc[p] + 1")} /\\ status' = (IF pc[p] + 1 = Len(plan[p]) THEN [status EXCEPT ![p] = "finished"] ELSE status)`,
+    `                   /\\ ${keep("previous", "state", "version", "pc", "status")})`,
+    `Next == \\E p \\in 1..${copies}: Begin(p) \\/ Run(p)`,
+    "NoEmission == ~unsupported",
+    `StateOK == ${stateOK}`,
+    `PlanOK == \\A p \\in 1..${copies}: \\A i \\in 1..Len(plan[p]): plan[p][i].state \\in ${stateSet}`,
+    `WritesKnown == \\A p \\in 1..${copies}: \\A i \\in 1..Len(plan[p]): \\A j \\in 1..Len(plan[p][i].writes): plan[p][i].writes[j] \\in DOMAIN state`,
+    ...properties.map(item => `${item.name} == ${item.formula}`),
+    ...transitions.map(item => `${item.name} == previous = state \\/ (${item.formula})`),
+    "====",
+  ].join("\n");
+  const config = `INIT Init NEXT Next INVARIANT NoEmission INVARIANT WritesKnown INVARIANT StateOK INVARIANT PlanOK ${properties.map(item => `INVARIANT ${item.name}`).join(" ")} ${transitions.map(item => `INVARIANT ${item.name}`).join(" ")} CHECK_DEADLOCK FALSE`;
+  return { name, source, config, states: 0, commands: options.copies.length };
 }
 
 export interface InductiveProof {
@@ -304,6 +410,10 @@ class Compiler {
         const hasFailure = fields.some(([key]) => key === "failure");
         if (!hasFailure) fields.push(["failure", 0]);
         fields.push(["hasFailure", hasFailure]);
+        if (!fields.some(([key]) => key === "ifUnchanged")) fields.push(["ifUnchanged", false]);
+        const hasWrites = fields.some(([key]) => key === "writes");
+        if (!hasWrites) fields.push(["writes", []]);
+        fields.push(["hasWrites", hasWrites]);
       }
       if (result && !fields.some(([key]) => key === "commands")) fields.push(["commands", []]);
       if (!fields.length) throw new SpecificationError("TLA+ translation cannot represent an empty record");
