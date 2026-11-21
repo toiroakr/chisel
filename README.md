@@ -516,7 +516,10 @@ When the code you ship is an existing implementation, not a machine, the machine
 ```ts
 const subject = {
   reset: state => { service = new OrderService(fakeStore(state)); },
-  run: async (command, faults) => { await (command.type === "pay" ? service.pay() : service.ship()); },
+  run: async (command, faults) => {
+    for (const fault of faults) fakeStore.inject(fault); // e.g. fail the effect `markPaid`, or die after one effect
+    await (command.type === "pay" ? service.pay() : service.ship());
+  },
   read: () => service.snapshot(),
 };
 await replayMachine(orderFlow, subject); // { status: "passed", replayed: 6, states: 3 }

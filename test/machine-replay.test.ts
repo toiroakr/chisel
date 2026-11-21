@@ -36,7 +36,7 @@ class OrderService {
   completed = 0;
   failing: string | undefined;
   diesAfter: number | undefined;
-  constructor(state: Order, private readonly rules: { readonly shipsBeforePayment?: boolean; readonly paysAnyOrder?: boolean } = {}) {
+  constructor(state: Order, private readonly rules: { readonly shipsBeforePayment?: boolean; readonly paysAnyOrder?: boolean; readonly forgetsChargeOnFailure?: boolean } = {}) {
     this.status = state.status;
     this.charged = state.charged;
   }
@@ -50,8 +50,13 @@ class OrderService {
   async pay() {
     if (this.status !== "created" && !this.rules.paysAnyOrder) throw new Error("order is not awaiting payment");
     this.dieIfDue();
-    this.write("charge", () => { this.charged = true; });
-    this.write("markPaid", () => { if (this.status === "created" || this.rules.paysAnyOrder) this.status = "paid"; });
+    try {
+      this.write("charge", () => { this.charged = true; });
+      this.write("markPaid", () => { if (this.status === "created" || this.rules.paysAnyOrder) this.status = "paid"; });
+    } catch (error) {
+      if (this.rules.forgetsChargeOnFailure) this.charged = false;
+      throw error;
+    }
   }
   async ship() {
     if (this.status !== "paid" && !this.rules.shipsBeforePayment) throw new Error("order is not paid");
@@ -158,11 +163,41 @@ describe("replaying a machine against the production code", () => {
   });
 
   it("finds the drift a failed effect exposes", async () => {
-    const { subject } = subjectOf();
-    const lenient: c.MachineSubject<Order, OrderCommand> = { ...subject, run: async (command, faults) => {
-      try { await subject.run(command, faults); } catch (error) { if (faults.length === 0) throw error; }
-    }, read: () => ({ status: "paid", charged: true }) };
-    expect(await c.replayMachine(flow, lenient)).toMatchObject({ status: "failed" });
+    const { subject } = subjectOf({ forgetsChargeOnFailure: true });
+    expect(await c.replayMachine(flow, subject)).toMatchObject({
+      status: "failed",
+      failure: { steps: [{
+        command: pay, faults: [{ kind: "fails", effect: "markPaid" }],
+        expected: { status: "created", charged: true }, actual: { status: "created", charged: false },
+      }] },
+    });
+  });
+
+  it("accepts a throw from a command the machine emitted where that command's precondition is false", async () => {
+    const Phase = c.enum(["draft", "approved", "issued"] as const);
+    const Flow = c.object({ phase: Phase });
+    type Phased = c.Infer<typeof Flow>;
+    const Steps = c.variants("type", { submit: c.object({}), allocate: c.object({}) });
+    const fulfilment = c.machine("fulfilment", {
+      state: Flow, command: Steps, initial: [{ phase: "draft" as const }],
+      update: (state, command) => c.matchValue<typeof Steps, never>(Steps, command, {
+        submit: () => ({ state: { phase: c.choose<Phased["phase"]>(state.phase.$eq("draft"), "approved", state.phase) }, commands: [{ type: "allocate" as const }] }),
+        allocate: () => ({ state: { phase: c.choose<Phased["phase"]>(state.phase.$eq("approved"), "issued", state.phase) } }),
+      } as never),
+    });
+    const specification = c.specifyMachine(fulfilment, { requires: { allocate: state => state.phase.$eq("approved") } });
+    let phase: Phased["phase"] = "draft";
+    const subject: c.MachineSubject<Phased, c.Infer<typeof Steps>> = {
+      reset: state => { phase = state.phase; },
+      run: command => {
+        if (command.type === "allocate") { if (phase === "approved") phase = "issued"; return; }
+        if (phase === "issued") throw new Error("nothing left to allocate");
+        if (phase === "draft") phase = "approved";
+        phase = "issued";
+      },
+      read: () => ({ phase }),
+    };
+    expect(await c.replayMachine(specification, subject, { faults: false })).toMatchObject({ status: "passed" });
   });
 
   it("tells the service when the process dies, after how many effects, and replays the state it leaves", async () => {

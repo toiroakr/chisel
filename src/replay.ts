@@ -144,9 +144,11 @@ export async function replayMachine<State, Command>(target: Machine<State, Comma
         if (faults.length > 0 && !injectFaults) continue;
         let refused: boolean;
         try {
-          const tag = tagOf(machine.command as never, command);
-          const precondition = tag === undefined ? undefined : specification.requires[tag];
-          refused = precondition !== undefined && !checks(precondition, { state: path.state, command });
+          refused = outcome.result.steps.some(step => {
+            const tag = tagOf(machine.command as never, step.command);
+            const precondition = tag === undefined ? undefined : specification.requires[tag];
+            return precondition !== undefined && !checks(precondition, { state: step.before, command: step.command });
+          });
         } catch (error) {
           if (!(error instanceof EvaluationLimit)) throw error;
           incomplete ??= error.message;
