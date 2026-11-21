@@ -168,8 +168,10 @@ export async function checkInterleavingsTla<State, Command>(specification: Machi
   const violated = result.violation?.name ?? "";
   if (result.status === "invariant-violation" && violated === "WritesKnown") return { status: "undetermined", states: result.distinctStates, module,
     reason: "An effect writes a field the state does not have" };
-  if (result.status === "invariant-violation" && (violated === "StateOK" || violated === "PlanOK")) return { status: "broken", states: result.distinctStates, module,
+  if (result.status === "invariant-violation" && violated === "StateOK") return { status: "broken", states: result.distinctStates, module,
     reason: "A write left a value that is not a state" };
+  if (result.status === "invariant-violation" && violated === "PlanOK") return { status: "broken", states: result.distinctStates, module,
+    reason: "An effect declares a state the state schema does not allow" };
   if (result.status === "invariant-violation" && violated === "NoEmission") return { status: "undetermined", states: result.distinctStates, module,
     reason: "TLA+ translation of interleavings does not follow the commands a command emits" };
   if (result.status === "invariant-violation") return { status: "broken", states: result.distinctStates, module,

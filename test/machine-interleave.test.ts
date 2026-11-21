@@ -225,7 +225,9 @@ describe("the TLA+ translation of interleavings", () => {
     });
     const specification = c.specifyMachine(sloppy);
     expect(c.checkInterleavings(specification, { copies: ["go"] }).status).toBe("broken");
-    expect((await c.checkInterleavingsTla(specification, { copies: ["go"] })).status).toBe("broken");
+    expect(await c.checkInterleavingsTla(specification, { copies: ["go"] })).toMatchObject({
+      status: "broken", reason: "An effect declares a state the state schema does not allow",
+    });
   });
 
   it("applies a transition that pairs records to the pairs", async () => {
