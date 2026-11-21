@@ -511,6 +511,20 @@ checkInterleavings(specification, { copies: [{ type: "buy", customer: "a" }, { t
 
 Without `ifUnchanged` both copies read a stock of 1 and both write, the report is `broken`, and the counterexample lists the order of the steps (`read`, `read`, `write`, `write`, each with its `copy`). The report's `terminals` list how each copy ended and the state left, so a claim such as "one copy always ends refused when they overlap" can be read off it. A command that declares a state instead of effects reads and writes in one step. `maxCopies` (default 2) and `maxStates` keep the search bounded and leave the result `undetermined` when exceeded, and failures and process deaths are not combined with interleavings. `checkInterleavingsTla` (and `chisel model-check --engine tla`) checks the same invariants and transition properties with each copy as a process of the TLA+ model; it needs a state that is an object, reports `undetermined` for a command that emits commands, and does not list the terminals. Declaring `interleavings: { copies: [...], starts?, maxCopies? }` in `specifyMachine` makes `chisel model-check` check them too, as `<name> (interleavings)`; the copies and starts are checked against the schemas where they are declared.
 
+When the code you ship is an existing implementation, not a machine, the machine you check and the code can drift apart. `replayMachine(machine, subject)` (a specification works too) runs the model's transitions against the code. After the shortest command sequence to every state the machine reaches it replays each command, one command at a time from a `reset`, so the transitions that only come back to a state already seen are run as well, and after every command it reads the code's state back and compares it with the machine's using `deepEqual`. The subject is three functions, with the external parts of the code faked by the caller:
+
+```ts
+const subject = {
+  reset: state => { service = new OrderService(fakeStore(state)); },
+  run: async (command, faults) => { await (command.type === "pay" ? service.pay() : service.ship()); },
+  read: () => service.snapshot(),
+};
+await replayMachine(orderFlow, subject); // { status: "passed", replayed: 6, states: 3 }
+```
+
+Where the machine and the code disagree the report is `failed` and `failure` holds the shortest sequence: `steps` with each command, the state the machine expected and the state the code answered, and a `reason` such as `After pay, ship, pay the machine reaches {"status":"shipped",...} but the subject reads {"status":"paid",...}`. A throw from `run` is accepted only where the machine does not run the command: where its `requires` precondition is false (a code that refuses with no change passes too, since the state is compared either way) or where an effect failed or the process died. Any other throw is a disagreement. An effect the machine fails, or a process death with `crashes: true`, is replayed too, and `faults` lists what to inject for the command (`{ kind: "fails", effect: "markPaid", index: 1, command }` or `{ kind: "dies", after: 1, command }`); `faults: false` replays only the runs where every effect succeeds. A throw from `reset` or `read` reaches the caller, since the test harness is broken, not the code. `maxReplays` (default 10000), `maxStates`, `maxCommands`, `maxOutcomes` and `domainLimit` keep it bounded and leave the report `undetermined` when exceeded.
+
+
 To fail CI unless the finite state check completes, export a machine and run:
 
 ```sh
