@@ -1,3 +1,4 @@
+import { requireTemporal } from "./temporal-global.js";
 import { temporalNeighbor } from "./temporal.js";
 import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { compareText } from "./text.js";
@@ -172,8 +173,7 @@ function plainTime(text: string): unknown {
 }
 
 function temporalValue(kind: "Instant" | "PlainDate" | "PlainDateTime" | "PlainTime", text: string): unknown {
-  return (globalThis as unknown as { readonly Temporal: Record<typeof kind, { from(text: string): unknown }> })
-    .Temporal[kind].from(text);
+  return requireTemporal()[kind].from(text);
 }
 
 function epochNanoseconds(value: unknown): bigint {

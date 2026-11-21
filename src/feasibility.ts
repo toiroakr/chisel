@@ -1120,10 +1120,23 @@ export function refusedJointly(
   value: unknown,
   combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): boolean {
+  return refusedTogether(scope, [{ path, value }], combinations);
+}
+
+// No combination the invariants relating finite positions keep gives every
+// one of these finite positions its value.
+export function refusedTogether(
+  scope: AnySchema,
+  coordinates: readonly { readonly path: readonly string[]; readonly value: unknown }[],
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
+): boolean {
   return (
-    finiteDomainAt(scope, path) !== undefined &&
-    jointAssignment([{ path, measure: "value", constraints: [{ operator: "==", bound: value }] }], scope, combinations) ===
-      "none"
+    coordinates.every(({ path }) => finiteDomainAt(scope, path) !== undefined) &&
+    jointAssignment(
+      coordinates.map(({ path, value }) => ({ path, measure: "value" as const, constraints: [{ operator: "==" as const, bound: value }] })),
+      scope,
+      combinations,
+    ) === "none"
   );
 }
 

@@ -12,7 +12,7 @@ define state and commands
 → check reachable states or generate TLA+ proof obligations
 ```
 
-Install with `npm install @toiroakr/chisel` (Node.js 26.13.1 or newer).
+Install with `npm install @toiroakr/chisel` (Node.js 22.22, 24.15, 26 or newer, or Bun).
 
 **0.2.0 migration:** The package root now exports the state-machine runtime. Existing 0.1.x imports of `behavior`, `spec`, `check`, and related APIs must change from `@toiroakr/chisel` to `@toiroakr/chisel/full`. Verification of machines uses `@toiroakr/chisel/verification`. This breaking export change is outside the `^0.1.0` version range.
 
@@ -20,7 +20,9 @@ The earlier behavior-and-example workflow remains available from `/full` and is 
 
 ## 1. Declare data and behavior
 
-The behavior and specification examples below use `import * as c from "@toiroakr/chisel/full"`. The package root `@toiroakr/chisel` provides the executable state-machine API described in [one reducer for runtime and exhaustive checking](#one-reducer-for-runtime-and-exhaustive-checking).
+The behavior and specification examples below use `import * as c from "@toiroakr/chisel/full"`. The package root `@toiroakr/chisel` provides the executable state-machine API described in [one reducer for runtime and exhaustive checking](#one-reducer-for-runtime-and-exhaustive-checking), together with what production code needs to run a behavior: the schemas, `behavior`, `implement`, `model` and its expressions, `dependency`, `perform`, `performSync`, `decode` and `encode`. It reaches neither the analysis (`check`, `generate`, `verify`) nor zod, tsx or `tla-ts`, so code that runs a verified model in place of its own imports only the root, and its specification imports `/full` alongside.
+
+`c.performSync(implementation, input, deps)` answers what `perform` answers, for a caller that cannot await: it parses and validates the same way and throws `SpecificationError` where a dependency or a decision answers a promise. [`examples/ownership/`](examples/ownership/) replaces the ownership check of a deploy with a model this way: the model is adequate under `check --strict`, `c.test` holds the original code to its rows, and a test compares the two on every label and owner it can be handed.
 
 The first version describes the domain vocabulary and the behavior boundary, not its implementation. `variants(discriminant, { case: object(...) })` declares a discriminated union: a value is exactly one of the named cases, told apart by the discriminant field (Souther calls this a sum type). An `object` holds exactly the fields it declares: a value carrying another key is refused, not trimmed, so a model answering with a stray field fails `check` instead of passing it.
 
@@ -272,7 +274,7 @@ Construction proofs and example coverage are separate. `verify` can prove a body
 
 ## Commands
 
-Chisel requires Node.js 26 or later and uses its built-in Temporal API.
+Chisel runs on Node.js 22.22, 24.15 and 26 or later, and on Bun. Only the temporal schemas (`instant`, `date`, `time`, `datetime`) need the Temporal API: Node.js 26 has it built in, and on earlier runtimes import a polyfill such as `temporal-polyfill/global` before using them. A specification without temporal values needs nothing more. The test suite loads `temporal-polyfill` where the runtime lacks Temporal, and CI runs it on Node.js 22, 24 and 26.
 
 ```sh
 npm install
@@ -411,7 +413,7 @@ A disregarded field draws no classes of its type, no invariant borders and no bo
 
 ## One reducer for runtime and exhaustive checking
 
-For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose. Import the execution API from `@toiroakr/chisel`; put verification properties in a separate module importing `@toiroakr/chisel/verification`. This keeps invariant definitions, model checking, TLA+ translation, and `tla-ts` out of the production import graph. The optional `/runtime` subpath is an alias of the root; the previous combined API is available from `/full`.
+For a finite command domain, `machine` uses one expression for both runtime state updates and exhaustive reachability checking. Commands emitted by a transition run through that same reducer in order. The returned state is yours to persist wherever you choose. Import the execution API from `@toiroakr/chisel`; put verification properties in a separate module importing `@toiroakr/chisel/verification`. This keeps invariant definitions, model checking, TLA+ translation, and `tla-ts` out of the production import graph. The optional `/runtime` subpath is an alias of the root, which also exports the behavior runtime described above; the previous combined API is available from `/full`.
 
 ```ts
 import * as c from "@toiroakr/chisel";

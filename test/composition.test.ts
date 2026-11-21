@@ -21,6 +21,7 @@ import {
   object,
   record,
   perform,
+  performSync,
   SpecificationError,
   string,
   variants,
@@ -659,6 +660,12 @@ describe("running a composition", () => {
       result: { 結果: "見積", 金額: 200 },
       effects: [{ 種類: "通知", 金額: 200 }],
     });
+  });
+
+  it("answers synchronously through performSync what perform answers", async () => {
+    for (const 数量 of [0, 2]) {
+      expect(performSync(見積もるの実装, { 状態: "申込", 数量 })).toStrictEqual(await perform(見積もるの実装, { 状態: "申込", 数量 }));
+    }
   });
 
   it("answers a case the second stage does not receive as it departed", async () => {

@@ -31,6 +31,17 @@ describe("pair obligations", () => {
     expect(report.measures.pairs.obligations.filter(pair => pair.status === "no row owed").map(pair => pair.classes)).toStrictEqual([["true", "false"], ["false", "true"]]);
   });
 
+  it("proves a pair impossible from the invariants relating finite positions where the domain is too wide to search", async () => {
+    const label = c.object({ given: c.boolean(), value: c.string() });
+    const labels = c.behavior("labels", { result: c.boolean(), effects: c.variants("type", {}), input: c.variants("type", {
+      input: c.object({ attached: c.boolean(), name: label }).refine(v => v.attached.$eq(true).$or(v.name.given.$eq(false))),
+    }) });
+    const report = await c.check(c.spec("labels", { examples: c.examples(labels, {}) }));
+    expect(report.measures.pairs.obligations.find(pair => pair.classes[0] === "false" && pair.classes[1] === "true"))
+      .toStrictEqual({ positions: ["@input.attached", "@input.name.given"], classes: ["false", "true"], status: "no row owed", reason: "不変条件を保つ値の組に、この組み合わせを持つものがない" });
+    expect(report.measures.pairs.status).toBe("complete");
+  });
+
   it("reports an obligation limit rather than silently dropping combinations", async () => {
     const report = await c.check(c.spec("flags", { examples: rows, implementation }), { pairs: { obligations: 1 } });
     expect(report.measures.pairs.status).toBe("partial");

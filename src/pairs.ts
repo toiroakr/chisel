@@ -4,7 +4,8 @@ import { isTodo } from "./behavior.js";
 import type { Example, CoverageStatus } from "./specification.js";
 import type { GuardPartition } from "./guard-borders.js";
 import { feasibilityScope } from "./guard-borders.js";
-import { keepingInvariants, keepingOrderings } from "./feasibility.js";
+import { keepingInvariants, keepingOrderings, refusedTogether } from "./feasibility.js";
+import { finiteCoordinateOf } from "./specification.js";
 import type { Position } from "./partition.js";
 import { constantsOf, domainOf } from "./domain.js";
 
@@ -73,6 +74,13 @@ export function pairCoverage(
         }
         if (matching.length > 0) {
           obligations.push({ ...base, status: "answer owed" });
+          continue;
+        }
+        const leftAt = finiteCoordinateOf(definition, left.position, first);
+        const rightAt = finiteCoordinateOf(definition, right.position, second);
+        if (leftAt !== undefined && rightAt !== undefined && leftAt.tag === rightAt.tag &&
+          refusedTogether(leftAt.scope, [leftAt, rightAt], limits.candidates)) {
+          obligations.push({ ...base, status: "no row owed", reason: "不変条件を保つ値の組に、この組み合わせを持つものがない" });
           continue;
         }
         const domain = searched ??= domainOf(definition.input, limits.candidates, constantsOf(rules));

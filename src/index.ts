@@ -83,6 +83,7 @@ export {
   isTodo,
   todo,
   perform,
+  performSync,
   SpecificationError,
   TodoDecision,
 } from "./behavior.js";

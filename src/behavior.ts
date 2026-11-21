@@ -627,44 +627,21 @@ export async function runTraced<B extends AnyBehavior>(
   readonly way: WayTaken | undefined;
 }> {
   const definition = implementation.behavior;
-  const parsedInput = definition.input.parse(input);
-  if (!parsedInput.success) {
-    throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
-  }
-
-  if (implementation.external !== undefined) {
-    throw new SpecificationError(
-      `${definition.name} is implemented outside Chisel: ${implementation.external.reason}`,
-    );
-  }
+  const parsedInput = parsedInputOf(implementation, input);
   if (implementation.pipeline !== undefined) {
-    const execution = await runStages(implementation.pipeline, parsedInput.value, deps);
+    const execution = await runStages(implementation.pipeline, parsedInput, deps);
     return {
-      execution: validated(definition, parsedInput.value, execution),
+      execution: validated(definition, parsedInput, execution),
       arms: [],
       comparisons: [],
       way: undefined,
     };
   }
-  const tag = tagOf(definition.input, parsedInput.value);
-  if (tag === undefined) {
-    throw new SpecificationError("Input has no recognized variant");
-  }
-
-  const selected = implementation.cases[
-    tag as keyof ImplementationCases<B>
-  ];
-  if (selected === undefined) {
-    throw new SpecificationError(`No decision for input variant ${tag}`);
-  }
-  if (selected.kind === "todo") {
-    throw new TodoDecision(definition.name, tag, selected.reason);
-  }
-
+  const selected = decisionFor(implementation, parsedInput);
   const arms: ArmTaken[] = [];
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
-  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput.value) : parsedInput.value;
+  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput) : parsedInput;
   const execution =
     selected.kind === "rules"
       ? await decide(
@@ -676,7 +653,7 @@ export async function runTraced<B extends AnyBehavior>(
           (distinction, outcome) => steps.push({ distinction, outcome }),
           definition,
         )
-      : await selected.run(parsedInput.value as never, answeringValues(definition, deps) as never);
+      : await selected.run(parsedInput as never, answeringValues(definition, deps) as never);
   return {
     execution: validated(definition, decisionInput, execution),
     arms,
@@ -720,18 +697,84 @@ async function runStages(
   deps: unknown,
 ): Promise<Execution<unknown, unknown>> {
   const answered = (await runTraced(first, input as never, deps as never)).execution;
-  const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
-  const firstResult = first.behavior.result;
-  const tag = isVariantsSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
-  if (
-    tag === undefined ||
-    departed.includes(tag) ||
-    !second.behavior.input.variantTags.includes(tag)
-  ) {
+  if (continuingTag(first, second, answered) === undefined) {
     return answered;
   }
   const continued = (await runTraced(second, answered.result as never, deps as never)).execution;
   return { result: continued.result, effects: [...answered.effects, ...continued.effects] };
+}
+
+function parsedInputOf(implementation: AnyImplementation, input: unknown): unknown {
+  const definition = implementation.behavior;
+  const parsedInput = definition.input.parse(input);
+  if (!parsedInput.success) {
+    throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
+  }
+  if (implementation.external !== undefined) {
+    throw new SpecificationError(
+      `${definition.name} is implemented outside Chisel: ${implementation.external.reason}`,
+    );
+  }
+  return parsedInput.value;
+}
+
+function decisionFor(
+  implementation: AnyImplementation,
+  input: unknown,
+): Exclude<AnyImplementation["cases"][string], { readonly kind: "todo" }> {
+  const definition = implementation.behavior;
+  const tag = tagOf(definition.input, input);
+  if (tag === undefined) {
+    throw new SpecificationError("Input has no recognized variant");
+  }
+  const selected = implementation.cases[tag];
+  if (selected === undefined) {
+    throw new SpecificationError(`No decision for input variant ${tag}`);
+  }
+  if (selected.kind === "todo") {
+    throw new TodoDecision(definition.name, tag, selected.reason);
+  }
+  return selected;
+}
+
+// perform for a caller that cannot await: the same parsing, decision and
+// validation, refusing an implementation whose answer would be a promise.
+export function performSync<B extends AnyBehavior>(
+  implementation: Implementation<B>,
+  input: BehaviorInput<B>,
+  deps?: BehaviorDeps<B>,
+): Execution<BehaviorResult<B>, BehaviorEffect<B>> {
+  return executeSync(implementation as AnyImplementation, input, deps) as Execution<BehaviorResult<B>, BehaviorEffect<B>>;
+}
+
+function executeSync(implementation: AnyImplementation, input: unknown, deps: unknown): Execution<unknown, unknown> {
+  const definition = implementation.behavior;
+  const parsedInput = parsedInputOf(implementation, input);
+  if (implementation.pipeline !== undefined) {
+    const [first, second] = implementation.pipeline;
+    const answered = executeSync(first, parsedInput, deps);
+    if (continuingTag(first, second, answered) === undefined) return validated(definition, parsedInput, answered);
+    const continued = executeSync(second, answered.result, deps);
+    return validated(definition, parsedInput, { result: continued.result, effects: [...answered.effects, ...continued.effects] });
+  }
+  const selected = decisionFor(implementation, parsedInput);
+  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput) : parsedInput;
+  const execution =
+    selected.kind === "rules"
+      ? decide(selected, decisionInput, deps, [], () => undefined, () => undefined, definition)
+      : selected.run(parsedInput as never, answeringValues(definition, deps) as never);
+  if (isPromiseLike(execution)) {
+    Promise.resolve(execution).catch(() => undefined);
+    throw new SpecificationError(`${definition.name} answered a promise; use perform, which awaits it`);
+  }
+  return validated(definition, decisionInput, execution as Execution<unknown, unknown>);
+}
+
+function continuingTag(first: AnyImplementation, second: AnyImplementation, answered: Execution<unknown, unknown>): string | undefined {
+  const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
+  const firstResult = first.behavior.result;
+  const tag = isVariantsSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
+  return tag === undefined || departed.includes(tag) || !second.behavior.input.variantTags.includes(tag) ? undefined : tag;
 }
 
 export function traceSync(

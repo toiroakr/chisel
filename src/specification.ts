@@ -2208,34 +2208,45 @@ async function disregardBroken(
 // the invariants relating finite positions keep can take is excluded, like
 // one a rule on the position alone refuses.
 function withJointExclusions(definition: AnyBehavior, position: Position, combinations: number): Position {
-  const [head, ...rest] = position.segments;
-  if (position.kind !== "divided" || head === undefined || rest.length === 0 || !rest.every(step => step.startsWith("."))) {
+  if (position.kind !== "divided") {
     return position;
+  }
+  const refused = position.classes.filter(className => {
+    if (position.excluded.includes(className)) {
+      return true;
+    }
+    const at = finiteCoordinateOf(definition, position, className);
+    return at !== undefined && refusedJointly(at.scope, at.path, at.value, combinations);
+  });
+  return refused.length === position.excluded.length ? position : { ...position, excluded: refused };
+}
+
+// Where a class of a boolean, an enum or a sum field directly under an input
+// case sits for the joint invariant search: the case's scope, the field's keys
+// in it and the value the class stands for.
+export function finiteCoordinateOf(
+  definition: AnyBehavior,
+  position: Position,
+  className: string,
+): { readonly tag: string; readonly scope: AnySchema; readonly path: readonly string[]; readonly value: unknown } | undefined {
+  const [head, ...rest] = position.segments;
+  if (head === undefined || rest.length === 0 || !rest.every(step => step.startsWith("."))) {
+    return undefined;
   }
   const tag = head.slice(1);
   const scope = feasibilityScope(definition, tag);
   const keys = rest.map(step => step.slice(1));
   const field = schemaAtPath(scope, keys);
-  const coordinate = (className: string): { path: readonly string[]; value: unknown } | undefined => {
-    switch (field?.kind) {
-      case "boolean":
-        return { path: keys, value: className === "true" };
-      case "enum":
-        return { path: keys, value: className };
-      case "variants":
-        return { path: [...keys, (field as AnyVariantsSchema).discriminant], value: className };
-      default:
-        return undefined;
-    }
-  };
-  const refused = position.classes.filter(className => {
-    if (position.excluded.includes(className)) {
-      return true;
-    }
-    const at = coordinate(className);
-    return at !== undefined && refusedJointly(scope, at.path, at.value, combinations);
-  });
-  return refused.length === position.excluded.length ? position : { ...position, excluded: refused };
+  switch (field?.kind) {
+    case "boolean":
+      return { tag, scope, path: keys, value: className === "true" };
+    case "enum":
+      return { tag, scope, path: keys, value: className };
+    case "variants":
+      return { tag, scope, path: [...keys, (field as AnyVariantsSchema).discriminant], value: className };
+    default:
+      return undefined;
+  }
 }
 
 // How a decision's ways are measured: by the combinations of the finite values

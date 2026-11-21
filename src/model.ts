@@ -35,11 +35,11 @@ function expression<T>(node: Node): Expression<T> {
 const LOCAL = "#local:";
 let nextLocal = 0;
 function localName(): string { return `${LOCAL}${nextLocal++}`; }
-export function bind<Value, Result>(schema: Schema<Value>, value: Template<NoInfer<Value>>, build: (value: TermOf<Value>) => Template<Result>): Expression<Result> {
+export function bind<Value, Result>(schema: Schema<Value>, value: NoInfer<Template<Value>>, build: (value: TermOf<Value>) => Template<Result>): Expression<Result> {
   const name = localName();
   return expression({ kind: "bind", name, schema: schema as Schema<unknown>, value, body: build(rootTerm<Value>(name)) });
 }
-export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value: Template<NoInfer<Infer<S>>>, cases: { readonly [Tag in Tags<S>]: (value: TermOf<VariantOf<S, Tag>>) => Template<Result> }): Expression<Result> {
+export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value: NoInfer<Template<Infer<S>>>, cases: { readonly [Tag in Tags<S>]: (value: TermOf<VariantOf<S, Tag>>) => Template<Result> }): Expression<Result> {
   const tags = schema.variantTags as readonly Tags<S>[];
   if (tags.length === 0 || Object.keys(cases).length !== tags.length || tags.some(tag => !Object.hasOwn(cases, tag) || typeof cases[tag] !== "function")) throw new Error("matchValue requires exactly one body for every variant");
   const name = localName();
@@ -49,11 +49,11 @@ export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value
   for (let index = tags.length - 2; index >= 0; index--) body = expression({ kind: "choose", condition: { kind: "compare", left: positionTerm([name, schema.discriminant], "value"), operator: "==", right: tags[index] }, yes: bodies[index], no: body });
   return expression({ kind: "bind", name, schema, value, body });
 }
-export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: (value: TermOf<Element>) => Template<NoInfer<Result>>): Expression<readonly Result[]> {
+export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: (value: TermOf<Element>) => NoInfer<Template<Result>>): Expression<readonly Result[]> {
   const name = localName();
   return expression({ kind: "map", name, element: element as Schema<unknown>, output: output as Schema<unknown>, values, body: build(rootTerm<Element>(name)) });
 }
-export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: Template<NoInfer<Accumulator>>, build: (accumulator: TermOf<Accumulator>, value: TermOf<Element>) => Template<NoInfer<Accumulator>>): Expression<Accumulator> {
+export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: NoInfer<Template<Accumulator>>, build: (accumulator: TermOf<Accumulator>, value: TermOf<Element>) => NoInfer<Template<Accumulator>>): Expression<Accumulator> {
   const name = localName(), accumulator = localName();
   return expression({ kind: "fold", name, accumulator, element: element as Schema<unknown>, output: output as Schema<unknown>, values, initial, body: build(rootTerm<Accumulator>(accumulator), rootTerm<Element>(name)) });
 }
@@ -70,13 +70,13 @@ export function localRoots(value: unknown): readonly string[] {
   }
   return childrenOf(value).flatMap(localRoots);
 }
-export function choose<T>(condition: Rule, yes: Template<T>, no: Template<NoInfer<T>>): Expression<T> {
+export function choose<Yes, No = Yes>(condition: Rule, yes: Template<Yes>, no: Template<No>): Expression<Yes | No> {
   return expression({ kind: "choose", condition, yes, no });
 }
-export function construct<T>(schema: Schema<T>, value: Template<NoInfer<T extends object ? Pick<T, Extract<keyof T, string | number>> : T>>): Expression<T> {
+export function construct<T>(schema: Schema<T>, value: NoInfer<Template<T extends object ? Pick<T, Extract<keyof T, string | number>> : T>>): Expression<T> {
   return expression({ kind: "construct", schema: schema as Schema<unknown>, value });
 }
-export function call<Input, Output>(dependency: Term<(input: Input) => Output>, input: Template<NoInfer<Input>>): Expression<Output> {
+export function call<Input, Output>(dependency: Term<(input: Input) => Output>, input: NoInfer<Template<Input>>): Expression<Output> {
   dependencyName(dependency);
   return expression({ kind: "call", dependency, input });
 }
@@ -88,7 +88,7 @@ export function dependencyName(dependency: Term<unknown>): string {
 export function concat(left: Template<string>, right: Template<string>): Expression<string> {
   return expression({ kind: "operation", operator: "concat", left, right });
 }
-export function arithmetic<T extends number | bigint | Rational | Decimal>(operator: "add" | "subtract" | "multiply" | "divide", left: Template<T>, right: Template<NoInfer<T>>): Expression<T> {
+export function arithmetic<T extends number | bigint | Rational | Decimal>(operator: "add" | "subtract" | "multiply" | "divide", left: Template<T>, right: NoInfer<Template<T>>): Expression<T> {
   return expression({ kind: "operation", operator, left, right });
 }
 type PlainDate = TemporalTypes.PlainDate;
