@@ -388,9 +388,10 @@ export function replaceChildren(template: unknown, values: readonly unknown[]): 
   return Array.isArray(template) ? values : Object.fromEntries(Object.keys(template as object).map((key, index) => [key, values[index]]));
 }
 
-// A binding of a field the input already holds, under the schema it is
-// declared with, is the field itself: its local is replaced by the field's path,
-// so its choices read input positions and are measured like any guard on them.
+// A binding of a field the input already holds is the field itself: its local is
+// replaced by the field's path, so its choices read input positions and are
+// measured like any guard on them. Bound under another schema than the field's,
+// the binding is kept to parse the field with it, its local no longer read.
 export function inlineInputBindings(template: unknown, schemaAt: (path: readonly string[]) => Schema<unknown> | undefined): unknown {
   let inlined = false;
   const visit = (value: unknown, aliases: ReadonlyMap<string, readonly string[]>): unknown => {
@@ -409,9 +410,11 @@ export function inlineInputBindings(template: unknown, schemaAt: (path: readonly
       case "bind": {
         const bound = visit(node.value, aliases);
         const position = isTerm(bound) ? positionData(bound) : undefined;
-        if (position !== undefined && position.measure === "value" && position.path.length > 0 && !position.path[0]!.startsWith(LOCAL) && schemaAt(position.path) === node.schema) {
+        if (position !== undefined && position.measure === "value" && position.path.length > 0 && !position.path[0]!.startsWith(LOCAL)) {
           inlined = true;
-          return visit(node.body, new Map([...aliases, [node.name, position.path]]));
+          const body = visit(node.body, new Map([...aliases, [node.name, position.path]]));
+          // Bound under a schema of its own, the field is still parsed with it.
+          return schemaAt(position.path) === node.schema ? body : expression({ ...node, value: bound, body });
         }
         return expression({ ...node, value: bound, body: visit(node.body, aliases) });
       }

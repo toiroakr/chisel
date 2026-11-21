@@ -44,6 +44,7 @@ import type {
   AnySchema,
   ArraySchema,
   DecimalSchema,
+  AnyVariantsSchema,
   ObjectSchema,
   ObjectShape,
   OptionalSchema,
@@ -463,13 +464,35 @@ function labelsOf(frames: Frames): ElementLabels {
 }
 
 function pathOf(frame: Frame, keys: readonly string[]): string {
-  return `${frame.path}${keys.map(key => `.${key}`).join("")}`;
+  return `${frame.path}${stepsOf(frame.scope, keys).join("")}`;
 }
 
 // The rendered path is for reports; positions are found by segments, since a
 // key holding "." renders the same as the nested path it spells.
 function segmentsOf(frame: Frame, keys: readonly string[]): readonly string[] {
-  return [...frame.segments, ...keys.map(key => `.${key}`)];
+  return [...frame.segments, ...stepsOf(frame.scope, keys)];
+}
+
+// The segments a path takes from a scope, naming the case of each sum it
+// passes through as the partition does (`.丁`, `@あり`, `.戊`): the case that
+// declares the next key, the first of them where several do. A sum's
+// discriminant is read on the sum itself.
+function stepsOf(scope: AnySchema, keys: readonly string[]): readonly string[] {
+  const steps: string[] = [];
+  let current: AnySchema | undefined = scope;
+  for (const key of keys) {
+    if (current !== undefined && isVariantsSchema(current) && key !== current.discriminant) {
+      const tag = (current.variantTags as readonly string[]).find(candidate =>
+        Object.hasOwn((current as AnyVariantsSchema).variants[candidate]!.shape, key));
+      if (tag !== undefined) {
+        steps.push(`@${tag}`);
+        current = current.variants[tag] as AnySchema;
+      }
+    }
+    steps.push(`.${key}`);
+    current = current?.kind === "object" ? (current as ObjectSchema<ObjectShape>).shape[key] : undefined;
+  }
+  return steps;
 }
 
 function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {

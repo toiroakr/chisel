@@ -89,3 +89,65 @@ describe("a match over a field of the input", () => {
       .toStrictEqual({ result: { verdict: "owner", name: "x" }, effects: [] });
   });
 });
+
+describe("a guard on a field of a sum's case", () => {
+  const no = () => ({ result: { 結果: "却下" as const }, effects: [] });
+  const yes = () => ({ result: { 結果: "受付" as const }, effects: [] });
+  const 丁 = c.variants("有無", { なし: c.object({}), あり: c.object({ 戊: c.int().min(3) }) });
+  const 受け付ける = c.behavior("受け付ける", {
+    input: c.variants("状態", { 入力済み: c.object({ 丁 }) }),
+    result: c.variants("結果", { 受付: c.object({}), 却下: c.object({}) }),
+    effects: c.variants("種類", {}),
+  });
+  const 五以上 = c.implement(受け付ける, { cases: { 入力済み: c.action("五以上", {
+    guards: input => [input.丁.有無.$eq("あり").$and(input.丁.戊.$gte(5)).$else(no)], run: yes,
+  }) } });
+  const rows = c.examples(受け付ける, { なし: { given: { 状態: "入力済み", 丁: { 有無: "なし" } }, expect: no() } });
+
+  it("draws its border on the field under the case, so generate composes each point by taking the case", () => {
+    const generated = c.generate(rows, 五以上);
+    expect(generated.notComposed).toStrictEqual([]);
+    expect(generated.rows.map(row => [row.name.replace("受け付ける: ", ""), row.given])).toStrictEqual([
+      ["@入力済み.丁 = あり", { 状態: "入力済み", 丁: { 有無: "あり", 戊: 3 } }],
+      ["@入力済み.丁@あり.戊 IN (> 3)", { 状態: "入力済み", 丁: { 有無: "あり", 戊: 4 } }],
+      ["@入力済み.丁@あり.戊 = 5 <= v", { 状態: "入力済み", 丁: { 有無: "あり", 戊: 5 } }],
+      ["@入力済み.丁@あり.戊 IN (> 5)", { 状態: "入力済み", 丁: { 有無: "あり", 戊: 6 } }],
+    ]);
+  });
+
+  it("divides the field under the case into the guard's classes", async () => {
+    const report = await c.check(c.spec("受け付ける", { implementation: 五以上, examples: rows }));
+    const field = report.partitions.find(partition => partition.path === "@入力済み.丁@あり.戊");
+    expect(field?.kind === "divided" ? field.missing : undefined).toStrictEqual(["3 <= v < 5", "5 <= v"]);
+  });
+});
+
+describe("a match over a field under a schema written again", () => {
+  const written = () => c.variants("state", { absent: c.object({}), given: c.object({ value: c.string().min(1) }) });
+  const asked = c.behavior("asked", {
+    input: c.variants("kind", { ask: c.object({ name: written() }) }),
+    result: c.variants("verdict", { owner: c.object({ name: c.string() }), none: c.object({}) }),
+    effects: c.variants("kind", {}),
+  });
+  const rows = c.examples(asked, {
+    absent: { given: { kind: "ask", name: { state: "absent" } }, expect: none },
+    given: { given: { kind: "ask", name: { state: "given", value: "xyz" } }, expect: { result: { verdict: "owner", name: "xyz" }, effects: [] } },
+  });
+  const matching = (schema: ReturnType<typeof written>) => c.implement(asked, { cases: { ask: c.model("who", input => ({
+    result: c.matchValue(schema, input.name, { absent: () => ({ verdict: "none" as const }), given: name => ({ verdict: "owner" as const, name: name.value }) }),
+    effects: [],
+  })) } });
+
+  it("is measured, and proved where the field's schema holds of it", async () => {
+    const report = await c.check(c.spec("asked", { implementation: matching(written()), examples: rows }));
+    expect([report.measures.arms.status, report.measures.rules.status, report.measures.constructions.status]).toStrictEqual(["complete", "complete", "verified"]);
+  });
+
+  it("still parses the field with the schema it is matched under", async () => {
+    const narrower = c.variants("state", { absent: c.object({}), given: c.object({ value: c.string().min(5) }) });
+    const implementation = matching(narrower);
+    const report = await c.check(c.spec("asked", { implementation, examples: rows }));
+    expect([report.measures.arms.status, report.measures.constructions.status]).toStrictEqual(["complete", "refuted"]);
+    await expect(c.perform(implementation, { kind: "ask", name: { state: "given", value: "xyz" } })).rejects.toThrow("Invalid local construction");
+  });
+});

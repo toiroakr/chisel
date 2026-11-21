@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -250,11 +250,18 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
   if (provesNumeric(schema, original, scope, steps) || provesTemporal(schema, original, scope, steps)) return true;
   if (node?.kind === "operation" || node?.kind === "temporal") return false;
   if (schema.kind === "optional") return provesValue(presentSchema(schema as OptionalSchema<unknown>), value, scope, steps, limit);
+  let held: ReadonlySet<string> = new Set();
   if (isTerm(value)) {
     const position = positionData(value);
     if (!position || mayBeAbsent(scope, position.path)) return false;
-    const source = schemaAtPath(scope, position.path);
-    if (!source || position.measure !== "value" || !sameShape(schema, source, limit)) return false;
+    const read = schemaAtPath(scope, position.path);
+    // A sum the steps settled reads as its case; the target is held to that case.
+    const settled = read !== undefined && isVariantsSchema(schema) && read.kind === "object" ? settledTag(schema, read) : undefined;
+    const target = settled === undefined ? schema : taggedCase(schema as AnyVariantsSchema, settled);
+    const source = read;
+    if (!source || position.measure !== "value" || !sameShape(target, source, limit)) return false;
+    // An invariant the source declares as well holds of the value read from it.
+    held = new Set(source.invariants.map(rule => describeRule(rule, "$")));
   } else if (schema.kind === "object") {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
     const shape = (schema as ObjectSchema<ObjectShape>).shape;
@@ -273,6 +280,7 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
     return schema.parse(value).success;
   }
   return schema.invariants.every(invariant => {
+    if (held.has(describeRule(invariant, "$"))) return true;
     const rule = substitute(invariant, value);
     return rule !== undefined && provesRule(rule, scope, steps, limit);
   });
@@ -288,6 +296,11 @@ function includesSchema(target: AnySchema, source: AnySchema, limit: number): bo
     if (domain.exhaustive) return domain.values.every(value => target.parse(value).success);
   }
   return provesValue(target, positionTerm(["value"], "value"), object({ value: source }), [], limit);
+}
+function settledTag(sum: AnyVariantsSchema, read: AnySchema): string | undefined {
+  const discriminant = (read as ObjectSchema<ObjectShape>).shape[sum.discriminant];
+  return sum.variantTags.find(tag => discriminant?.parse(tag).success && Object.hasOwn(sum.variants, tag) &&
+    sum.variantTags.filter(other => discriminant.parse(other).success).length === 1);
 }
 function presentSchema(schema: OptionalSchema<unknown>): AnySchema {
   return schema.invariants.reduce((present, rule) => present.refine(() => rule), schema.schema);
