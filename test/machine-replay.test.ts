@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 
@@ -244,6 +245,23 @@ describe("replaying a machine against the production code", () => {
       reset: async state => { await subject.reset(state); (state as { charged: boolean }).charged = true; },
     };
     expect(await c.replayMachine(flow, inPlace, { faults: false })).toMatchObject({ status: "passed", states: 3 });
+  });
+
+  it("gives reset its own copy of a decimal too, since its digits can be changed in place", async () => {
+    const Balance = c.object({ amount: c.decimal(2) });
+    const Touch = c.variants("type", { touch: c.object({}) });
+    type Held = c.Infer<typeof Balance>;
+    const balance = c.machine("balance", {
+      state: Balance, command: Touch, initial: [{ amount: new Decimal("1.5") }],
+      update: state => ({ state: { amount: state.amount } }),
+    });
+    let held: Held = { amount: new Decimal(0) };
+    const subject: c.MachineSubject<Held, c.Infer<typeof Touch>> = {
+      reset: state => { held = { amount: new Decimal(state.amount) }; (state.amount as unknown as { d: number[] }).d[0] = 7; },
+      run: () => undefined,
+      read: () => held,
+    };
+    expect(await c.replayMachine(balance, subject)).toMatchObject({ status: "passed", replayed: 1 });
   });
 
   it("does not enumerate failure outcomes when faults are off, so an outcomes limit of one is enough", async () => {

@@ -9,7 +9,7 @@ import { isMachineSpecification, specifyMachine } from "./machine-check.js";
 import type { MachineSpecification } from "./machine-check.js";
 import { tagOf } from "./schema.js";
 import type { AnySchema } from "./schema.js";
-import { checks } from "./world.js";
+import { checks, copyOf } from "./world.js";
 
 // What the machine did to a command that the code is asked to do the same to: an effect that failed
 // (`index` is its place in the command's effects) or the process dying after `after` effects. `step`
@@ -107,12 +107,6 @@ export async function replayMachine<State, Command>(target: Machine<State, Comma
   let incomplete: string | undefined;
   let replayed = 0;
 
-  // A state the subject may change in place, parsed afresh so the stored one stays what the machine says.
-  const copyOf = (state: State): State => {
-    const parsed = machine.state.parse(state);
-    if (!parsed.success) throw new SpecificationError(`State ${show(state)} is no state of ${machine.name}: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
-    return parsed.value;
-  };
   const labelOf = (command: Command) => tagOf(machine.command as never, command) ?? (typeof command === "string" ? command : show(command));
   const chainTo = (index: number | undefined, last?: Node<State, Command>): Node<State, Command>[] => {
     const chain: Node<State, Command>[] = last === undefined ? [] : [last];

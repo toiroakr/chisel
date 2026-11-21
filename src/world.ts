@@ -516,7 +516,7 @@ function guardsOf(implementation: AnyImplementation): Rule[] {
 // so it is copied with them, through its own constructor so that another copy
 // of decimal.js is kept; Rational and Temporal values cannot be changed in
 // place, so they are shared.
-function copyOf<V>(value: V): V {
+export function copyOf<V>(value: V): V {
   if (isDecimal(value)) return new (value.constructor as new (from: unknown) => V)(value);
   if (Array.isArray(value)) return value.map(copyOf) as V;
   if (value !== null && typeof value === "object" && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
