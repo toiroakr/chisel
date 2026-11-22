@@ -1,3 +1,4 @@
+import { requireTemporal } from "./temporal-global.js";
 import { Rational } from "./exact.js";
 import { Decimal } from "decimal.js";
 import type {
@@ -43,15 +44,17 @@ function convert(schema: AnySchema, value: unknown, direction: Direction, path: 
     if (typeof value !== "string") {
       return refuse(`Expected a string encoding ${schema.kind}`);
     }
+    const temporal = schema.kind === "instant" || schema.kind === "date" || schema.kind === "time" || schema.kind === "datetime"
+      ? requireTemporal() : undefined;
     try {
       switch (schema.kind) {
         case "int64": if (!/^-?(0|[1-9][0-9]*)$/.test(value)) throw new Error("Invalid bigint"); return BigInt(value);
         case "rational": return new Rational(value);
         case "decimal": return new Decimal(value);
-        case "instant": return Temporal.Instant.from(value);
-        case "date": return Temporal.PlainDate.from(value);
-        case "time": return Temporal.PlainTime.from(value);
-        case "datetime": return Temporal.PlainDateTime.from(value);
+        case "instant": return temporal!.Instant.from(value);
+        case "date": return temporal!.PlainDate.from(value);
+        case "time": return temporal!.PlainTime.from(value);
+        case "datetime": return temporal!.PlainDateTime.from(value);
       }
     } catch {
       return refuse(`Invalid ${schema.kind} string`);

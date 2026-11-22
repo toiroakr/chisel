@@ -1,4 +1,5 @@
-import { modelPaths } from "./model.js";
+import { iterationsOf, modelPaths } from "./model.js";
+import { isTerm } from "./rule.js";
 import type { Branch, RulesDecision } from "./behavior.js";
 import type { Rule } from "./rule.js";
 import { describeRule, describeTerm } from "./rule.js";
@@ -12,6 +13,14 @@ export interface Way {
   readonly choices?: readonly { readonly condition: Rule; readonly outcome: boolean }[];
   readonly steps: readonly Step[];
   readonly exit: number | "otherwise" | "case";
+  // The map or fold whose body one element takes this way through.
+  readonly within?: IterationNode;
+}
+
+export interface IterationNode {
+  readonly kind: "map" | "fold";
+  readonly name: string;
+  readonly values: unknown;
 }
 
 interface Outcome {
@@ -32,6 +41,11 @@ export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): read
 export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): Generator<Way> {
   if (decision.expression !== undefined) {
     for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
+    for (const iteration of iterationsOf(decision.expression)) {
+      const paths = [...modelPaths(iteration.body)];
+      if (paths.every(path => path.steps.length === 0)) continue;
+      for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration };
+    }
     return;
   }
   function* from(index: number, before: readonly Step[]): Generator<Way> {
@@ -81,7 +95,10 @@ export function describeWay(way: Way): string {
     return steps;
   }
   const exit = way.exit === "otherwise" ? "otherwise" : `else of guard ${way.exit + 1}`;
-  return steps === "" ? exit : `${steps} → ${exit}`;
+  const described = steps === "" ? exit : `${steps} → ${exit}`;
+  if (way.within === undefined) return described;
+  const over = isTerm(way.within.values) ? `${describeTerm(way.within.values)}[]` : "an element";
+  return `each of ${over}: ${described}`;
 }
 
 export function* outcomesOf(rule: Rule): Generator<Outcome> {

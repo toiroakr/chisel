@@ -1,8 +1,10 @@
 import { invokeDependency } from "./dependency.js";
 import { DATA, isPromiseLike, snapshotValue } from "./data.js";
-import { interpret, childrenOf, modelDependencyIssue, nodeOf } from "./model.js";
+import { interpret, childrenOf, guardsOf, inlineInputBindings, modelDependencyIssue, nodeOf, translationOf } from "./model.js";
+import type { Translation } from "./model.js";
 import type { DeclaredDependencies, Resolved, Supplied } from "./dependency.js";
 import type {
+  AnySchema,
   AnyVariantsSchema,
   EnumSchema,
   Infer,
@@ -33,7 +35,8 @@ import {
   termData,
   rootsRead, positionOf, describeTerm,
 } from "./rule.js";
-import { offGridEqualityIn } from "./guard-borders.js";
+import { guardScope, offGridEqualityIn } from "./guard-borders.js";
+import { factsOf, leftOutReadIn, leftOutReadInModel } from "./absence.js";
 import { scopesOf } from "./ensures.js";
 import { isVariantsSchema, offGridEquality, schemaAtPath, tagOf } from "./schema.js";
 
@@ -74,7 +77,14 @@ export type Otherwise<Input, Result, Effect, Deps = unknown> =
   | Match<Input, Result, Effect, Deps>;
 
 export interface RulesDecision<Input, Result, Effect, Deps = unknown> {
+  // The model as the analyses read it: with what its bindings hold read where
+  // they are read, so a choice on a bound field is a guard on that field.
   readonly expression?: unknown;
+  // The model as written, which is what runs where `expression` was rewritten,
+  // and the rules and nodes of the one standing for those of the other, so a run
+  // is recorded in the terms the analyses read.
+  readonly runs?: unknown;
+  readonly translate?: Translation;
   readonly kind: "rules";
   readonly id: string;
   readonly guards: readonly Guard<Input, Result, Effect, Deps>[];
@@ -316,6 +326,10 @@ export function behavior<
     if (offGrid !== undefined) {
       throw new SpecificationError(`Ensures ${clause.name} ${offGrid}`);
     }
+    const leftOut = leftOutReadIn(clause.rule, { scope: ensuresScope(clause, options) }, [], "");
+    if (leftOut !== undefined) {
+      throw new SpecificationError(`Ensures ${clause.name} ${leftOut}`);
+    }
   }
   return {
     kind: "behavior",
@@ -410,21 +424,41 @@ export function implement<B extends AnyBehavior>(
     readonly constructs?: readonly Schema<unknown>[];
   }>,
 ): Implementation<NoInfer<B>> {
-  const cases = casesWithoutDefault(definition, options.cases);
+  const written = casesWithoutDefault(definition, options.cases);
+  const writtenTags = new Map<unknown, string[]>();
+  for (const [tag, decision] of Object.entries(written) as [string, unknown][]) {
+    writtenTags.set(decision, [...(writtenTags.get(decision) ?? []), tag]);
+  }
+  const inlined = new Map<unknown, unknown>();
+  for (const [decision, tags] of writtenTags) {
+    const rules = decision as ImplementationCases<AnyBehavior>[string];
+    if (rules.kind !== "rules" || rules.expression === undefined) continue;
+    const schemaAt = (path: readonly string[]) => {
+      const found = tags.map(tag => declaredAt(definition.input.variants[tag], path));
+      return found.every(schema => schema !== undefined && schema === found[0]) ? found[0] : undefined;
+    };
+    const expression = inlineInputBindings(rules.expression, schemaAt);
+    if (expression !== rules.expression) {
+      inlined.set(decision, Object.freeze({ ...rules, expression, runs: rules.expression, translate: translationOf(rules.expression, expression), guards: guardsOf(expression) }));
+    }
+  }
+  const cases = Object.fromEntries(
+    Object.entries(written).map(([tag, decision]) => [tag, inlined.get(decision) ?? decision]),
+  ) as typeof written;
   const tagsOf = new Map<unknown, string[]>();
   for (const [tag, decision] of Object.entries(cases) as [string, unknown][]) {
     tagsOf.set(decision, [...(tagsOf.get(decision) ?? []), tag]);
   }
   for (const decision of Object.values(cases) as ImplementationCases<AnyBehavior>[string][]) {
     if (decision.kind !== "rules" || decision.expression === undefined) continue;
-    const dependencyIssue = modelDependencyIssue(decision.expression, definition, tagsOf.get(decision)!);
+    const dependencyIssue = modelDependencyIssue(decision.runs ?? decision.expression, definition, tagsOf.get(decision)!);
     if (dependencyIssue) throw new SpecificationError(dependencyIssue);
     const inspect = (value: unknown): void => {
       const node = nodeOf(value);
       if (node?.kind === "construct" && DATA in node.schema && !options.constructs?.includes(node.schema)) throw new SpecificationError(`Construction of ${(node.schema as unknown as { name: string }).name} requires an explicit constructs declaration`);
       childrenOf(value).forEach(inspect);
     };
-    inspect(decision.expression);
+    inspect(decision.runs ?? decision.expression);
   }
   for (const [decision, tags] of tagsOf) {
     checkMatch(definition, tags, decision as ImplementationCases<AnyBehavior>[string]);
@@ -436,6 +470,30 @@ export function implement<B extends AnyBehavior>(
     cases,
     controls: options.controls ?? ({} as ControlTable<B["effects"]>),
   };
+}
+
+// The schema a path reaches, through a sum where every case declaring the next
+// key declares it with one schema; undefined where it reaches none or several.
+function declaredAt(schema: Schema<unknown>, keys: readonly string[]): Schema<unknown> | undefined {
+  const unwrapped = (schema as { readonly kind?: string }).kind === "optional" ? (schema as OptionalSchema<unknown>).schema : schema;
+  const [key, ...rest] = keys;
+  if (key === undefined) return unwrapped;
+  if (isVariantsSchema(unwrapped)) {
+    const found = (Object.values(unwrapped.variants) as ObjectSchema<ObjectShape>[]).flatMap(variant => Object.hasOwn(variant.shape, key) ? [variant.shape[key]!] : []);
+    return found.length > 0 && found.every(field => field === found[0]) ? declaredAt(found[0]!, rest) : undefined;
+  }
+  if ((unwrapped as { readonly kind?: string }).kind !== "object") return undefined;
+  const { shape } = unwrapped as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) ? declaredAt(shape[key]!, rest) : undefined;
+}
+
+// The roots an ensures clause reads, the answer narrowed to the cases it names.
+function ensuresScope(clause: EnsuresClause, definition: Pick<AnyBehavior, "input" | "result">): AnySchema {
+  const { result } = definition;
+  const value = clause.cases === undefined || !isVariantsSchema(result)
+    ? result
+    : { ...result, variants: Object.fromEntries(clause.cases.map(tag => [tag, result.variants[tag]])) };
+  return { kind: "object", shape: { input: definition.input, value } } as unknown as AnySchema;
 }
 
 // Not schemaAtPath: that stops at a sum so a match selects its discriminant,
@@ -567,6 +625,18 @@ function checkGuards(
     if (offGrid !== undefined) {
       throw new SpecificationError(`guard in ${decision.id} ${offGrid}`);
     }
+    const roots = { scope: guardScope(definition, tag) };
+    if (decision.expression !== undefined) {
+      const found = leftOutReadInModel(decision.runs ?? decision.expression, roots);
+      if (found !== undefined) throw new SpecificationError(`model ${decision.id} ${found}`);
+      continue;
+    }
+    const facts: ReturnType<typeof factsOf>[number][] = [];
+    for (const candidate of decision.guards) {
+      const found = leftOutReadIn(candidate.condition, roots, facts);
+      if (found !== undefined) throw new SpecificationError(`guard in ${decision.id} ${found}`);
+      facts.push(...factsOf(candidate.condition, true));
+    }
   }
 }
 
@@ -600,6 +670,8 @@ export interface ComparisonReached {
 export interface WayTaken {
   readonly decision: string;
   readonly steps: readonly { readonly distinction: Branch; readonly outcome: boolean | string }[];
+  // The map or fold whose body one element took this way through.
+  readonly within?: unknown;
 }
 
 export interface ArmTaken {
@@ -625,46 +697,26 @@ export async function runTraced<B extends AnyBehavior>(
   readonly arms: readonly ArmTaken[];
   readonly comparisons: readonly ComparisonReached[];
   readonly way: WayTaken | undefined;
+  readonly iterations: readonly WayTaken[];
 }> {
   const definition = implementation.behavior;
-  const parsedInput = definition.input.parse(input);
-  if (!parsedInput.success) {
-    throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
-  }
-
-  if (implementation.external !== undefined) {
-    throw new SpecificationError(
-      `${definition.name} is implemented outside Chisel: ${implementation.external.reason}`,
-    );
-  }
+  const parsedInput = parsedInputOf(implementation, input);
   if (implementation.pipeline !== undefined) {
-    const execution = await runStages(implementation.pipeline, parsedInput.value, deps);
+    const execution = await runStages(implementation.pipeline, parsedInput, deps);
     return {
-      execution: validated(definition, parsedInput.value, execution),
+      execution: validated(definition, parsedInput, execution),
       arms: [],
       comparisons: [],
       way: undefined,
+      iterations: [],
     };
   }
-  const tag = tagOf(definition.input, parsedInput.value);
-  if (tag === undefined) {
-    throw new SpecificationError("Input has no recognized variant");
-  }
-
-  const selected = implementation.cases[
-    tag as keyof ImplementationCases<B>
-  ];
-  if (selected === undefined) {
-    throw new SpecificationError(`No decision for input variant ${tag}`);
-  }
-  if (selected.kind === "todo") {
-    throw new TodoDecision(definition.name, tag, selected.reason);
-  }
-
+  const selected = decisionFor(implementation, parsedInput);
+  const iterations: WayTaken[] = [];
   const arms: ArmTaken[] = [];
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
-  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput.value) : parsedInput.value;
+  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput) : parsedInput;
   const execution =
     selected.kind === "rules"
       ? await decide(
@@ -675,13 +727,15 @@ export async function runTraced<B extends AnyBehavior>(
           (rule, scope) => comparisons.push({ rule, scope }),
           (distinction, outcome) => steps.push({ distinction, outcome }),
           definition,
+          (within, taken) => iterations.push({ decision: selected.id, steps: taken, within }),
         )
-      : await selected.run(parsedInput.value as never, answeringValues(definition, deps) as never);
+      : await selected.run(parsedInput as never, answeringValues(definition, deps) as never);
   return {
     execution: validated(definition, decisionInput, execution),
     arms,
     comparisons,
     way: selected.kind === "rules" ? { decision: selected.id, steps } : undefined,
+    iterations,
   };
 }
 
@@ -720,31 +774,98 @@ async function runStages(
   deps: unknown,
 ): Promise<Execution<unknown, unknown>> {
   const answered = (await runTraced(first, input as never, deps as never)).execution;
-  const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
-  const firstResult = first.behavior.result;
-  const tag = isVariantsSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
-  if (
-    tag === undefined ||
-    departed.includes(tag) ||
-    !second.behavior.input.variantTags.includes(tag)
-  ) {
+  if (continuingTag(first, second, answered) === undefined) {
     return answered;
   }
   const continued = (await runTraced(second, answered.result as never, deps as never)).execution;
   return { result: continued.result, effects: [...answered.effects, ...continued.effects] };
 }
 
+function parsedInputOf(implementation: AnyImplementation, input: unknown): unknown {
+  const definition = implementation.behavior;
+  const parsedInput = definition.input.parse(input);
+  if (!parsedInput.success) {
+    throw new SpecificationError(formatIssues("Invalid input", parsedInput.issues));
+  }
+  if (implementation.external !== undefined) {
+    throw new SpecificationError(
+      `${definition.name} is implemented outside Chisel: ${implementation.external.reason}`,
+    );
+  }
+  return parsedInput.value;
+}
+
+function decisionFor(
+  implementation: AnyImplementation,
+  input: unknown,
+): Exclude<AnyImplementation["cases"][string], { readonly kind: "todo" }> {
+  const definition = implementation.behavior;
+  const tag = tagOf(definition.input, input);
+  if (tag === undefined) {
+    throw new SpecificationError("Input has no recognized variant");
+  }
+  const selected = implementation.cases[tag];
+  if (selected === undefined) {
+    throw new SpecificationError(`No decision for input variant ${tag}`);
+  }
+  if (selected.kind === "todo") {
+    throw new TodoDecision(definition.name, tag, selected.reason);
+  }
+  return selected;
+}
+
+// perform for a caller that cannot await: the same parsing, decision and
+// validation, refusing an implementation whose answer would be a promise.
+export function performSync<B extends AnyBehavior>(
+  implementation: Implementation<B>,
+  input: BehaviorInput<B>,
+  deps?: BehaviorDeps<B>,
+): Execution<BehaviorResult<B>, BehaviorEffect<B>> {
+  return executeSync(implementation as AnyImplementation, input, deps) as Execution<BehaviorResult<B>, BehaviorEffect<B>>;
+}
+
+function executeSync(implementation: AnyImplementation, input: unknown, deps: unknown): Execution<unknown, unknown> {
+  const definition = implementation.behavior;
+  const parsedInput = parsedInputOf(implementation, input);
+  if (implementation.pipeline !== undefined) {
+    const [first, second] = implementation.pipeline;
+    const answered = executeSync(first, parsedInput, deps);
+    if (continuingTag(first, second, answered) === undefined) return validated(definition, parsedInput, answered);
+    const continued = executeSync(second, answered.result, deps);
+    return validated(definition, parsedInput, { result: continued.result, effects: [...answered.effects, ...continued.effects] });
+  }
+  const selected = decisionFor(implementation, parsedInput);
+  const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput) : parsedInput;
+  const execution =
+    selected.kind === "rules"
+      ? decide(selected, decisionInput, deps, [], () => undefined, () => undefined, definition)
+      : selected.run(parsedInput as never, answeringValues(definition, deps) as never);
+  if (isPromiseLike(execution)) {
+    Promise.resolve(execution).catch(() => undefined);
+    throw new SpecificationError(`${definition.name} answered a promise; use perform, which awaits it`);
+  }
+  return validated(definition, decisionInput, execution as Execution<unknown, unknown>);
+}
+
+function continuingTag(first: AnyImplementation, second: AnyImplementation, answered: Execution<unknown, unknown>): string | undefined {
+  const departed = (first.behavior as { readonly departed?: readonly string[] }).departed ?? [];
+  const firstResult = first.behavior.result;
+  const tag = isVariantsSchema(firstResult) ? tagOf(firstResult, answered.result) : undefined;
+  return tag === undefined || departed.includes(tag) || !second.behavior.input.variantTags.includes(tag) ? undefined : tag;
+}
+
 export function traceSync(
   implementation: AnyImplementation,
   input: unknown,
   deps?: unknown,
-): { readonly comparisons: readonly ComparisonReached[]; readonly way: WayTaken | undefined } {
+): { readonly comparisons: readonly ComparisonReached[]; readonly way: WayTaken | undefined; readonly iterations: readonly WayTaken[]; readonly ended?: true; readonly error?: unknown } {
   const parsed = implementation.behavior.input.parse(input);
   const tag = parsed.success ? tagOf(implementation.behavior.input, parsed.value) : undefined;
   const decision = tag === undefined ? undefined : implementation.cases[tag];
   if (!parsed.success || decision?.kind !== "rules") {
-    return { comparisons: [], way: undefined };
+    return { comparisons: [], way: undefined, iterations: [] };
   }
+  const iterations: WayTaken[] = [];
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
   try {
@@ -756,16 +877,20 @@ export function traceSync(
       (rule, scope) => comparisons.push({ rule, scope }),
       (distinction, outcome) => steps.push({ distinction, outcome }),
       implementation.behavior,
+      (within, taken) => iterations.push({ decision: decision.id, steps: taken, within }),
     );
     // A dependency that answers a promise ends the trace where it is called:
     // the comparisons and the way so far are what can be read synchronously.
-    if (isPromiseLike(execution)) Promise.resolve(execution).catch(() => undefined);
-  } catch {
+    if (isPromiseLike(execution)) {
+      Promise.resolve(execution).catch(() => undefined);
+      return { comparisons, way: { decision: decision.id, steps }, iterations };
+    }
+  } catch (error) {
     // Not undefined: the way is settled before a handler runs, so a handler
     // that needs a stand-in generate does not have leaves the way intact.
-    return { comparisons, way: { decision: decision.id, steps } };
+    return { comparisons, way: { decision: decision.id, steps }, iterations, error };
   }
-  return { comparisons, way: { decision: decision.id, steps } };
+  return { comparisons, way: { decision: decision.id, steps }, iterations, ended: true };
 }
 
 export function comparisonsReached(
@@ -784,10 +909,11 @@ function decide<Result, Effect>(
   observe: ComparisonObserver,
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
   definition: AnyBehavior,
+  iterate?: (within: unknown, steps: readonly { readonly distinction: Branch; readonly outcome: boolean | string }[]) => void,
 ): Execution<Result, Effect> | Promise<Execution<Result, Effect>> {
   let resolved = Object.keys(definition.dependencies).length === 0 ? undefined : deps;
   if (decision.expression !== undefined) {
-    const issue = modelDependencyIssue(decision.expression, definition, [tagOf(definition.input, input)!]);
+    const issue = modelDependencyIssue(decision.runs ?? decision.expression, definition, [tagOf(definition.input, input)!]);
     if (issue) throw new SpecificationError(issue);
   }
   if (decision.expression !== undefined && Object.keys(definition.dependencies).length > 0) {
@@ -803,7 +929,12 @@ function decide<Result, Effect>(
   const scope = withDeps(input, resolved);
   if (decision.expression === undefined) deps = answeringValues(definition, deps);
   if (decision.expression !== undefined) {
-    return interpret(decision.expression, scope, { observe, distinguish,
+    const rule = <R>(written: R): R => (decision.translate?.rules.get(written as object) as R | undefined) ?? written;
+    const node = <N>(written: N): N => (decision.translate?.nodes.get(written as object) as N | undefined) ?? written;
+    return interpret(decision.runs ?? decision.expression, scope, {
+      observe: (written, value) => observe(rule(written), value),
+      distinguish: (distinction, outcome) => distinguish(rule(distinction), outcome),
+      ...(iterate === undefined ? {} : { iterate: (within, steps) => iterate(node(within), steps.map(step => ({ ...step, distinction: rule(step.distinction) }))) }),
       invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
     }) as Execution<Result, Effect> | Promise<Execution<Result, Effect>>;

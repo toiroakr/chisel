@@ -39,7 +39,7 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm test",
     "coverage": "vitest run --coverage",
-    "demo": "tsx examples/progressive-demo/run.ts",
+    "demo": "tsx --import ./examples/progressive-demo/temporal.ts examples/progressive-demo/run.ts",
     "demo:type-break": "tsc -p examples/progressive-demo/type-break/tsconfig.json --pretty false",
     "example:check": "tsx src/cli.ts check examples/order-cancellation.spec.ts",
     "example:strict": "tsx src/cli.ts check examples/order-cancellation.spec.ts --strict",
@@ -48,7 +48,7 @@
     "prepublishOnly": "npm run check && npm run build"
   },
   "engines": {
-    "node": ">=26.13.1"
+    "node": "^22.22.0 || ^24.15.0 || >=26.0.0"
   },
   "license": "MIT",
   "dependencies": {
@@ -64,6 +64,7 @@
     "@vitest/coverage-v8": "^5.0.1",
     "esbuild": "0.28.2",
     "pkg-pr-new": "0.0.93",
+    "temporal-polyfill": "1.0.8",
     "typescript": "7.0.2",
     "vitest": "^5.0.1"
   },

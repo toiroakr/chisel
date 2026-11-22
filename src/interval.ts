@@ -218,3 +218,21 @@ function optionalAlong(schema: AnySchema, path: readonly string[]): boolean {
   const child = (schema as ObjectSchema<ObjectShape>).shape[path[0]!];
   return !child || optionalAlong(child, path.slice(1));
 }
+
+// The values a sum, difference or product of numbers may take, read from the
+// bounds of the positions it reads and what the steps settle of them, as exact
+// rationals with no limit of size, for telling a comparison it never meets.
+export function rangeOf(value: unknown, scope: AnySchema, steps: readonly Step[]): { readonly low: Rational; readonly high: Rational } | undefined {
+  const node = nodeOf(value);
+  if (node?.kind === "construct") return rangeOf(node.value, scope, steps);
+  if (node?.kind === "operation" && (node.operator === "add" || node.operator === "subtract" || node.operator === "multiply")) {
+    const left = rangeOf(node.left, scope, steps), right = rangeOf(node.right, scope, steps);
+    if (!left || !right) return undefined;
+    if (node.operator === "add") return { low: left.low.plus(right.low), high: left.high.plus(right.high) };
+    if (node.operator === "subtract") return { low: left.low.minus(right.high), high: left.high.minus(right.low) };
+    const values = [left.low, left.high].flatMap(a => [right.low, right.high].map(b => a.times(b)));
+    return { low: values.reduce(min), high: values.reduce(max) };
+  }
+  const found = interval(value, scope, steps);
+  return found === undefined || onTimeline(found.kind) ? undefined : { low: found.low, high: found.high };
+}

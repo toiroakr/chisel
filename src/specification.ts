@@ -1,5 +1,8 @@
-import { hasScopedChoices } from "./model.js";
-import { verify } from "./proof.js";
+import { answersOf, callsIn, childrenOf, fieldsTurnedOn, iterationsOf, nodeOf, localRoots, localsOf, writtenArgument } from "./model.js";
+import { rangeOf } from "./interval.js";
+import { fractionOf } from "./exact.js";
+import type { Rational } from "./exact.js";
+import { selectedTag, taggedCase, verify } from "./proof.js";
 import type { ProofReport } from "./proof.js";
 import { constantsOf, domainOf } from "./domain.js";
 import { pairCoverage, PAIR_LIMIT } from "./pairs.js";
@@ -22,6 +25,7 @@ import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import {
+  answerSchema,
   comparisonsNotReadOf,
   ensuresBordersOf,
   invariantContradictionsOf,
@@ -42,7 +46,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths } from "./rule.js";
+import { DEPS, localLabel, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths, pathsRead } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -56,7 +60,7 @@ import type { Parting } from "./beside.js";
 import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf, writeExactly } from "./partition.js";
-import { isVariantsSchema, schemaAtPath, tagOf } from "./schema.js";
+import { isVariantsSchema, object, schemaAtPath, tagOf } from "./schema.js";
 import type { AnySchema, AnyVariantsSchema, Tags } from "./schema.js";
 
 interface RunOutcome {
@@ -432,6 +436,7 @@ export async function check(
       .filter(table => !fakeIssues.some(item => item.table.dependency === table.dependency))
       .map(table => [table.dependency, answerFrom(table)] as const),
   );
+  const usableFakes = specification.fakes.filter(table => tables.has(table.dependency));
   const standIns = (row: Example<AnyBehavior>): unknown => ({
     ...Object.fromEntries(tables),
     ...(row.with ?? {}),
@@ -527,6 +532,7 @@ export async function check(
           if (traced.way !== undefined) {
             waysOwed.push(traced.way);
           }
+          waysOwed.push(...traced.iterations);
         } catch (error) {
           const open = openDecisionIn(implementation, error);
           if (open !== undefined) {
@@ -614,6 +620,7 @@ export async function check(
           if (traced.way !== undefined) {
             waysMet.push(traced.way);
           }
+          waysMet.push(...traced.iterations);
           return traced.execution;
         },
       );
@@ -779,7 +786,7 @@ export async function check(
       if (coordinates.some(value => point.contains(value))) {
         return { ...base, status: "met" as const };
       }
-      return { ...base, ...unmetStatus(reachOf(drawn, point, combinations, wayLimit)) };
+      return { ...base, ...unmetStatus(pointFeasibility(drawn, point, specification.implementation!, combinations, wayLimit, usableFakes)) };
     });
     const owed = drawn.border.points.flatMap((point, index) => (point.status === "owed" ? [points[index]!] : []));
     const due =
@@ -845,8 +852,8 @@ export async function check(
     borders.every(border => border.beside?.status !== "not told");
 
   const plans = plansOf(specification.implementation, combinations, wayLimit);
-  const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans);
-  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans);
+  const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans, usableFakes);
+  const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans, usableFakes);
   const lines = [
     ...(arms.status === "unavailable" ? [] : arms.arms),
     ...(rulesMeasure.status === "unavailable" ? [] : rulesMeasure.rules),
@@ -935,6 +942,9 @@ export interface GenerationReport {
 
 export interface GenerationOptions {
   readonly pairs?: { readonly obligations?: number; readonly candidates?: number };
+  // The specification's fakes: rows are traced with them, and a way or a point
+  // turning on a dependency's answer is composed by asking what a fake row asks.
+  readonly fakes?: readonly FakeTable[];
   readonly ways?: boolean;
   // How many combinations of finite values are tried against the invariants
   // relating them, and how many ways are listed, as in CheckOptions.
@@ -971,7 +981,11 @@ export function generate(
       .filter(([, declared]) => declared.takes === "nothing")
       .map(([name, declared]) => [name, declared.output.placeholder(name)]),
   );
+  // Stand-ins a search ran a row it found with, which the row is offered with.
+  const searchedStandIns = new Map<unknown, unknown>();
   const withFrom = (origin: unknown): { readonly with?: unknown } => {
+    const searchedWith = searchedStandIns.get(origin);
+    if (searchedWith !== undefined) return { with: searchedWith };
     const written = answeredRows.find(row => row.given === origin)?.with as
       | Readonly<Record<string, unknown>>
       | undefined;
@@ -982,6 +996,39 @@ export function generate(
     origins.find(given => position.valuesIn(given).length > 0) ??
     definition.input.placeholder();
 
+  const fakeTables = new Map(
+    (options.fakes ?? [])
+      .filter(table => table.behavior === definition.name)
+      .filter(table => !fakeIssuesOf(definition.dependencies, definition.name, options.fakes ?? []).some(item => item.table.dependency === table.dependency))
+      .map(table => [table.dependency, table] as const),
+  );
+  const usableFakes = [...fakeTables.values()];
+  const answering = Object.fromEntries([...fakeTables].map(([name, table]) => [name, answerFrom(table)]));
+  const tracedWith = (stand: unknown): unknown => ({ ...answering, ...(stand as object | undefined) });
+  // A row asking each dependency what one of its fake rows asks: the call's
+  // argument written into the input where the argument reads the input.
+  const askingFakes = (tag: string, decision: unknown, origins: readonly unknown[], reaches: (given: unknown) => boolean): unknown => {
+    const expression = (decision as { readonly expression?: unknown }).expression;
+    if (expression === undefined) return undefined;
+    for (const call of callsIn(expression)) {
+      const table = fakeTables.get(call.dependency);
+      for (const [asked] of table?.rows ?? []) {
+        for (const origin of origins) {
+          const given = writtenArgument(origin, call.input, asked);
+          if (given !== undefined && tagOf(definition.input, given) === tag && definition.input.parse(given).success && reaches(given)) {
+            return given;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+  // What a point or a way that turns on a dependency's answer still needs: a
+  // fake row answering there, asked by an input the row can write.
+  const askedOf = (locals: readonly string[]): string => {
+    const called = [...new Set(locals.map(localLabel).filter(label => label.endsWith("()")))];
+    return called.length === 0 ? "" : ` — ${called.join("・")}がそう答えるfakeの行がない`;
+  };
   const generated: GeneratedExample[] = [];
   const notComposed: string[] = [];
   // A row moved from `from` that breaks an invariant relating finite positions
@@ -1100,7 +1147,7 @@ export function generate(
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
       tagOf(definition.input, given) === drawn.origin?.tag
-        ? comparisonsReached(implementation!, given, deps).filter(item => item.rule === drawn.comparison)
+        ? comparisonsReached(implementation!, given, tracedWith(deps)).filter(item => item.rule === drawn.comparison)
         : [];
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
@@ -1109,7 +1156,7 @@ export function generate(
       const standsAt = [...rows, ...generated].some(row =>
         reachedBy(row.given, row.with).some(item => point.contains(drawn.coordinateOf(item))),
       );
-      if (standsAt || unmetStatus(reachOf(drawn, point, combinations, wayLimit)).status === "no row owed") {
+      if (standsAt || unmetStatus(pointFeasibility(drawn, point, implementation!, combinations, wayLimit, usableFakes)).status === "no row owed") {
         continue;
       }
       const origin =
@@ -1124,10 +1171,14 @@ export function generate(
         reachedBy(candidate, withFrom(origin).with).some(item => point.contains(drawn.coordinateOf(item)));
       const given =
         candidates.find(candidate => definition.input.parse(candidate).success && reaches(candidate)) ??
+        askingFakes(drawn.origin?.tag ?? "", drawn.origin?.decision, [
+          ...origins.filter(candidate => tagOf(definition.input, candidate) === drawn.origin?.tag),
+          ...(drawn.origin === undefined ? [] : [definition.input.placeholderFor(drawn.origin.tag)]),
+        ], reaches) ??
         candidates.find(candidate => !definition.input.parse(candidate).success) ??
         candidates.find(candidate => definition.input.parse(candidate).success);
       if (given === undefined) {
-        notComposed.push(`${drawn.path} ${point.role} (${point.relation})`);
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})${askedOf(drawn.segments.flatMap(segment => segment.startsWith(".#local:") ? [segment.slice(1)] : []))}`);
       } else {
         offer({
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
@@ -1149,7 +1200,7 @@ export function generate(
       owed.some(standsAt) &&
       owed.every(
         point =>
-          standsAt(point) || unmetStatus(reachOf(drawn, point, combinations, wayLimit)).status === "no row owed",
+          standsAt(point) || unmetStatus(pointFeasibility(drawn, point, implementation!, combinations, wayLimit, usableFakes)).status === "no row owed",
       );
     const found = due ? besideOf(definition, implementation!, drawn, items) : undefined;
     if (found?.beside.status !== "not told") {
@@ -1204,8 +1255,11 @@ export function generate(
     if (decision.kind !== "rules") {
       continue;
     }
-    const wayOf = (given: unknown, deps: unknown) => traceSync(implementation!, given, deps).way;
+    const wayOf = (given: unknown, deps: unknown) => traceSync(implementation!, given, tracedWith(deps)).way;
     const takes = (given: unknown, deps: unknown, way: Way) => {
+      if (way.within !== undefined) {
+        return traceSync(implementation!, given, tracedWith(deps)).iterations.some(taken => taken.within === way.within && sameSteps(taken.steps, way.steps));
+      }
       const taken = wayOf(given, deps);
       return taken !== undefined && sameSteps(taken.steps, way.steps);
     };
@@ -1239,10 +1293,6 @@ export function generate(
       definition.input.placeholderFor(tag),
     ];
     const plan = plans.get(decision);
-    if (plan?.kind === "scoped") {
-      notComposed.push(`${decision.id}: local and iteration branch coverage is not yet supported`);
-      continue;
-    }
     if (plan?.kind === "too many") {
       notComposed.push(`${decision.id}: ${tooManyWays(wayLimit)}ため組み立てない`);
       continue;
@@ -1257,7 +1307,7 @@ export function generate(
       }
       if (
         witness === undefined &&
-        feasibilityOf(way, scopeOf(implementation!, tag), undefined, combinations).kind === "infeasible"
+        wayFeasibility(way, implementation!, tag, decision, combinations, usableFakes).kind === "infeasible"
       ) {
         continue;
       }
@@ -1265,7 +1315,11 @@ export function generate(
         candidate !== undefined && takes(candidate.given, withFrom(candidate.origin).with, way)
           ? candidate
           : undefined;
+      const throughFakes = askingFakes(tag, decision, origins_, given => takes(given, withFrom(given).with, way));
       const composed =
+        (throughFakes === undefined ? undefined : { given: throughFakes, origin: throughFakes }) ??
+        (way.within === undefined ? undefined : composeElement(way)) ??
+        taken(searched(way)) ??
         taken(composeForWay(way, tag)) ??
         (options.ways !== true
           ? undefined
@@ -1280,8 +1334,46 @@ export function generate(
           ...withFrom(composed.origin),
         });
       } else {
-        notComposed.push(`${decision.id}: ${describeWay(way)}`);
+        notComposed.push(`${decision.id}: ${describeWay(way)}${askedOf(way.steps.flatMap(step => localRoots(step.distinction)))}`);
       }
+    }
+
+    // A way one element takes through an iteration's body: a row whose array
+    // holds that one element, taken from what the rows hold or moved into each
+    // class of the element's positions.
+    function composeElement(way: Way): { readonly given: unknown; readonly origin: unknown } | undefined {
+      const values = way.within?.values;
+      const position = isTerm(values) ? positionData(values) : undefined;
+      if (position === undefined || position.measure !== "value" || position.path.some(key => key.startsWith("#"))) return undefined;
+      const read = (given: unknown) => position.path.reduce<unknown>((at, key) => (at !== null && typeof at === "object" ? (at as Record<string, unknown>)[key] : undefined), given);
+      const held = [...rows, ...generated].flatMap(row => {
+        const array = read(row.given);
+        return Array.isArray(array) ? array : [];
+      });
+      const trail = [`@${tag}`, ...position.path.map(key => `.${key}`), "[]"];
+      const moved = [...positionsByPath.values()].filter(at => at.kind === "divided" && trailKey(at.segments.slice(0, trail.length)) === trailKey(trail));
+      for (const origin of origins_) {
+        const candidates = [
+          ...held.map(element => writtenArgument(origin, values, [element])),
+          ...moved.flatMap(at => at.kind === "divided" ? at.classes.map(name => at.place(writtenArgument(origin, values, held.slice(0, 1)) ?? origin, name)) : []),
+        ];
+        for (const given of candidates) {
+          if (given !== undefined && definition.input.parse(given).success && takes(given, withFrom(origin).with, way)) return { given, origin };
+        }
+      }
+      return undefined;
+    }
+
+    // A way through a value the model computes, from an input the search found
+    // taking it.
+    function searched(way: Way): { readonly given: unknown; readonly origin: unknown } | undefined {
+      if (opaqueRead(way, decision).length === 0) return undefined;
+      const factored = factoredWitness(way, implementation!, tag, decision, combinations)?.given;
+      const found = searchedWitness(way, implementation!, tag, decision, combinations, usableFakes)
+        ?? (factored === undefined ? undefined : { given: factored });
+      if (found === undefined) return undefined;
+      if (found.with !== undefined) searchedStandIns.set(found.given, found.with);
+      return { given: found.given, origin: found.given };
     }
 
     function composeFromReach(
@@ -1300,7 +1392,7 @@ export function generate(
 
     function composeFromWitnesses(way: Way): { readonly given: unknown; readonly origin: unknown } | undefined {
       for (const origin of origins_) {
-        const witnesses = witnessesOf(way, scopeOf(implementation!, tag), { discriminant, tag }, combinations);
+        const witnesses = witnessesOf(way, scopeOf(implementation!, tag, decision as { readonly expression?: unknown }), { discriminant, tag }, combinations);
         if (witnesses === undefined) {
           break;
         }
@@ -1554,6 +1646,7 @@ function measureRules(
   owed: readonly WayTaken[],
   combinations: number,
   plans: ReadonlyMap<unknown, WayPlan>,
+  fakes?: readonly FakeTable[],
 ): RulesMeasure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
@@ -1563,31 +1656,31 @@ function measureRules(
   }
   const decided = decisionsWithCases(implementation);
   const notRead = decided.flatMap(([decision]) =>
-    decision.kind === "decision" || (decision.kind === "rules" && ["too many", "scoped"].includes(plans.get(decision)?.kind ?? ""))
+    decision.kind === "decision" || (decision.kind === "rules" && plans.get(decision)?.kind === "too many")
       ? [decision.id]
       : [],
   );
-  const took = (taken: readonly WayTaken[], decision: string, steps: Parameters<typeof sameSteps>[0]) =>
-    taken.some(item => item.decision === decision && sameSteps(item.steps, steps));
+  const took = (taken: readonly WayTaken[], decision: string, way: Way) =>
+    taken.some(item => item.decision === decision && item.within === way.within && sameSteps(item.steps, way.steps));
   const rules = decided.flatMap(([decision, tags]) => {
     const plan = plans.get(decision);
-    if (decision.kind !== "rules" || plan === undefined || (plan.kind === "too many" || plan.kind === "scoped")) {
+    if (decision.kind !== "rules" || plan === undefined || plan.kind === "too many") {
       return [];
     }
     const ways = plan.kind === "finite" ? plan.reached.map(item => item.way) : plan.ways;
     return ways.map((way): RuleCoverage => {
       const base = { decision: decision.id, way: describeWay(way) };
-      if (took(met, decision.id, way.steps)) {
+      if (took(met, decision.id, way)) {
         return { ...base, status: "met" };
       }
-      if (took(owed, decision.id, way.steps)) {
+      if (took(owed, decision.id, way)) {
         return { ...base, status: "answer owed" };
       }
       return plan.kind === "finite"
         ? { ...base, status: "gap" }
         : {
             ...base,
-            ...unmetStatus(tags.map(tag => feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations))),
+            ...unmetStatus(tags.map(tag => wayFeasibility(way, implementation, tag, decision, combinations, fakes))),
           };
     });
   });
@@ -1605,6 +1698,7 @@ function measureArms(
   owed: readonly ArmTaken[],
   combinations: number,
   plans: ReadonlyMap<unknown, WayPlan>,
+  fakes?: readonly FakeTable[],
 ): Measure {
   if (implementation === undefined || implementation.pipeline !== undefined) {
     return { status: "unavailable", reason: "not applicable" };
@@ -1614,7 +1708,7 @@ function measureArms(
   }
   const decided = decisionsWithCases(implementation);
   const notRead = decided.flatMap(([decision]) =>
-    decision.kind === "decision" || (decision.kind === "rules" && ["too many", "scoped"].includes(plans.get(decision)?.kind ?? ""))
+    decision.kind === "decision" || (decision.kind === "rules" && plans.get(decision)?.kind === "too many")
       ? [decision.id]
       : [],
   );
@@ -1622,7 +1716,7 @@ function measureArms(
     taken.some(item => item.decision === decision && item.guard === guard && item.arm === arm);
   const arms = decided.flatMap(([decision, tags]) => {
     const plan = plans.get(decision);
-    if (decision.kind !== "rules" || plan === undefined || (plan.kind === "too many" || plan.kind === "scoped")) {
+    if (decision.kind !== "rules" || plan === undefined || plan.kind === "too many") {
       return [];
     }
     const ways =
@@ -1631,7 +1725,7 @@ function measureArms(
         : tags.flatMap(tag =>
             plan.ways.map(way => ({
               way,
-              feasibility: feasibilityOf(way, scopeOf(implementation, tag), undefined, combinations),
+              feasibility: wayFeasibility(way, implementation, tag, decision, combinations, fakes),
             })),
           );
     const through = (index: number, arm: string) =>
@@ -1738,6 +1832,305 @@ export function externalsIn(implementation: AnyImplementation | undefined): stri
   return implementation.pipeline === undefined
     ? []
     : implementation.pipeline.flatMap(stage => externalsIn(stage));
+}
+
+// Inputs of a case run through a decision. `taken` keeps, for each way (or, through
+// an iteration, each way one element takes), the first input that takes it with
+// the fakes answering the function dependencies and the value dependencies'
+// stand-ins it was run with: a row generate can offer. `possible` and `reached`
+// are what any input takes and reaches when a dependency may give any answer its
+// contract allows (its output schema and its ensures of the argument), and
+// `exhaustive` says those runs were every input, stand-in and answer there is,
+// so a way none of them takes, or a point none reaches, is one nothing does.
+interface Searched {
+  readonly taken: readonly { readonly way: WayTaken; readonly given: unknown; readonly with?: unknown }[];
+  readonly possible: readonly WayTaken[];
+  readonly reached: readonly ComparisonReached[];
+  readonly exhaustive: boolean;
+}
+const searches = new WeakMap<object, Map<string, Searched>>();
+const fakesIds = new WeakMap<object, number>();
+let fakesCount = 0;
+const IMPOSSIBLE = Symbol("an answer the dependency's contract refuses");
+function searchedWays(
+  implementation: Implementation<AnyBehavior>,
+  tag: string,
+  decision: unknown,
+  combinations: number,
+  fakes: readonly FakeTable[] = [],
+): Searched {
+  const definition = implementation.behavior;
+  if (!fakesIds.has(fakes)) fakesIds.set(fakes, ++fakesCount);
+  const key = `${tag}\u0000${combinations}\u0000${fakesIds.get(fakes)}`;
+  const cached = searches.get(decision as object)?.get(key);
+  if (cached !== undefined) return cached;
+  const answering = Object.fromEntries(fakes.map(table => [table.dependency, answerFrom(table)]));
+  const rules = Object.values(implementation.cases).flatMap(item => item.kind === "rules" ? item.guards.map(guard => guard.condition) : []);
+  const values = Object.entries(definition.dependencies).filter(([, declared]) => declared.takes === "nothing");
+  const expression = (decision as { readonly expression?: unknown }).expression;
+  // Only the fields the ways turn on are tried, the rest held at a placeholder,
+  // where no invariant of the case relates the two.
+  const variant = definition.input.variants[tag] as AnySchema & { readonly shape: Readonly<Record<string, AnySchema>> };
+  const turned = expression === undefined ? undefined : fieldsTurnedOn(expression, argumentMatters(definition, variant.shape));
+  const caseRules = [...variant.invariants, ...definition.input.invariants];
+  const projected = turned !== undefined && caseRules.every(rule => pathsRead(rule).every(path => path.length > 0 && turned.has(path[0]!)))
+    ? object(Object.fromEntries(Object.entries(variant.shape).filter(([key]) => turned.has(key)))) as AnySchema
+    : undefined;
+  const placeholder = definition.input.placeholderFor(tag) as Record<string, unknown>;
+  const inputSchema = projected ?? definition.input as AnySchema;
+  const schema = values.length === 0
+    ? inputSchema
+    : object({ input: inputSchema, deps: object(Object.fromEntries(values.map(([name, declared]) => [name, declared.output as AnySchema]))) }) as AnySchema;
+  const raw = domainOf(schema, combinations, constantsOf(rules));
+  const filled = (input: unknown) => (projected === undefined ? input : { ...placeholder, ...(input as object), [definition.input.discriminant]: tag });
+  const domain = {
+    exhaustive: raw.exhaustive,
+    values: raw.values.map(value => (values.length === 0 ? filled(value) : { ...(value as object), input: filled((value as { input: unknown }).input) })),
+  };
+  const calls = expression === undefined ? [] : callsIn(expression);
+  const inputOf = (candidate: unknown) => (values.length === 0 ? candidate : (candidate as { input: unknown }).input);
+  const standOf = (candidate: unknown) => (values.length === 0 ? undefined : (candidate as { deps: object }).deps);
+  // Each input also asks every call what a fake row asks, where the argument
+  // reads the input, so an answer a fake gives is reached.
+  const asking = (candidate: unknown): readonly unknown[] => calls.flatMap(call =>
+    (fakes.find(table => table.dependency === call.dependency)?.rows ?? []).flatMap(([asked]) => {
+      const written = writtenArgument(inputOf(candidate), call.input, asked);
+      return written === undefined ? [] : [values.length === 0 ? written : { ...(candidate as object), input: written }];
+    }));
+  const candidates = [...domain.values, ...domain.values.flatMap(asking)].filter(candidate => tagOf(definition.input, inputOf(candidate)) === tag);
+  const taken: { way: WayTaken; given: unknown; with?: unknown }[] = [];
+  const possible: WayTaken[] = [];
+  const reached: ComparisonReached[] = [];
+  const note = (ways: WayTaken[], way: WayTaken) => {
+    if (!ways.some(item => item.within === way.within && sameSteps(item.steps, way.steps))) ways.push(way);
+  };
+  for (const candidate of candidates) {
+    const traced = traceSync(implementation, inputOf(candidate), { ...answering, ...standOf(candidate) });
+    // A run that fails took the way it failed on: a row there shows the failure.
+    if (traced.ended !== true && traced.error === undefined) continue;
+    for (const way of [...(traced.way === undefined ? [] : [traced.way]), ...traced.iterations]) {
+      if (!taken.some(item => item.way.within === way.within && sameSteps(item.way.steps, way.steps))) {
+        taken.push({ way, given: inputOf(candidate), ...(standOf(candidate) === undefined ? {} : { with: standOf(candidate) }) });
+      }
+    }
+  }
+  // Every answer the contract allows: one answer for each dependency called, so
+  // the runs are every answer only where each is called at one place, not in an
+  // iteration.
+  const called = [...new Set(calls.map(call => call.dependency))];
+  const answers = called.map(name => {
+    const declared = Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined;
+    const bound = expression === undefined ? undefined : answersOf(expression).find(answer => answer.dependency === name)?.schema;
+    if (declared?.takes !== "input") return { values: [], exhaustive: false };
+    return domainOf(bound === undefined ? declared.output as AnySchema : answerSchema(declared.output as AnySchema, bound as AnySchema), combinations);
+  });
+  const once = called.every(name => calls.filter(call => call.dependency === name).length === 1) &&
+    (expression === undefined || iterationsOf(expression).every(iteration => callsIn(iteration.body).length === 0));
+  let exhaustive = domain.exhaustive && answers.every(answer => answer.exhaustive) && once;
+  let budget = combinations;
+  const assignments = function* (index: number, chosen: readonly unknown[]): Generator<readonly unknown[]> {
+    if (index === answers.length) { yield chosen; return; }
+    for (const value of answers[index]!.values) yield* assignments(index + 1, [...chosen, value]);
+  };
+  search: for (const candidate of domain.values.filter(value => tagOf(definition.input, inputOf(value)) === tag)) {
+    for (const assignment of assignments(0, [])) {
+      if (--budget < 0) { exhaustive = false; break search; }
+      const answer = Object.fromEntries(called.map((name, index) => [name, (argument: unknown) => {
+        const declared = definition.dependencies[name]!;
+        const injected = declared.takes === "input" ? declared.injected?.behavior : undefined;
+        if (injected !== undefined && brokenEnsures(injected as AnyBehavior, argument, assignment[index]) !== undefined) throw IMPOSSIBLE;
+        return assignment[index];
+      }]));
+      const traced = traceSync(implementation, inputOf(candidate), { ...answer, ...standOf(candidate) });
+      if (traced.error === IMPOSSIBLE) continue;
+      // A run answering a promise was not followed to its end.
+      if (traced.ended !== true && traced.error === undefined) { exhaustive = false; continue; }
+      for (const way of [...(traced.way === undefined ? [] : [traced.way]), ...traced.iterations]) note(possible, way);
+      reached.push(...traced.comparisons);
+    }
+  }
+  for (const item of taken) note(possible, item.way);
+  const searched = { taken, possible, reached, exhaustive };
+  const byTag = searches.get(decision as object) ?? new Map<string, Searched>();
+  byTag.set(key, searched);
+  searches.set(decision as object, byTag);
+  return searched;
+}
+
+function searchedWitness(
+  way: Way,
+  implementation: Implementation<AnyBehavior>,
+  tag: string,
+  decision: unknown,
+  combinations: number,
+  fakes?: readonly FakeTable[],
+): { readonly given: unknown; readonly with?: unknown } | undefined {
+  return searchedWays(implementation, tag, decision, combinations, fakes).taken
+    .find(item => item.way.within === way.within && sameSteps(item.way.steps, way.steps));
+}
+
+// Whether some row could take a way: a way reading a value the model computes
+// (`localsOf`'s opaque locals) is settled by running the case's inputs through
+// the decision, as far as they are few enough to try.
+function wayFeasibility(
+  way: Way,
+  implementation: Implementation<AnyBehavior>,
+  tag: string,
+  decision: unknown,
+  combinations: number,
+  fakes?: readonly FakeTable[],
+): Feasibility {
+  const settled = way.steps.find(step =>
+    step.distinction.kind !== "match" && termPaths(step.distinction).length === 0 && holds(step.distinction, {}) !== step.outcome);
+  if (settled !== undefined) return { kind: "infeasible", reason: "値を読まない条件で、この結果にならない" };
+  const found = feasibilityOf(way, scopeOf(implementation, tag, decision as { readonly expression?: unknown }, way), undefined, combinations);
+  const expression = (decision as { readonly expression?: unknown }).expression;
+  if (found.kind !== "feasible" || expression === undefined) return found;
+  const read = opaqueRead(way, decision);
+  if (read.length === 0) return found;
+  const outside = outsideRange(way, implementation, tag, decision);
+  if (outside !== undefined) return { kind: "infeasible", reason: outside };
+  const searched = searchedWays(implementation, tag, decision, combinations, fakes);
+  if (searched.possible.some(item => item.within === way.within && sameSteps(item.steps, way.steps))) return found;
+  if (searched.exhaustive) {
+    return { kind: "infeasible", reason: "入力の全値を試し、この道筋を通る値がない" };
+  }
+  const factored = factoredSearch(way, implementation, tag, decision, combinations);
+  if (factored === "found") return found;
+  if (factored === "none") return { kind: "infeasible", reason: "積が定数になる因数の組をすべて試し、この道筋を通るものがない" };
+  return { kind: "undecided", reason: `${[...new Set(read.map(localLabel))].join("・")}はモデルが計算する値で、試した入力ではこの道筋を通らない` };
+}
+
+// Whether what a dependency is asked may change what a way takes: unless its
+// ensures say nothing of the argument and it takes every value the input field
+// asked of it may hold.
+function argumentMatters(definition: AnyBehavior, shape: Readonly<Record<string, AnySchema>>): (dependency: string, argument: unknown) => boolean {
+  const plain = new Set(["string", "boolean", "number", "integer"]);
+  return (name, argument) => {
+    const declared = Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined;
+    if (declared?.takes !== "input" || (declared.injected?.behavior.ensures.length ?? 0) > 0) return true;
+    const position = isTerm(argument) ? positionData(argument) : undefined;
+    if (position === undefined || position.measure !== "value" || position.path.length !== 1 || !Object.hasOwn(shape, position.path[0]!)) return true;
+    const field = shape[position.path[0]!]!, taken = declared.input as AnySchema;
+    return !(plain.has(field.kind) && field.kind === taken.kind && field.invariants.length === 0 && taken.invariants.length === 0);
+  };
+}
+
+// What a bind holds, by its local's name.
+function boundValueOf(template: unknown, name: string): unknown {
+  const node = nodeOf(template);
+  if (node?.kind === "bind" && node.name === name) return node.value;
+  for (const child of childrenOf(template)) {
+    const found = boundValueOf(child, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+// A step comparing a computed sum, difference or product with a constant, where
+// the bounds of what it reads leave it no value that takes the step's outcome
+// (two inputs of at least 2 never multiply to less than 4): why, or undefined.
+function outsideRange(way: Way, implementation: Implementation<AnyBehavior>, tag: string, decision: unknown): string | undefined {
+  const expression = (decision as { readonly expression?: unknown }).expression;
+  if (expression === undefined) return undefined;
+  const scope = scopeOf(implementation, tag, decision as { readonly expression?: unknown }, way);
+  for (const step of way.steps) {
+    const rule = step.distinction;
+    if (rule.kind !== "compare" || typeof step.outcome !== "boolean") continue;
+    const [term, constant, operator] = isTerm(rule.left) && !isTerm(rule.right)
+      ? [rule.left, rule.right, rule.operator]
+      : isTerm(rule.right) && !isTerm(rule.left) ? [rule.right, rule.left, mirroredOperator(rule.operator)] : [undefined, undefined, rule.operator];
+    const position = term === undefined ? undefined : positionData(term as Term<unknown>);
+    if (position === undefined || position.measure !== "value" || position.path.length !== 1) continue;
+    const value = boundValueOf(expression, position.path[0]!);
+    if (value === undefined) continue;
+    const range = rangeOf(value, scope, way.steps.filter(other => other !== step) as never);
+    let bound: Rational;
+    try { bound = fractionOf(constant as number); } catch { continue; }
+    if (range === undefined) continue;
+    const meets = (holdsIt: boolean) => {
+      const wanted = holdsIt ? operator : negated[operator];
+      const { low, high } = range;
+      switch (wanted) {
+        case "<": return low.comparedTo(bound) < 0;
+        case "<=": return low.comparedTo(bound) <= 0;
+        case ">": return high.comparedTo(bound) > 0;
+        case ">=": return high.comparedTo(bound) >= 0;
+        case "==": return low.comparedTo(bound) <= 0 && high.comparedTo(bound) >= 0;
+        case "!=": return !(low.comparedTo(bound) === 0 && high.comparedTo(bound) === 0);
+      }
+    };
+    if (!meets(step.outcome)) {
+      return `${localLabel(position.path[0]!)}が取りうる範囲（${String(range.low)}〜${String(range.high)}）では、この結果にならない`;
+    }
+  }
+  return undefined;
+}
+
+const negated: Readonly<Record<string, "<" | "<=" | ">" | ">=" | "==" | "!=">> = { "<": ">=", "<=": ">", ">": "<=", ">=": "<", "==": "!=", "!=": "==" };
+function mirroredOperator(operator: "<" | "<=" | ">" | ">=" | "==" | "!="): "<" | "<=" | ">" | ">=" | "==" | "!=" {
+  return ({ "<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!=" } as const)[operator];
+}
+
+// A way whose step holds that a product of two integer inputs equals a whole
+// number N other than 0 is taken only by inputs whose two factors are a
+// divisor pair of N. Those pairs, with every value of the other fields the ways
+// turn on, are every input that could take it: "found" where one does, "none"
+// where none does and the rest were all tried, undefined where it cannot tell.
+const FACTOR_LIMIT = 10 ** 12;
+function factoredSearch(way: Way, implementation: Implementation<AnyBehavior>, tag: string, decision: unknown, combinations: number): "found" | "none" | undefined {
+  const found = factoredWitness(way, implementation, tag, decision, combinations);
+  return found === undefined ? undefined : found.given !== undefined ? "found" : found.exhaustive ? "none" : undefined;
+}
+function factoredWitness(way: Way, implementation: Implementation<AnyBehavior>, tag: string, decision: unknown, combinations: number): { readonly given?: unknown; readonly exhaustive: boolean } | undefined {
+  const expression = (decision as { readonly expression?: unknown }).expression;
+  const definition = implementation.behavior;
+  if (expression === undefined || Object.keys(definition.dependencies).length > 0) return undefined;
+  for (const step of way.steps) {
+    const rule = step.distinction;
+    if (rule.kind !== "compare" || step.outcome !== (rule.operator === "==") || (rule.operator !== "==" && rule.operator !== "!=")) continue;
+    const [term, constant] = isTerm(rule.left) ? [rule.left, rule.right] : [rule.right, rule.left];
+    const position = isTerm(term) ? positionData(term as Term<unknown>) : undefined;
+    if (position === undefined || position.measure !== "value" || position.path.length !== 1 || typeof constant !== "number" || !Number.isSafeInteger(constant) || constant === 0 || Math.abs(constant) > FACTOR_LIMIT) continue;
+    const product = nodeOf(boundValueOf(expression, position.path[0]!));
+    if (product?.kind !== "operation" || product.operator !== "multiply") continue;
+    const [first, second] = [product.left, product.right].map(side => (isTerm(side) ? positionData(side as Term<unknown>) : undefined));
+    const variant = definition.input.variants[tag] as AnySchema & { readonly shape: Readonly<Record<string, AnySchema>> };
+    if (first === undefined || second === undefined || first.path.length !== 1 || second.path.length !== 1 || first.path[0] === second.path[0]) continue;
+    if ([first, second].some(side => side.measure !== "value" || variant.shape[side.path[0]!]?.kind !== "integer")) continue;
+    const divisors: number[] = [];
+    for (let d = 1; d * d <= Math.abs(constant); d++) {
+      if (constant % d === 0) divisors.push(d, -d, constant / d, -constant / d);
+    }
+    const pairs = [...new Set(divisors)].map(d => [d, constant / d] as const);
+    const turned = fieldsTurnedOn(expression, argumentMatters(definition, variant.shape));
+    const others = Object.fromEntries(Object.entries(variant.shape).filter(([key]) => (turned === undefined || turned.has(key)) && key !== first.path[0] && key !== second.path[0]));
+    const caseRules = [...variant.invariants, ...definition.input.invariants];
+    const separate = turned !== undefined && caseRules.every(rule => pathsRead(rule).every(path => path.length > 0 && turned.has(path[0]!)));
+    const rest = domainOf(object(others) as AnySchema, combinations);
+    const placeholder = definition.input.placeholderFor(tag) as Record<string, unknown>;
+    let tried = 0;
+    for (const [a, b] of pairs) {
+      for (const other of rest.values) {
+        if (++tried > combinations) return { exhaustive: false };
+        const given = { ...placeholder, ...(other as object), [first.path[0]!]: a, [second.path[0]!]: b, [definition.input.discriminant]: tag };
+        if (!definition.input.parse(given).success) continue;
+        const traced = traceSync(implementation, given);
+        if ([...(traced.way === undefined ? [] : [traced.way]), ...traced.iterations].some(taken => taken.within === way.within && sameSteps(taken.steps, way.steps))) return { given, exhaustive: true };
+      }
+    }
+    return { exhaustive: rest.exhaustive && separate };
+  }
+  return undefined;
+}
+
+// The values a way reads that the model computes and no expression of the input
+// stands for.
+function opaqueRead(way: Way, decision: unknown): readonly string[] {
+  const expression = (decision as { readonly expression?: unknown }).expression;
+  if (expression === undefined) return [];
+  const opaque = new Set(localsOf(expression).filter(local => local.opaque).map(local => local.name));
+  return way.steps.flatMap(step => step.distinction.kind === "match" ? [] : localRoots(step.distinction)).filter(name => opaque.has(name));
 }
 
 function unmetStatus(
@@ -1852,6 +2245,30 @@ function mentions(rule: Rule, target: Rule): boolean {
   }
 }
 
+// Whether some row could stand at a guard border point. A comparison reading a
+// value the model computes is settled by the search's runs: one reaching it at
+// the point makes it feasible, and runs of every input and answer none of which
+// do make it infeasible.
+function pointFeasibility(
+  drawn: GuardBorder,
+  point: BorderPoint,
+  implementation: Implementation<AnyBehavior>,
+  combinations: number,
+  wayLimit: number,
+  fakes: readonly FakeTable[],
+): readonly Feasibility[] {
+  const origin = drawn.origin;
+  const expression = (origin?.decision as { readonly expression?: unknown } | undefined)?.expression;
+  if (origin === undefined || expression === undefined) return reachOf(drawn, point, combinations, wayLimit);
+  const opaque = new Set(localsOf(expression).filter(local => local.opaque).map(local => local.name));
+  const read = localRoots(drawn.comparison).filter(name => opaque.has(name));
+  if (read.length === 0) return reachOf(drawn, point, combinations, wayLimit);
+  const searched = searchedWays(implementation, origin.tag, origin.decision, combinations, fakes);
+  if (searched.reached.some(item => item.rule === drawn.comparison && point.contains(drawn.coordinateOf(item)))) return [{ kind: "feasible" }];
+  if (searched.exhaustive) return [{ kind: "infeasible", reason: "入力と依存の答えの全値を試し、この点に届く値がない" }];
+  return [{ kind: "undecided", reason: `${[...new Set(read.map(localLabel))].join("・")}はモデルが計算する値で、試した入力ではこの点に届かない` }];
+}
+
 function reachOf(
   drawn: GuardBorder,
   point: BorderPoint,
@@ -1898,8 +2315,30 @@ function reachOf(
     : prefixes.map(steps => feasibilityOf({ steps }, scope, placement, combinations));
 }
 
-function scopeOf(implementation: Implementation<AnyBehavior>, tag: string): AnySchema {
-  return feasibilityScope(implementation.behavior, tag);
+function scopeOf(
+  implementation: Implementation<AnyBehavior>,
+  tag: string,
+  decision?: { readonly expression?: unknown },
+  way?: Way,
+): AnySchema {
+  const scope = feasibilityScope(implementation.behavior, tag, decision, way?.steps ?? []);
+  return way === undefined ? scope : settledBy(scope, way.steps);
+}
+
+// The scope with each sum field the way settles to one case read as that case,
+// so a field of the case is read with the kind it has there.
+function settledBy(scope: AnySchema, steps: Way["steps"], path: readonly string[] = []): AnySchema {
+  if (scope.kind !== "object") return scope;
+  const { shape } = scope as unknown as { readonly shape: Readonly<Record<string, AnySchema>> };
+  let changed = false;
+  const settled = Object.fromEntries(Object.entries(shape).map(([key, field]: [string, AnySchema]) => {
+    const at = [...path, key];
+    const tag = isVariantsSchema(field) ? selectedTag(field, at, steps) : undefined;
+    const next = tag === undefined ? settledBy(field, steps, at) : settledBy(taggedCase(field as AnyVariantsSchema, tag), steps, at);
+    if (next !== field) changed = true;
+    return [key, next];
+  }));
+  return changed ? ({ ...scope, shape: settled } as AnySchema) : scope;
 }
 
 function coverage(
@@ -2208,34 +2647,45 @@ async function disregardBroken(
 // the invariants relating finite positions keep can take is excluded, like
 // one a rule on the position alone refuses.
 function withJointExclusions(definition: AnyBehavior, position: Position, combinations: number): Position {
-  const [head, ...rest] = position.segments;
-  if (position.kind !== "divided" || head === undefined || rest.length === 0 || !rest.every(step => step.startsWith("."))) {
+  if (position.kind !== "divided") {
     return position;
+  }
+  const refused = position.classes.filter(className => {
+    if (position.excluded.includes(className)) {
+      return true;
+    }
+    const at = finiteCoordinateOf(definition, position, className);
+    return at !== undefined && refusedJointly(at.scope, at.path, at.value, combinations);
+  });
+  return refused.length === position.excluded.length ? position : { ...position, excluded: refused };
+}
+
+// Where a class of a boolean, an enum or a sum field directly under an input
+// case sits for the joint invariant search: the case's scope, the field's keys
+// in it and the value the class stands for.
+export function finiteCoordinateOf(
+  definition: AnyBehavior,
+  position: Position,
+  className: string,
+): { readonly tag: string; readonly scope: AnySchema; readonly path: readonly string[]; readonly value: unknown } | undefined {
+  const [head, ...rest] = position.segments;
+  if (head === undefined || rest.length === 0 || !rest.every(step => step.startsWith("."))) {
+    return undefined;
   }
   const tag = head.slice(1);
   const scope = feasibilityScope(definition, tag);
   const keys = rest.map(step => step.slice(1));
   const field = schemaAtPath(scope, keys);
-  const coordinate = (className: string): { path: readonly string[]; value: unknown } | undefined => {
-    switch (field?.kind) {
-      case "boolean":
-        return { path: keys, value: className === "true" };
-      case "enum":
-        return { path: keys, value: className };
-      case "variants":
-        return { path: [...keys, (field as AnyVariantsSchema).discriminant], value: className };
-      default:
-        return undefined;
-    }
-  };
-  const refused = position.classes.filter(className => {
-    if (position.excluded.includes(className)) {
-      return true;
-    }
-    const at = coordinate(className);
-    return at !== undefined && refusedJointly(scope, at.path, at.value, combinations);
-  });
-  return refused.length === position.excluded.length ? position : { ...position, excluded: refused };
+  switch (field?.kind) {
+    case "boolean":
+      return { tag, scope, path: keys, value: className === "true" };
+    case "enum":
+      return { tag, scope, path: keys, value: className };
+    case "variants":
+      return { tag, scope, path: [...keys, (field as AnyVariantsSchema).discriminant], value: className };
+    default:
+      return undefined;
+  }
 }
 
 // How a decision's ways are measured: by the combinations of the finite values
@@ -2245,8 +2695,7 @@ function withJointExclusions(definition: AnyBehavior, position: Position, combin
 type WayPlan =
   | { readonly kind: "finite"; readonly reached: readonly (Reached & { readonly tag: string })[] }
   | { readonly kind: "ways"; readonly ways: readonly Way[] }
-  | { readonly kind: "too many" }
-  | { readonly kind: "scoped" };
+  | { readonly kind: "too many" };
 
 function plansOf(
   implementation: Implementation<AnyBehavior> | undefined,
@@ -2258,7 +2707,6 @@ function plansOf(
     if (decision.kind !== "rules") {
       continue;
     }
-    if (hasScopedChoices(decision.expression)) { plans.set(decision, { kind: "scoped" }); continue; }
     const reaches = tags.map(tag => ({
       tag,
       reached: decision.expression !== undefined ? undefined : finiteReach(decision, scopeOf(implementation!, tag), combinations, [[implementation!.behavior.input.discriminant]]),

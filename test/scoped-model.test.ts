@@ -168,15 +168,13 @@ it("charges nested iteration proof paths to the same budget", () => {
   expect(c.verify(impl, { ways: 2 }).status).toBe("verified");
 });
 
-it("leaves local and iterated path coverage unmeasured instead of declaring it complete", async () => {
+it("reads a choice on a constant a model binds as settled, owing no row for the outcome it never takes", async () => {
   const definition = c.behavior("local coverage", { input: request, result: c.int(), effects: emptyEffects });
   const impl = c.implement(definition, { cases: { request: c.model("local", () => ({ result: c.bind(c.boolean(), true, value => c.choose(value.$eq(true), 1, 0)), effects: [] })) } });
   const examples = c.examples(definition, { request: { given: { kind: "request" }, expect: { result: 1, effects: [] } } });
   const report = await c.check(c.spec("local coverage", { examples, implementation: impl }));
-  expect(report.measures.constructions.status).toBe("verified");
-  expect(report.measures.arms.status).toBe("unavailable");
-  expect(report.verdict).toBe("undetermined");
-  expect(c.generate(examples, impl, { ways: true }).notComposed).toContain("local: local and iteration branch coverage is not yet supported");
+  expect(report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : report.measures.rules).toStrictEqual(["met", "no row owed"]);
+  expect(report.verdict).toBe("satisfied");
 });
 
 it("never applies one result case's guarantee to a different case", () => {

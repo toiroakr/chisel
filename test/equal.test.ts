@@ -86,7 +86,6 @@ const pairs: [string, unknown, unknown][] = [
   ["typed arrays holding different keys", Object.assign(new Uint8Array([1]), { x: 1 }), new Uint8Array([1])],
   ["typed arrays holding different symbols", Object.assign(new Uint8Array([1]), { [symbol]: 1 }), new Uint8Array([1])],
   ["dates holding different keys", Object.assign(new Date(0), { x: 1 }), new Date(0)],
-  ["invalid dates", new Date(Number.NaN), new Date(Number.NaN)],
   ["a non-enumerable symbol", Object.defineProperty({}, symbol, { value: 1, enumerable: false }), {}],
   ["two symbols of one description", { [Symbol("a")]: 1 }, { [Symbol("a")]: 1 }],
   ["equal decimals", new Decimal("1.50"), new Decimal("1.5")],
@@ -94,7 +93,6 @@ const pairs: [string, unknown, unknown][] = [
   ["rationals", new Rational(1n, 3n), new Rational(2n, 6n)],
   ["temporal dates", Temporal.PlainDate.from("2020-01-01"), Temporal.PlainDate.from("2020-01-01")],
   ["cycles", cycle(), cycle()],
-  ["cycles of different length", loop(1), loop(2)],
   ["a pair refused while matching a set", [new Set([one, two]), one], [new Set([otherTwo, otherOne]), otherTwo]],
   ["a pair refused while matching a map", [new Map([[one, 0], [two, 0]]), one], [new Map([[otherTwo, 0], [otherOne, 0]]), otherTwo]],
 ];
@@ -103,6 +101,15 @@ describe("deepEqual", () => {
   it.each(pairs)("agrees with isDeepStrictEqual on %s", (_, left, right) => {
     expect(deepEqual(left, right)).toBe(isDeepStrictEqual(left, right));
     expect(deepEqual(right, left)).toBe(isDeepStrictEqual(right, left));
+  });
+
+  // Node 22 answered these otherwise; the expectations are those of Node 24 and later.
+  it.each([
+    ["invalid dates", new Date(Number.NaN), new Date(Number.NaN), true],
+    ["cycles of different length", loop(1), loop(2), false],
+  ] as const)("decides %s as current Node does", (_, left, right, expected) => {
+    expect(deepEqual(left, right)).toBe(expected);
+    expect(deepEqual(right, left)).toBe(expected);
   });
 
   // isDeepStrictEqual reads no own key of a Temporal value, so it takes any two as equal.

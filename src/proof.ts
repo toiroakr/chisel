@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -40,16 +40,17 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
       continue;
     }
     const base = { decision: decision.id };
-    const dependencyIssue = modelDependencyIssue(decision.expression, definition, [tag]);
+    const written = decision.runs ?? decision.expression;
+    const dependencyIssue = modelDependencyIssue(written, definition, [tag]);
     if (dependencyIssue) { decisions.push({ ...base, status: "undetermined", reason: dependencyIssue }); continue; }
-    const calls = containsCalls(decision.expression);
+    const calls = containsCalls(written);
     const domain = domainOf(object({ input: definition.input, deps: object(Object.fromEntries(Object.entries(definition.dependencies).filter(([, dependency]) => dependency.takes === "nothing").map(([name, dependency]) => [name, dependency.output]))) }), candidates, constantsOf(decision.guards.map(guard => guard.condition)));
     let failed: ConstructionProof | undefined;
     for (const candidate of calls ? [] : domain.values) {
       const { input, deps } = candidate as { input: unknown; deps: unknown };
       if (tagOf(definition.input, input) !== tag) continue;
       try {
-        const execution = interpret(decision.expression, withDeps(input, Object.keys(definition.dependencies).length ? deps : undefined)) as { result: unknown; effects: readonly unknown[] };
+        const execution = interpret(written, withDeps(input, Object.keys(definition.dependencies).length ? deps : undefined)) as { result: unknown; effects: readonly unknown[] };
         const result = definition.result.parse(execution.result);
         if (!result.success) throw new Error(result.issues.map(issue => `${issue.path}: ${issue.message}`).join("; "));
         if (!Array.isArray(execution.effects)) throw new Error("Effects must be an array");
@@ -69,7 +70,7 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
     const scope = feasibilityScope(definition, tag);
     const budget = { remaining: ways };
     let proven = true;
-    for (const path of modelPaths(decision.expression)) {
+    for (const path of modelPaths(written)) {
       if (--budget.remaining < 0) { proven = false; break; }
       if (feasibilityOf({ steps: availableSteps(path.steps, scope) }, scope, undefined, candidates).kind === "infeasible") continue;
       const prepared = prepareExpression(path.value, definition, tag, scope, path.steps, candidates, budget);
@@ -179,7 +180,7 @@ function selectedCase(schema: AnySchema, path: readonly string[], steps: readonl
   const selected = selectedTag(schema, path, steps);
   return selected === undefined ? schema : taggedCase(schema, selected);
 }
-function selectedTag(schema: AnyVariantsSchema, path: readonly string[], steps: readonly Step[]): string | undefined {
+export function selectedTag(schema: AnyVariantsSchema, path: readonly string[], steps: readonly Step[]): string | undefined {
   let candidates = schema.variantTags as readonly string[];
   for (const step of steps) {
     const rule = step.distinction;
@@ -212,7 +213,7 @@ function pipelineBoundary(first: AnyImplementation, second: AnyImplementation, l
     reason: verified ? "Every forwarded result satisfies the next stage's input" : "The next stage's input is not proved for every forwarded result",
   };
 }
-function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
+export function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
   const variant = sum.variants[tag] as ObjectSchema<ObjectShape>;
   const declared = Object.hasOwn(variant.shape, sum.discriminant) ? variant.shape[sum.discriminant] : undefined;
   const discriminant = declared ? declared.refine(value => ({ kind: "compare", left: value, operator: "==", right: tag })) : literal(tag);
@@ -226,18 +227,42 @@ function intermediates(value: unknown, prove: (schema: AnySchema, value: unknown
   const node = nodeOf(value);
   return (node?.kind !== "construct" || prove(node.schema, node.value)) && childrenOf(value).every(child => intermediates(child, prove));
 }
-function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, steps: readonly Step[], limit: number): boolean {
+// The scope with each sum field the steps settle to one case read as that case,
+// so a field of the case is reached under a choice on its discriminant.
+function narrowedBy(scope: AnySchema, steps: readonly Step[], path: readonly string[] = []): AnySchema {
+  if (scope.kind !== "object") return scope;
+  const { shape } = scope as ObjectSchema<ObjectShape>;
+  let changed = false;
+  const narrowed = Object.fromEntries(Object.entries(shape).map(([key, field]) => {
+    const at = [...path, key];
+    const selected = isVariantsSchema(field) ? selectedTag(field, at, steps) : undefined;
+    const next = selected !== undefined ? narrowedBy(taggedCase(field as AnyVariantsSchema, selected), steps, at) : narrowedBy(field, steps, at);
+    if (next !== field) changed = true;
+    return [key, next];
+  }));
+  if (!changed) return scope;
+  return (scope as ObjectSchema<ObjectShape>).invariants.reduce((current, rule) => current.refine(() => rule), object(narrowed));
+}
+function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema, steps: readonly Step[], limit: number): boolean {
+  const scope = narrowedBy(unnarrowed, steps);
   const node = nodeOf(original);
   const value = node?.kind === "construct" ? node.value : original;
   if (!containsSymbolic(value)) return schema.parse(value).success;
   if (provesNumeric(schema, original, scope, steps) || provesTemporal(schema, original, scope, steps)) return true;
   if (node?.kind === "operation" || node?.kind === "temporal") return false;
   if (schema.kind === "optional") return provesValue(presentSchema(schema as OptionalSchema<unknown>), value, scope, steps, limit);
+  let held: ReadonlySet<string> = new Set();
   if (isTerm(value)) {
     const position = positionData(value);
     if (!position || mayBeAbsent(scope, position.path)) return false;
-    const source = schemaAtPath(scope, position.path);
-    if (!source || position.measure !== "value" || !sameShape(schema, source, limit)) return false;
+    const read = schemaAtPath(scope, position.path);
+    // A sum the steps settled reads as its case; the target is held to that case.
+    const settled = read !== undefined && isVariantsSchema(schema) && read.kind === "object" ? settledTag(schema, read) : undefined;
+    const target = settled === undefined ? schema : taggedCase(schema as AnyVariantsSchema, settled);
+    const source = read;
+    if (!source || position.measure !== "value" || !sameShape(target, source, limit)) return false;
+    // An invariant the source declares as well holds of the value read from it.
+    held = new Set(source.invariants.map(rule => describeRule(rule, "$")));
   } else if (schema.kind === "object") {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
     const shape = (schema as ObjectSchema<ObjectShape>).shape;
@@ -256,6 +281,7 @@ function provesValue(schema: AnySchema, original: unknown, scope: AnySchema, ste
     return schema.parse(value).success;
   }
   return schema.invariants.every(invariant => {
+    if (held.has(describeRule(invariant, "$"))) return true;
     const rule = substitute(invariant, value);
     return rule !== undefined && provesRule(rule, scope, steps, limit);
   });
@@ -271,6 +297,11 @@ function includesSchema(target: AnySchema, source: AnySchema, limit: number): bo
     if (domain.exhaustive) return domain.values.every(value => target.parse(value).success);
   }
   return provesValue(target, positionTerm(["value"], "value"), object({ value: source }), [], limit);
+}
+function settledTag(sum: AnyVariantsSchema, read: AnySchema): string | undefined {
+  const discriminant = (read as ObjectSchema<ObjectShape>).shape[sum.discriminant];
+  return sum.variantTags.find(tag => discriminant?.parse(tag).success && Object.hasOwn(sum.variants, tag) &&
+    sum.variantTags.filter(other => discriminant.parse(other).success).length === 1);
 }
 function presentSchema(schema: OptionalSchema<unknown>): AnySchema {
   return schema.invariants.reduce((present, rule) => present.refine(() => rule), schema.schema);
