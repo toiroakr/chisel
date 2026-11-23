@@ -285,3 +285,42 @@ it("uses specification errors for missing functions, arguments, and postconditio
   await expect(c.perform(impl, { kind: "request", minimum: 0 }, { lookup: () => 1 })).rejects.toBeInstanceOf(c.SpecificationError);
   await expect(c.perform(impl, { kind: "request", minimum: 1 }, { lookup: () => 0 })).rejects.toBeInstanceOf(c.SpecificationError);
 });
+
+it("does not verify an answer returned under a case whose own invariant the dependency does not promise", () => {
+  const answered = c.variants("kind", { ok: c.object({ n: c.int() }) });
+  const required = c.variants("kind", { ok: c.object({ n: c.int() }).refine(v => v.n.$gte(1)) });
+  const definition = c.behavior("case invariant", {
+    input: c.variants("kind", { go: c.object({ key: c.string() }) }), result: required, effects: c.variants("kind", {}),
+    dependencies: { lookup: c.dependency(c.string(), answered) },
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", (input, deps) => ({
+    result: c.bind(answered, c.call(deps.lookup, input.key), answer => answer), effects: [],
+  })) } });
+  expect(c.verify(impl).status).toBe("undetermined");
+});
+
+it("tells a key holding a dot from the nested path it renders like when reusing an invariant of the dependency's answer", () => {
+  const shape = { "a.b": c.int(), a: c.object({ b: c.int() }) };
+  const promised = c.object(shape).refine(v => v["a.b"].$gte(0));
+  const required = c.object(shape).refine(v => v.a.b.$gte(0));
+  const definition = c.behavior("dotted key", {
+    input: c.variants("kind", { go: c.object({ key: c.string() }) }), result: required, effects: c.variants("kind", {}),
+    dependencies: { lookup: c.dependency(c.string(), promised) },
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", (input, deps) => ({
+    result: c.bind(promised, c.call(deps.lookup, input.key), answer => answer), effects: [],
+  })) } });
+  expect(c.verify(impl).status).toBe("undetermined");
+});
+
+it("refuses a binding of a dependency's answer under a sum that takes none of the cases the dependency declares", () => {
+  const declared = c.variants("kind", { a: c.object({}) });
+  const bound = c.variants("kind", { b: c.object({}) });
+  const definition = c.behavior("no shared case", {
+    input: c.variants("kind", { go: c.object({ key: c.string() }) }), result: c.int(), effects: c.variants("kind", {}),
+    dependencies: { lookup: c.dependency(c.string(), declared) },
+  });
+  expect(() => c.implement(definition, { cases: { go: c.model("go", (input, deps) => ({
+    result: c.bind(bound, c.call(deps.lookup, input.key) as never, () => 1), effects: [],
+  })) } })).toThrow("Model binds the answer of lookup under a schema taking none of the cases it declares (a), so every run fails");
+});

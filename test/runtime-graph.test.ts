@@ -10,7 +10,8 @@ async function dependencies(entry: string): Promise<Set<string>> {
 }
 
 describe("production import graph", () => {
-  const excluded = ["src/machine-check.ts", "src/world.ts", "src/tla.ts", "src/domain.ts", "src/proof.ts", "src/specification.ts", "src/verification.ts"];
+  const excluded = ["src/machine-check.ts", "src/world.ts", "src/tla.ts", "src/domain.ts", "src/proof.ts", "src/specification.ts", "src/verification.ts",
+    "src/border.ts", "src/partition.ts", "src/guard-borders.ts", "src/ways.ts", "src/interval.ts", "src/feasibility.ts"];
   function expectRuntimeOnly(imports: ReadonlySet<string>): void {
     const normalized = [...imports].map(path => path.replaceAll("\\", "/").replace(/^\.\//, ""));
     for (const name of excluded) expect(normalized.some(path => path === name || path.endsWith(`/${name}`)), name).toBe(false);

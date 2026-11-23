@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 import { Decimal } from "decimal.js";
 import { interpret } from "../src/model.js";
+import { linearCombination, positionTerm } from "../src/rule.js";
 
 const effects = c.variants("kind", {});
 const answer = c.variants("v", { yes: c.object({}), no: c.object({}) });
@@ -154,7 +155,12 @@ describe("what a run of a rewritten model records", () => {
     })) } });
     const report = await c.check(c.spec("pair", { implementation, examples: c.examples(pair, { hh: row(60, 10, 2), hl: row(60, 0, 1), l: row(10, 0, 0) }) }));
     const rules = report.measures.rules;
-    expect(rules.status === "complete" ? rules.rules.filter(rule => rule.status === "gap") : rules).toStrictEqual([]);
+    expect(rules.status === "complete" ? rules.rules.map(rule => `${rule.way}: ${rule.status}`) : rules).toStrictEqual([
+      "$.a > 50 holds, $.b > 5 holds → otherwise: met",
+      "$.a > 50 holds, $.b > 5 fails → otherwise: met",
+      "$.a > 50 fails, $.a > 50 holds → otherwise: no row owed",
+      "$.a > 50 fails, $.a > 50 fails → otherwise: met",
+    ]);
   });
 
   it("measures a sum with a fractional constant on the field it reads", async () => {
@@ -214,4 +220,28 @@ describe("a search over a model's inputs", () => {
     const rules = report.measures.rules;
     expect(rules.status === "complete" ? rules.rules.find(rule => rule.way === "$.a > 50 fails, choose >= 3 fails → otherwise")?.status : rules).toBe("gap");
   });
+
+  it("owes no row past the range the schema a sum is bound under allows", async () => {
+    const pair = c.behavior("pair", {
+      input: c.variants("kind", { request: c.object({ a: c.int().min(0).max(100), b: c.int().min(0).max(100) }) }),
+      result: c.int(),
+      effects,
+    });
+    const capped = c.implement(pair, { cases: { request: c.model("capped", input => ({
+      result: c.bind(c.int().max(150), c.arithmetic("add", input.a, input.b), total => c.choose(total.$gte(160), total, 0)),
+      effects: [],
+    })) } });
+    const rows = c.examples(pair, { small: { given: { kind: "request", a: 10, b: 20 }, expect: { result: 0, effects: [] } } });
+    const report = await c.check(c.spec("pair", { implementation: capped, examples: rows }));
+    const measured = report.measures.rules;
+    if (measured.status === "unavailable") throw new Error("the ways were not measured");
+    expect(measured.rules.find(way => way.way.includes("holds"))?.status).toBe("no row owed");
+    expect(c.generate(rows, capped).rows.map(row => row.name).filter(name => name.includes("> 160"))).toStrictEqual([]);
+  });
+});
+
+it("does not read a sum whose weights are rounded before they cancel", () => {
+  const big = Number.MAX_SAFE_INTEGER;
+  const scaled = linearCombination([{ operand: positionTerm(["z"], "value"), coefficient: big }]);
+  expect(linearCombination([{ operand: scaled, coefficient: 3 }, { operand: scaled, coefficient: -2 }, { operand: scaled, coefficient: -1 }])).toBeUndefined();
 });

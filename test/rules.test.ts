@@ -20,6 +20,7 @@ import {
   variants,
 } from "../src/index.js";
 import type { Implementation } from "../src/index.js";
+import { holds, rebaseRule } from "../src/rule.js";
 
 const 注文を確定する = behavior("注文を確定する", {
   input: variants("状態", {
@@ -742,5 +743,14 @@ describe("action", () => {
         ? report.measures.rules
         : report.measures.rules.rules.find(rule => rule.decision === "取消済みは断る"),
     ).toMatchObject({ way: "otherwise", status: "met" });
+  });
+});
+
+describe("rebasing a rule", () => {
+  it("keeps the root a quantifier names its element by, so the element is still read", () => {
+    const rule = array(int()).refine(items => items.$all(item => item.$gt(0))).invariants[0]!;
+    const moved = rebaseRule(rule, path => ["answer", ...path]);
+    expect(holds(moved, { answer: [1, 2] })).toBe(true);
+    expect(holds(moved, { answer: [1, 0] })).toBe(false);
   });
 });

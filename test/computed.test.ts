@@ -58,6 +58,39 @@ describe("a choice on a value the model computes", () => {
     expect(statuses(none)).toStrictEqual(["multiply($.a, $.b) >= 82 holds → otherwise: no row owed", "multiply($.a, $.b) >= 82 fails → otherwise: met"]);
   });
 
+  it("does not refute a way by the exact product of numbers the runtime multiplies in floating point", async () => {
+    const floats = c.behavior("floats", { input: c.variants("kind", { request: c.object({ a: c.number().min(0.1).max(0.1), b: c.number().min(0.2).max(0.2) }) }), result: c.int(), effects });
+    const product = c.implement(floats, { cases: { request: c.model("product", input => ({
+      result: c.bind(c.number(), c.arithmetic("multiply", input.a, input.b), value => c.choose(value.$gt(0.02), 1, 0)),
+      effects: [],
+    })) } });
+    const report = await c.check(c.spec("floats", { implementation: product, examples: c.examples(floats, {}) }));
+    expect(statuses(report)).toStrictEqual(["multiply($.a, $.b) > 0.02 holds → otherwise: gap", "multiply($.a, $.b) > 0.02 fails → otherwise: undecided"]);
+  });
+
+  it("tries an input field whose name starts with # like any other, since only the local names are reserved", async () => {
+    const hashed = c.behavior("hashed", { input: c.variants("kind", { request: c.object({ "#a": c.int().min(1).max(2), b: c.int().min(1).max(2) }) }), result: c.int(), effects });
+    const product = c.implement(hashed, { cases: { request: c.model("product", input => ({
+      result: c.bind(c.int(), c.arithmetic("multiply", input["#a"], input.b), value => c.choose(value.$eq(4), 1, 0)),
+      effects: [],
+    })) } });
+    const one = { one: { given: { kind: "request" as const, "#a": 1, b: 1 }, expect: { result: 0, effects: [] } } };
+    const report = await c.check(c.spec("hashed", { implementation: product, examples: c.examples(hashed, one) }));
+    expect(report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status) : report.measures.rules).toStrictEqual(["gap", "met"]);
+  });
+
+  it("leaves a way undecided, not without a row owed, where the fields the search leaves out have no placeholder the input takes", async () => {
+    const unread = c.array(c.boolean()).length(1).refine(flags => flags.$all(flag => flag.$eq(true)));
+    const small = c.behavior("unread", { input: c.variants("kind", { request: c.object({ a: c.int().min(0).max(9), b: c.int().min(0).max(9), flags: unread }) }), result: c.int(), effects });
+    const product = c.implement(small, { cases: { request: c.model("product", input => ({
+      result: c.bind(c.int(), c.arithmetic("multiply", input.a, input.b), value => c.choose(value.$gte(50), 1, 0)),
+      effects: [],
+    })) } });
+    const one = { one: { given: { kind: "request" as const, a: 1, b: 1, flags: [true] }, expect: { result: 0, effects: [] } } };
+    const report = await c.check(c.spec("unread", { implementation: product, examples: c.examples(small, one) }));
+    expect(statuses(report)).toStrictEqual(["multiply($.a, $.b) >= 50 holds → otherwise: undecided", "multiply($.a, $.b) >= 50 fails → otherwise: met"]);
+  });
+
   it("owes no row where a product of factors of at least 2 would be a prime, and finds the factors of a composite", async () => {
     const wide = c.behavior("wide", { input: c.variants("kind", { request: c.object({ a: c.int().min(2), b: c.int().min(2) }) }), result: c.int(), effects });
     const equalTo = (target: number) => c.implement(wide, { cases: { request: c.model("factored", input => ({

@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
-import { interpret } from "../src/model.js";
+import { interpret, localsOf } from "../src/model.js";
+import { eachWayOf } from "../src/ways.js";
 
 const emptyEffects = c.variants("kind", {});
 const request = c.variants("kind", { request: c.object({}) });
@@ -230,4 +231,41 @@ it("requires every variant body and refuses inherited match handlers", () => {
   const handlers = { one: () => 1, two: () => 2 };
   const inherited: typeof handlers = Object.create(handlers);
   expect(() => c.matchValue(schema, { kind: "one" }, inherited)).toThrow("every variant");
+});
+
+it("reads an element of a map over a field of a dependency's answer as opaque, since no input field holds it", () => {
+  const answered = c.object({ items: c.array(c.int()) });
+  const definition = c.behavior("answered iteration", { input: request, result: c.array(c.int()), effects: emptyEffects,
+    dependencies: { lookup: c.dependency(c.boolean(), answered) } });
+  const decision = c.model<c.Infer<typeof definition.input>, readonly number[], never, c.BehaviorDeps<typeof definition>>("map", (_, deps) => ({
+    result: c.bind(answered, c.call(deps.lookup, true), answer => c.map(c.int(), c.int(), answer.items, value => value)), effects: [],
+  }));
+  expect(localsOf(decision.expression).map(local => local.opaque)).toStrictEqual([true]);
+});
+
+it("lists the ways through an iteration body one at a time, since a body may have more paths than a caller will list", () => {
+  const element = c.object(Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`f${index}`, c.boolean()])));
+  const definition = c.behavior("wide body", {
+    input: c.variants("kind", { go: c.object({ xs: c.array(element) }) }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(element, c.int(), input.xs, flags => Array.from({ length: 25 }).reduce<c.Template<number>>(
+      (sum, _, index) => c.arithmetic("add", sum, c.choose((flags as unknown as Record<string, c.TermOf<boolean>>)[`f${index}`]!.$eq(true), 1, 0)), 0)),
+    effects: [],
+  })) } });
+  const ways = eachWayOf(impl.cases.go as never);
+  expect([ways.next(), ways.next()].map(way => way.done)).toStrictEqual([false, false]);
+});
+
+it.each([[0, "no row owed"], [3, "gap"]] as const)("owes a row for the body of an iteration only where the array can hold an element (max %i)", async (max, status) => {
+  const definition = c.behavior("entry", {
+    input: c.variants("kind", { go: c.object({ xs: c.array(c.int()).max(max) }) }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(c.int(), c.int(), input.xs, x => c.choose(x.$gte(5), 1, 0)), effects: [],
+  })) } });
+  const rows = c.examples(definition, { none: { given: { kind: "go", xs: [] }, expect: { result: [], effects: [] } } });
+  const report = await c.check(c.spec("entry", { implementation: impl, examples: rows }));
+  const rules = report.measures.rules;
+  expect(rules.status === "complete" ? rules.rules.filter(rule => rule.way.startsWith("each of")).map(rule => rule.status) : rules).toStrictEqual([status, status]);
 });

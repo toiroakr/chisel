@@ -61,6 +61,27 @@ describe("a comparison reading a value that may be left out", () => {
   });
 });
 
+describe("a comparison reading a value that may be left out, inside a quantifier or an iteration", () => {
+  const lines = c.object({ lines: c.array(c.object({ n: c.int().optional() })) });
+
+  it("names the array element by what the author wrote, not by the name its term is rooted at", () => {
+    expect(() => lines.refine(v => v.lines.$all(line => line.n.$gte(0)))).toThrow(
+      "refine reads $.lines[].n, which may be left out: write its absence as a case of a sum");
+  });
+
+  it("names the element of an array a model iterates over the same way", () => {
+    const sum = c.behavior("sum", {
+      input: c.variants("kind", { go: lines }),
+      result: c.int(),
+      effects: c.variants("kind", {}),
+    });
+    expect(() => c.implement(sum, { cases: { go: c.model("count", input => ({
+      result: c.fold(c.object({ n: c.int().optional() }), c.int(), input.lines, 0, (total, line) => c.choose(line.n.$gt(0), 1, total)),
+      effects: [],
+    })) } })).toThrow("model count reads $.lines[].n, which may be left out: write its absence as a case of a sum");
+  });
+});
+
 describe("a match over a field of the input", () => {
   const implementation = c.implement(owner, { cases: { ask: c.model("who", input => ({
     result: c.matchValue(label, input.name, {
@@ -170,5 +191,15 @@ describe("a guard on a field every case of a sum declares", () => {
       return found?.kind === "divided" ? found.missing : undefined;
     };
     expect([divided("@入力済み.丁@甲.戊"), divided("@入力済み.丁@乙.戊")]).toStrictEqual([["0 <= v < 5", "5 <= v"], ["0 <= v < 5", "5 <= v"]]);
+  });
+});
+
+describe("a comparison reading through a nested object some cases of a sum leave without the field", () => {
+  const nested = c.variants("kind", { a: c.object({ p: c.object({ q: c.int() }) }), b: c.object({ p: c.object({}) }) });
+  it("is refused where one case declares the object without the field", () => {
+    expect(() => nested.refine(value => value.p.q.$gte(1))).toThrow("refine reads $.p.q, which may be left out at $.p: write its absence as a case of a sum");
+  });
+  it("is accepted where the discriminant condition has left only the case that declares it", () => {
+    expect(() => nested.refine(value => value.kind.$ne("a").$or(value.p.q.$gte(1)))).not.toThrow();
   });
 });

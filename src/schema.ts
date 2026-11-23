@@ -1,4 +1,4 @@
-import { TEMPORAL_UNAVAILABLE } from "./temporal-global.js";
+import { TEMPORAL_UNAVAILABLE, temporalGlobal } from "./temporal-global.js";
 import { leftOutReadIn } from "./absence.js";
 import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { Decimal } from "decimal.js";
@@ -711,28 +711,14 @@ export function tagOf(schema: AnyVariantsSchema, value: unknown): string | undef
 }
 
 function temporalInstant(): TemporalTypes.InstantConstructor {
-  const temporal = (
-    globalThis as unknown as {
-      readonly Temporal?: {
-        readonly Instant?: TemporalTypes.InstantConstructor;
-      };
-    }
-  ).Temporal;
-  if (temporal?.Instant === undefined) {
-    throw new Error(TEMPORAL_UNAVAILABLE);
-  }
-  return temporal.Instant;
+  const instant = temporalGlobal()?.Instant;
+  if (instant === undefined) throw new Error(TEMPORAL_UNAVAILABLE);
+  return instant;
 }
 
 function temporalPlain(type: PlainType): { from(text: string): unknown; new (...args: never[]): unknown } {
-  const constructor = (
-    globalThis as unknown as {
-      readonly Temporal?: Partial<Record<PlainType, { from(text: string): unknown; new (...args: never[]): unknown }>>;
-    }
-  ).Temporal?.[type];
-  if (constructor === undefined) {
-    throw new Error(TEMPORAL_UNAVAILABLE);
-  }
+  const constructor = temporalGlobal()?.[type] as { from(text: string): unknown; new (...args: never[]): unknown } | undefined;
+  if (constructor === undefined) throw new Error(TEMPORAL_UNAVAILABLE);
   return constructor;
 }
 

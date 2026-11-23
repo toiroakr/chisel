@@ -4,9 +4,10 @@ import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Replacement, Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
 import { DEPS, depsTerm, describeTerm, holds, rebaseRule, rebaseTerm, pathsRead as pathsReadOfRule, isDecimal, isTerm, linearCombination, positionData, readOperand, selfTerm, substitutedOperand, substitutedRule, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
+import { isVariantsSchema } from "./schema.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
-import { outcomesOf } from "./ways.js";
+import { outcomesOf } from "./outcomes.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
 import { countBetween, moveTemporal } from "./temporal.js";
@@ -216,6 +217,8 @@ export function modelDependencyIssue(template: unknown, definition: AnyBehavior,
       const names = node.kind === "fold" ? [node.name, node.accumulator] : [node.name];
       if (names.some(name => declared.has(name))) return "Model binding cannot be reused; declare a separate binding for each evaluation";
       names.forEach(name => declared.add(name));
+      const refused = node.kind === "bind" ? answerRefusedBy(node.value, node.schema, definition) : undefined;
+      if (refused) return refused;
       const before = node.kind === "bind" ? [node.value] : node.kind === "map" ? [node.values] : [node.values, node.initial];
       for (const child of before) { const issue = inspect(child, locals); if (issue) return issue; }
       return inspect(node.body, new Set([...locals, ...names]));
@@ -231,6 +234,17 @@ export function modelDependencyIssue(template: unknown, definition: AnyBehavior,
     return undefined;
   }
   return inspect(template);
+}
+// A call whose answer is a sum bound under a sum sharing none of its cases: every answer fails to bind.
+function answerRefusedBy(value: unknown, bound: Schema<unknown>, definition: AnyBehavior): string | undefined {
+  const call = nodeOf(value);
+  if (call?.kind !== "call") return undefined;
+  const name = dependencyName(call.dependency);
+  const output = Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name]!.output : undefined;
+  if (output === undefined || !isVariantsSchema(output) || !isVariantsSchema(bound) || output.discriminant !== bound.discriminant) return undefined;
+  const declared = output.variantTags as readonly string[];
+  return declared.some(tag => (bound.variantTags as readonly string[]).includes(tag)) ? undefined
+    : `Model binds the answer of ${name} under a schema taking none of the cases it declares (${declared.join(", ")}), so every run fails`;
 }
 function atom(value: unknown): boolean {
   return value === null || typeof value !== "object" || isDecimal(value) ||
@@ -297,6 +311,9 @@ export function interpret(template: unknown, scope: unknown, options: {
   // The steps one element of a map or a fold took through its body, which are
   // not steps of the way through the model around it.
   readonly iterate?: (iteration: Node, steps: readonly Step[]) => void;
+  // A caller that cannot await abandons the evaluation at the first pending
+  // call instead of resuming it, so no later call is made behind its back.
+  readonly onPending?: (pending: PromiseLike<unknown>) => never;
 } = {}): unknown {
   let remaining = options.steps ?? 100000;
   const choices = choicesOf(template);
@@ -388,7 +405,12 @@ export function interpret(template: unknown, scope: unknown, options: {
   }
   const evaluation = read(template);
   const first = evaluation.next();
-  return first.done ? first.value : resume(evaluation, first.value);
+  if (first.done) return first.value;
+  if (options.onPending !== undefined) {
+    evaluation.return(undefined);
+    return options.onPending(first.value);
+  }
+  return resume(evaluation, first.value);
 }
 
 // A generator over the expression being read: it yields a call's pending
@@ -449,7 +471,8 @@ export function replaceChildren(template: unknown, values: readonly unknown[]): 
 // - a field of the input is the field itself; bound under another schema than
 //   the field's, the binding is kept to parse the field with it;
 // - a sum or difference of input numbers, a multiple of one by a whole number,
-//   a constant, or an object of such values is read as that expression.
+//   a constant, or an object of such values is read as that expression, unless
+//   it is computed and the schema it is bound under has invariants of its own.
 // A binding of anything else (a quotient, a concatenation, a temporal value,
 // an iteration's answer) is left as it is and read as a value of its own.
 export function inlineInputBindings(template: unknown, schemaAt: (path: readonly string[]) => Schema<unknown> | undefined): unknown {
@@ -543,7 +566,11 @@ export function inlineInputBindings(template: unknown, schemaAt: (path: readonly
           const body = visit(node.body, new Map([...aliases, [node.name, rest => ({ with: positionTerm([...position.path, ...rest], "value") })]]));
           return expression({ ...node, value: bound, body });
         }
-        const alias = isAnswer(node.name) ? undefined : aliasOf(bound);
+        // A computed value bound under a schema with invariants may be one the
+        // schema refuses at run time, which the expression it would stand for
+        // does not say, so it stays a local of its own.
+        const refusable = nodeOf(bound) !== undefined && node.schema.invariants.length > 0;
+        const alias = isAnswer(node.name) || refusable ? undefined : aliasOf(bound);
         if (alias !== undefined) inlined = true;
         return expression({ ...node, value: bound, body: visit(node.body, alias === undefined ? aliases : new Map([...aliases, [node.name, alias]])) });
       }
@@ -635,7 +662,7 @@ export function localsOf(template: unknown, opaque: ReadonlySet<string> = new Se
   const rootedIn = (value: unknown, seen: ReadonlySet<string>): boolean => {
     const position = isTerm(value) ? positionData(value) : undefined;
     const first = position?.path[0];
-    return position !== undefined && position.measure === "value" && first !== undefined && first !== DEPS && !seen.has(first);
+    return position !== undefined && position.measure === "value" && first !== undefined && first !== DEPS && !isAnswer(first) && !seen.has(first);
   };
   if (node?.kind === "bind" && !isAnswer(node.name)) {
     const inner = new Set([...opaque, node.name]);
@@ -660,7 +687,7 @@ export function fieldsTurnedOn(template: unknown, matters: (dependency: string, 
   let whole = false;
   const add = (path: readonly string[]) => {
     if (path.length === 0) whole = true;
-    else if (!path[0]!.startsWith("#")) fields.add(path[0]!);
+    else if (!path[0]!.startsWith(LOCAL) && path[0] !== DEPS) fields.add(path[0]!);
   };
   const visit = (value: unknown): void => {
     if (isTerm(value)) {

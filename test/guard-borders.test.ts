@@ -1639,3 +1639,20 @@ describe("an equality between two positions", () => {
     expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
   });
 });
+
+describe("a guard on a field the cases of a sum share", () => {
+  it("draws a border under each case, held to the bounds that case declares", async () => {
+    const sum = variants("t", { a: object({ n: int().min(10) }), b: object({ n: int().min(0) }) });
+    const definition = behavior("shared field", { input: variants("kind", { go: object({ s: sum }) }), result: int(), effects: variants("kind", {}) });
+    const implementation = implement(definition, { cases: { go: action("g", {
+      guards: input => [input.s.n.$gte(5).$else(() => ({ result: 0, effects: [] }))], run: () => ({ result: 1, effects: [] }),
+    }) } });
+    const rows = examples(definition, { b: { given: { kind: "go", s: { t: "b", n: 5 } }, expect: { result: 1, effects: [] } } });
+    const report = await check(spec("shared field", { implementation, examples: rows }));
+    const points = report.borders.filter(border => border.rule === "guard $.s.n >= 5").map(border => border.points.map(point => `${point.role} ${point.status}`));
+    expect(points).toStrictEqual([
+      ["ON excluded", "OFF excluded", "IN gap", "OUT excluded"],
+      ["ON met", "OFF gap", "IN gap", "OUT gap"],
+    ]);
+  });
+});

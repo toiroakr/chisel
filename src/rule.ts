@@ -956,8 +956,8 @@ export function localLabel(name: string): string {
   return at === -1 ? `local${rest}` : rest.slice(at + 1);
 }
 
-export function describeTerm(term: Term<unknown>, path = "$"): string {
-  return describeOperand(term, path);
+export function describeTerm(term: Term<unknown>, path = "$", elements: ElementLabels = {}): string {
+  return describeOperand(term, path, elements);
 }
 
 function describeOperand(operand: unknown, path: string, elements: ElementLabels = {}): string {
@@ -1010,7 +1010,7 @@ export function rebaseRule(rule: Rule, move: (path: readonly string[]) => readon
       return named({ kind: "compare", operator: rule.operator, left: term(rule.left), right: term(rule.right) });
     case "all":
     case "any":
-      return named({ ...rule, of: term(rule.of) as Term<readonly unknown[]>, each: rebaseRule(rule.each, move) });
+      return named({ ...rule, of: term(rule.of) as Term<readonly unknown[]>, each: rebaseRule(rule.each, path => (path[0] === rule.element ? path : move(path))) });
     case "and":
     case "or":
       return named({ kind: rule.kind, rules: rule.rules.map(part => rebaseRule(part, move)) });
@@ -1039,13 +1039,15 @@ export function linearCombination(items: readonly { readonly operand: unknown; r
     for (const part of data.parts) {
       const index = parts.findIndex(existing => existing.measure === part.measure && deepEqual(existing.path, part.path));
       const weight = part.coefficient * coefficient;
-      if (index === -1) parts.push({ ...part, coefficient: weight });
-      else parts[index] = { ...parts[index]!, coefficient: parts[index]!.coefficient + weight };
+      const total = index === -1 ? weight : parts[index]!.coefficient + weight;
+      // A weight or a running total that rounds could cancel to a value the exact sum does not have.
+      if (!Number.isSafeInteger(weight) || !Number.isSafeInteger(total)) return undefined;
+      if (index === -1) parts.push({ ...part, coefficient: total });
+      else parts[index] = { ...parts[index]!, coefficient: total };
     }
     constant = sum(constant, scaled(data.constant, coefficient));
   }
   parts = parts.filter(part => part.coefficient !== 0);
-  if (parts.some(part => !Number.isSafeInteger(part.coefficient))) return undefined;
   // A constant is read exactly, as a term reads it: a fold that rounds is not read.
   if (typeof constant === "number" && (!Number.isFinite(constant) || (Number.isInteger(constant) && !Number.isSafeInteger(constant)) || !foldsExactly(items, constant))) return undefined;
   // What decimals add to stays a decimal where their parts cancel.
@@ -1141,4 +1143,21 @@ function scaledBy(value: unknown, factor: number): unknown {
       ? Number(product.numerator) : undefined;
   }
   return linearCombination([{ operand: value, coefficient: factor }]);
+}
+
+export function normalize(
+  rule: Rule,
+): { operator: Operator; bound: unknown; measure: Measure } | undefined {
+  if (rule.kind !== "compare") {
+    return undefined;
+  }
+  const left = isTerm(rule.left) ? positionData(rule.left as Term<unknown>) : undefined;
+  const right = isTerm(rule.right) ? positionData(rule.right as Term<unknown>) : undefined;
+  if (left !== undefined && !isTerm(rule.right)) {
+    return { operator: rule.operator, bound: rule.right, measure: left.measure };
+  }
+  if (right !== undefined && !isTerm(rule.left)) {
+    return { operator: mirrored[rule.operator], bound: rule.left, measure: right.measure };
+  }
+  return undefined;
 }

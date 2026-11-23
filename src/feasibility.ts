@@ -2,7 +2,7 @@ import { compatibleBound } from "./interval.js";
 import { deepEqual } from "./equal.js";
 import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
-import { inheritedAt } from "./guard-borders.js";
+import { inheritedAt } from "./guard-scope.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, LinearTermData, Measure, Operator, Rule, Term } from "./rule.js";
 import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths, counts, partsOfMeasure, positionTerm } from "./rule.js";

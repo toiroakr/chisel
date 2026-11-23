@@ -1,6 +1,6 @@
-import type { Rule } from "./rule.js";
+import type { ElementLabels, Rule } from "./rule.js";
 import { childrenOf, nodeOf } from "./model.js";
-import { isTerm, termData } from "./rule.js";
+import { describeTerm, isTerm, localLabel, termData } from "./rule.js";
 import type { AnySchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, VariantTable } from "./schema.js";
 
 // A comparison reading a value that may be left out would hold whenever it is,
@@ -15,6 +15,9 @@ interface Fact {
 export interface Roots {
   readonly scope: AnySchema;
   readonly locals?: ReadonlyMap<string, AnySchema>;
+  // How an element of `all`/`any` is named to the author, `$.xs[]`, rather than
+  // by the internal name its term is rooted at.
+  readonly labels?: ElementLabels;
 }
 
 // What a rule settled with the outcome tells of the comparisons in it.
@@ -58,7 +61,8 @@ export function leftOutReadIn(rule: Rule, roots: Roots, facts: readonly Fact[] =
         if (array.kind !== "array") continue;
         const locals = new Map(roots.locals ?? []);
         locals.set(rule.element, (array as ArraySchema<unknown>).element as AnySchema);
-        const inner = leftOutReadIn(rule.each, { ...roots, locals }, facts, label);
+        const labels = { ...roots.labels, [rule.element]: `${describeTerm(rule.of, label, roots.labels)}[]` };
+        const inner = leftOutReadIn(rule.each, { ...roots, locals, labels }, facts, label);
         if (inner !== undefined) return inner;
       }
       return undefined;
@@ -81,8 +85,8 @@ function leftOutOperand(operand: unknown, roots: Roots, facts: readonly Fact[], 
   for (const path of paths) {
     const at = leftOutAt(path, roots, facts);
     if (at !== undefined) {
-      const read = render(path, label);
-      const where = render(path.slice(0, at), label);
+      const read = render(path, label, roots);
+      const where = render(path.slice(0, at), label, roots);
       return read === where
         ? `reads ${read}, which may be left out: write its absence as a case of a sum`
         : `reads ${read}, which may be left out at ${where}: write its absence as a case of a sum`;
@@ -91,8 +95,12 @@ function leftOutOperand(operand: unknown, roots: Roots, facts: readonly Fact[], 
   return undefined;
 }
 
-function render(path: readonly string[], label: string): string {
-  return path.length === 0 ? label : path[0]!.startsWith("#") || label === "" ? path.join(".") : [label, ...path].join(".");
+function render(path: readonly string[], label: string, roots: Roots): string {
+  const [first, ...rest] = path;
+  if (first === undefined) return label;
+  const named = roots.labels?.[first] ?? (first.startsWith("#local:") ? localLabel(first) : undefined);
+  if (named !== undefined) return [named, ...rest].join(".");
+  return first.startsWith("#") || label === "" ? path.join(".") : [label, ...path].join(".");
 }
 
 // How many keys of the path lead to where it may be left out, or undefined
@@ -110,7 +118,9 @@ function leftOutAt(path: readonly string[], roots: Roots, facts: readonly Fact[]
     if (current.kind === "record" || current.kind === "array") return index + 1;
     if (current.kind === "object") {
       const { shape } = current as ObjectSchema<ObjectShape>;
-      return from(Object.hasOwn(shape, key) ? shape[key] : undefined, index + 1);
+      // Below the root a field the object does not declare is one left out; at the root the name may be a local or a dependency the scope does not list.
+      if (!Object.hasOwn(shape, key)) return index > (local === undefined ? 0 : 1) ? index : undefined;
+      return from(shape[key], index + 1);
     }
     if (current.kind === "variants") {
       const sum = current as AnySchema & { readonly discriminant: string; readonly variants: VariantTable };

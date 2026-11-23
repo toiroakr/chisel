@@ -24,8 +24,8 @@ import type { Way } from "./ways.js";
 import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
+import { answerSchema } from "./guard-scope.js";
 import {
-  answerSchema,
   comparisonsNotReadOf,
   ensuresBordersOf,
   invariantContradictionsOf,
@@ -46,7 +46,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
-import { DEPS, localLabel, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, termData, termPaths, pathsRead } from "./rule.js";
+import { DEPS, localLabel, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, positionTerm, termData, termPaths, pathsRead } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
 import { emptiedBy, normalize } from "./border.js";
@@ -1849,8 +1849,8 @@ interface Searched {
   readonly exhaustive: boolean;
 }
 const searches = new WeakMap<object, Map<string, Searched>>();
-const fakesIds = new WeakMap<object, number>();
-let fakesCount = 0;
+const tableIds = new WeakMap<object, number>();
+let tableCount = 0;
 const IMPOSSIBLE = Symbol("an answer the dependency's contract refuses");
 function searchedWays(
   implementation: Implementation<AnyBehavior>,
@@ -1860,8 +1860,11 @@ function searchedWays(
   fakes: readonly FakeTable[] = [],
 ): Searched {
   const definition = implementation.behavior;
-  if (!fakesIds.has(fakes)) fakesIds.set(fakes, ++fakesCount);
-  const key = `${tag}\u0000${combinations}\u0000${fakesIds.get(fakes)}`;
+  // Keyed by the tables themselves, not the array holding them, which every check builds anew.
+  const key = `${tag}\u0000${combinations}\u0000${fakes.map(table => {
+    if (!tableIds.has(table)) tableIds.set(table, ++tableCount);
+    return tableIds.get(table);
+  }).join(",")}`;
   const cached = searches.get(decision as object)?.get(key);
   if (cached !== undefined) return cached;
   const answering = Object.fromEntries(fakes.map(table => [table.dependency, answerFrom(table)]));
@@ -1969,6 +1972,16 @@ function searchedWitness(
     .find(item => item.way.within === way.within && sameSteps(item.way.steps, way.steps));
 }
 
+// A way through the body of an iteration over a field is taken only by an input
+// whose array holds an element, so the way also asks for one.
+function withEntry(way: Way): Way {
+  const values = way.within?.values;
+  const position = isTerm(values) ? positionData(values) : undefined;
+  if (position === undefined || position.measure !== "value") return way;
+  const holdsOne: Rule = { kind: "compare", operator: ">=", left: positionTerm(position.path, "length"), right: 1 };
+  return { ...way, steps: [...way.steps, { distinction: holdsOne, outcome: true }] };
+}
+
 // Whether some row could take a way: a way reading a value the model computes
 // (`localsOf`'s opaque locals) is settled by running the case's inputs through
 // the decision, as far as they are few enough to try.
@@ -1983,7 +1996,7 @@ function wayFeasibility(
   const settled = way.steps.find(step =>
     step.distinction.kind !== "match" && termPaths(step.distinction).length === 0 && holds(step.distinction, {}) !== step.outcome);
   if (settled !== undefined) return { kind: "infeasible", reason: "値を読まない条件で、この結果にならない" };
-  const found = feasibilityOf(way, scopeOf(implementation, tag, decision as { readonly expression?: unknown }, way), undefined, combinations);
+  const found = feasibilityOf(withEntry(way), scopeOf(implementation, tag, decision as { readonly expression?: unknown }, way), undefined, combinations);
   const expression = (decision as { readonly expression?: unknown }).expression;
   if (found.kind !== "feasible" || expression === undefined) return found;
   const read = opaqueRead(way, decision);

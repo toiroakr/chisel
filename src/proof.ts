@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isTerm, pathsRead, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -252,6 +252,7 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
   if (node?.kind === "operation" || node?.kind === "temporal") return false;
   if (schema.kind === "optional") return provesValue(presentSchema(schema as OptionalSchema<unknown>), value, scope, steps, limit);
   let held: ReadonlySet<string> = new Set();
+  let invariants = schema.invariants;
   if (isTerm(value)) {
     const position = positionData(value);
     if (!position || mayBeAbsent(scope, position.path)) return false;
@@ -261,8 +262,9 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
     const target = settled === undefined ? schema : taggedCase(schema as AnyVariantsSchema, settled);
     const source = read;
     if (!source || position.measure !== "value" || !sameShape(target, source, limit)) return false;
+    invariants = target.invariants;
     // An invariant the source declares as well holds of the value read from it.
-    held = new Set(source.invariants.map(rule => describeRule(rule, "$")));
+    held = new Set(source.invariants.map(identityOf));
   } else if (schema.kind === "object") {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
     const shape = (schema as ObjectSchema<ObjectShape>).shape;
@@ -280,11 +282,15 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
     if (containsSymbolic(value)) return false;
     return schema.parse(value).success;
   }
-  return schema.invariants.every(invariant => {
-    if (held.has(describeRule(invariant, "$"))) return true;
+  return invariants.every(invariant => {
+    if (held.has(identityOf(invariant))) return true;
     const rule = substitute(invariant, value);
     return rule !== undefined && provesRule(rule, scope, steps, limit);
   });
+}
+// The rendered text alone cannot tell the key "a.b" from the path a.b, so the paths read are part of the identity.
+function identityOf(rule: Rule): string {
+  return `${describeRule(rule, "$")} ${JSON.stringify(pathsRead(rule))}`;
 }
 function includesSchema(target: AnySchema, source: AnySchema, limit: number): boolean {
   if (source.kind === "optional") {

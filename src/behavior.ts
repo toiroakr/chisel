@@ -35,7 +35,7 @@ import {
   termData,
   rootsRead, positionOf, describeTerm,
 } from "./rule.js";
-import { guardScope, offGridEqualityIn } from "./guard-borders.js";
+import { guardScope, offGridEqualityIn } from "./guard-scope.js";
 import { factsOf, leftOutReadIn, leftOutReadInModel } from "./absence.js";
 import { scopesOf } from "./ensures.js";
 import { isVariantsSchema, offGridEquality, schemaAtPath, tagOf } from "./schema.js";
@@ -838,7 +838,10 @@ function executeSync(implementation: AnyImplementation, input: unknown, deps: un
   const decisionInput = selected.kind === "rules" && selected.expression !== undefined ? snapshotValue(parsedInput) : parsedInput;
   const execution =
     selected.kind === "rules"
-      ? decide(selected, decisionInput, deps, [], () => undefined, () => undefined, definition)
+      ? decide(selected, decisionInput, deps, [], () => undefined, () => undefined, definition, undefined, pending => {
+          Promise.resolve(pending).catch(() => undefined);
+          throw new SpecificationError(`${definition.name} answered a promise; use perform, which awaits it`);
+        })
       : selected.run(parsedInput as never, answeringValues(definition, deps) as never);
   if (isPromiseLike(execution)) {
     Promise.resolve(execution).catch(() => undefined);
@@ -910,6 +913,7 @@ function decide<Result, Effect>(
   distinguish: (distinction: Branch, outcome: boolean | string) => void,
   definition: AnyBehavior,
   iterate?: (within: unknown, steps: readonly { readonly distinction: Branch; readonly outcome: boolean | string }[]) => void,
+  onPending?: (pending: PromiseLike<unknown>) => never,
 ): Execution<Result, Effect> | Promise<Execution<Result, Effect>> {
   let resolved = Object.keys(definition.dependencies).length === 0 ? undefined : deps;
   if (decision.expression !== undefined) {
@@ -934,6 +938,7 @@ function decide<Result, Effect>(
     return interpret(decision.runs ?? decision.expression, scope, {
       observe: (written, value) => observe(rule(written), value),
       distinguish: (distinction, outcome) => distinguish(rule(distinction), outcome),
+      ...(onPending === undefined ? {} : { onPending }),
       ...(iterate === undefined ? {} : { iterate: (within, steps) => iterate(node(within), steps.map(step => ({ ...step, distinction: rule(step.distinction) }))) }),
       invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),

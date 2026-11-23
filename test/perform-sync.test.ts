@@ -46,4 +46,21 @@ describe("performSync", () => {
     expect(() => c.performSync(found, input, supplied)).toThrow(/answered a promise; use perform/);
     expect(await c.perform(found, input, supplied)).toStrictEqual({ result: 1, effects: [] });
   });
+
+  it("stops at the first dependency answering a promise, so a later dependency is never called", async () => {
+    const pay = c.behavior("pay", {
+      input: c.variants("kind", { go: c.object({ key: c.string() }) }),
+      result: c.int(),
+      effects: c.variants("kind", {}),
+      dependencies: { check: c.dependency(c.string(), c.int()), charge: c.dependency(c.string(), c.int()) },
+    });
+    const paid = c.implement(pay, {
+      cases: { go: c.model("go", (input, deps) => ({ result: c.arithmetic("add", c.call(deps.check, input.key), c.call(deps.charge, input.key)), effects: [] })) },
+    });
+    const charged: string[] = [];
+    const supplied = { check: (() => Promise.resolve(1)) as unknown as (key: string) => number, charge: (key: string) => (charged.push(key), 2) };
+    expect(() => c.performSync(paid, { kind: "go", key: "a" }, supplied)).toThrow(/answered a promise; use perform/);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(charged).toStrictEqual([]);
+  });
 });
