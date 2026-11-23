@@ -21,6 +21,9 @@ import {
   string,
   time,
   variants,
+  model,
+  choose,
+  map as mapOf,
 } from "../src/index.js";
 import type { Condition, Rule, TermOf } from "../src/index.js";
 
@@ -1654,5 +1657,33 @@ describe("a guard on a field the cases of a sum share", () => {
       ["ON excluded", "OFF excluded", "IN gap", "OUT excluded"],
       ["ON met", "OFF gap", "IN gap", "OUT gap"],
     ]);
+  });
+});
+
+describe("a guard on a field the cases of a sum share, read from an element of an iteration", () => {
+  it("is met only by an element of the case the border is drawn under", async () => {
+    const sum = variants("t", { a: object({ n: int().min(10) }), b: object({ n: int().min(0) }) });
+    const definition = behavior("shared element", { input: variants("kind", { go: object({ xs: array(sum) }) }), result: array(int()), effects: variants("kind", {}) });
+    const implementation = implement(definition, { cases: { go: model("go", input => ({
+      result: mapOf(sum, int(), input.xs, x => choose(x.n.$gte(5), 1, 0)), effects: [],
+    })) } });
+    const rows = examples(definition, { b: { given: { kind: "go", xs: [{ t: "a", n: 10 }] }, expect: { result: [1], effects: [] } } });
+    const report = await check(spec("shared element", { implementation, examples: rows }));
+    const points = report.borders.filter(border => border.rule.startsWith("guard") && border.rule.includes(">= 5")).map(border => border.points.map(point => `${point.role} ${point.status}`));
+    expect(points).toStrictEqual([["ON excluded", "OFF excluded", "IN met", "OUT excluded"], ["ON gap", "OFF gap", "IN gap", "OUT gap"]]);
+  });
+});
+
+describe("a guard on a field of a sum's case whose own invariant bounds the field", () => {
+  it("excludes the points that invariant refuses", async () => {
+    const sum = variants("t", { a: object({ n: int() }).refine(value => value.n.$gte(10)), b: object({ n: int().min(0) }) });
+    const definition = behavior("case invariant", { input: variants("kind", { go: object({ s: sum }) }), result: int(), effects: variants("kind", {}) });
+    const implementation = implement(definition, { cases: { go: action("g", {
+      guards: input => [input.s.n.$gte(5).$else(() => ({ result: 0, effects: [] }))], run: () => ({ result: 1, effects: [] }),
+    }) } });
+    const rows = examples(definition, { b: { given: { kind: "go", s: { t: "b", n: 5 } }, expect: { result: 1, effects: [] } } });
+    const report = await check(spec("case invariant", { implementation, examples: rows }));
+    const first = report.borders.find(border => border.rule === "guard $.s.n >= 5")!;
+    expect(first.points.map(point => `${point.role} ${point.status}`)).toStrictEqual(["ON excluded", "OFF excluded", "IN gap", "OUT excluded"]);
   });
 });

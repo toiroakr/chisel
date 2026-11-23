@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/runtime.js";
+import { traceSync } from "../src/behavior.js";
 
 const fee = c.behavior("fee", {
   input: c.variants("kind", { order: c.object({ total: c.int().min(0), member: c.boolean() }), gift: c.object({}) }),
@@ -62,5 +63,22 @@ describe("performSync", () => {
     expect(() => c.performSync(paid, { kind: "go", key: "a" }, supplied)).toThrow(/answered a promise; use perform/);
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(charged).toStrictEqual([]);
+  });
+
+  it("ends a trace at the first dependency answering a promise, so a later dependency is never called", async () => {
+    const pay = c.behavior("pay", {
+      input: c.variants("kind", { go: c.object({ key: c.string() }) }),
+      result: c.int(),
+      effects: c.variants("kind", {}),
+      dependencies: { check: c.dependency(c.string(), c.int()), charge: c.dependency(c.string(), c.int()) },
+    });
+    const paid = c.implement(pay, {
+      cases: { go: c.model("go", (input, deps) => ({ result: c.arithmetic("add", c.call(deps.check, input.key), c.call(deps.charge, input.key)), effects: [] })) },
+    });
+    const charged: string[] = [];
+    const supplied = { check: (() => Promise.resolve(1)) as unknown as (key: string) => number, charge: (key: string) => (charged.push(key), 2) };
+    const traced = traceSync(paid, { kind: "go", key: "a" }, supplied);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect([charged, traced.ended, traced.error]).toStrictEqual([[], undefined, undefined]);
   });
 });

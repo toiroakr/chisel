@@ -236,7 +236,8 @@ describe("a search over a model's inputs", () => {
     const measured = report.measures.rules;
     if (measured.status === "unavailable") throw new Error("the ways were not measured");
     expect(measured.rules.find(way => way.way.includes("holds"))?.status).toBe("no row owed");
-    expect(c.generate(rows, capped).rows.map(row => row.name).filter(name => name.includes("> 160"))).toStrictEqual([]);
+    const offered = c.generate(rows, capped).rows.map(row => row.given as { a: number; b: number });
+    expect(offered.filter(given => given.a + given.b >= 160)).toStrictEqual([]);
   });
 });
 

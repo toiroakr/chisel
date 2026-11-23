@@ -499,7 +499,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
       admits: coordinate =>
         measure !== "value" ||
         (schema.parse(coordinate).success &&
-          inheritedAt(frame.scope, keys).every(inherited => holds(inherited, coordinate))),
+          inheritedAt(frame.scope, keys, steps).every(inherited => holds(inherited, coordinate))),
     });
     const positionPath = pathOf(frame, keys, steps);
     const positionSegments = [...frame.segments, ...steps];
@@ -508,7 +508,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
       segments: positionSegments,
       comparison: rule,
       border,
-      coordinateOf: (reached: { readonly scope: unknown }) => frame !== frames.root || onTrail(frame.scope, keys, steps, reached.scope) ? readOperand(term, reached.scope) : undefined,
+      coordinateOf: (reached: { readonly scope: unknown }) => onTrail(frame.scope, keys, steps, frame === frames.root ? reached.scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), reached.scope)) ? readOperand(term, reached.scope) : undefined,
       compose: (given: unknown, coordinate: unknown) => {
         const position = at(positionSegments);
         return position === undefined ? undefined : writeExactly(position, given, measure, coordinate);

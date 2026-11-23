@@ -18,6 +18,8 @@ export interface Roots {
   // How an element of `all`/`any` is named to the author, `$.xs[]`, rather than
   // by the internal name its term is rooted at.
   readonly labels?: ElementLabels;
+  // Names some case of the input declares, so one the checked case leaves out is a field it lacks rather than a name the scope does not list.
+  readonly declared?: ReadonlySet<string>;
 }
 
 // What a rule settled with the outcome tells of the comparisons in it.
@@ -87,7 +89,7 @@ function leftOutOperand(operand: unknown, roots: Roots, facts: readonly Fact[], 
     if (at !== undefined) {
       const read = render(path, label, roots);
       const where = render(path.slice(0, at), label, roots);
-      return read === where
+      return read === where || at === 0
         ? `reads ${read}, which may be left out: write its absence as a case of a sum`
         : `reads ${read}, which may be left out at ${where}: write its absence as a case of a sum`;
     }
@@ -98,7 +100,7 @@ function leftOutOperand(operand: unknown, roots: Roots, facts: readonly Fact[], 
 function render(path: readonly string[], label: string, roots: Roots): string {
   const [first, ...rest] = path;
   if (first === undefined) return label;
-  const named = roots.labels?.[first] ?? (first.startsWith("#local:") ? localLabel(first) : undefined);
+  const named = (roots.labels !== undefined && Object.hasOwn(roots.labels, first) ? roots.labels[first] : undefined) ?? (first.startsWith("#local:") ? localLabel(first) : undefined);
   if (named !== undefined) return [named, ...rest].join(".");
   return first.startsWith("#") || label === "" ? path.join(".") : [label, ...path].join(".");
 }
@@ -119,7 +121,7 @@ function leftOutAt(path: readonly string[], roots: Roots, facts: readonly Fact[]
     if (current.kind === "object") {
       const { shape } = current as ObjectSchema<ObjectShape>;
       // Below the root a field the object does not declare is one left out; at the root the name may be a local or a dependency the scope does not list.
-      if (!Object.hasOwn(shape, key)) return index > (local === undefined ? 0 : 1) ? index : undefined;
+      if (!Object.hasOwn(shape, key)) return index > (local === undefined ? 0 : 1) || (local === undefined && roots.declared?.has(key)) ? index : undefined;
       return from(shape[key], index + 1);
     }
     if (current.kind === "variants") {

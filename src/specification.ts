@@ -1861,7 +1861,8 @@ function searchedWays(
 ): Searched {
   const definition = implementation.behavior;
   // Keyed by the tables themselves, not the array holding them, which every check builds anew.
-  const key = `${tag}\u0000${combinations}\u0000${fakes.map(table => {
+  if (!tableIds.has(definition)) tableIds.set(definition, ++tableCount);
+  const key = `${tableIds.get(definition)}\u0000${tag}\u0000${combinations}\u0000${fakes.map(table => {
     if (!tableIds.has(table)) tableIds.set(table, ++tableCount);
     return tableIds.get(table);
   }).join(",")}`;

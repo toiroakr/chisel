@@ -203,3 +203,23 @@ describe("a comparison reading through a nested object some cases of a sum leave
     expect(() => nested.refine(value => value.kind.$ne("a").$or(value.p.q.$gte(1)))).not.toThrow();
   });
 });
+
+describe("a refusal naming a field read inside a quantifier", () => {
+  it("reads an outer field named like an Object.prototype key as the field", () => {
+    const holder = c.object({ toString: c.int().optional(), rows: c.array(c.int()) });
+    expect(() => holder.refine(value => value.rows.$all(row => row.$gte(value.toString)))).toThrow("refine reads $.toString, which may be left out: write its absence as a case of a sum");
+  });
+});
+
+describe("a guard shared by input cases reading a field only some of them declare", () => {
+  const split = c.behavior("split", {
+    input: c.variants("kind", { a: c.object({ n: c.int() }), b: c.object({}) }),
+    result: c.variants("verdict", { ok: c.object({}), no: c.object({}) }), effects: c.variants("kind", {}),
+  });
+  it("is refused for the case that does not declare it", () => {
+    expect(() => c.implement(split, { cases: { $default: c.action("shared", {
+      guards: input => [(input as unknown as { n: c.TermOf<number> }).n.$gte(1).$else(() => ({ result: { verdict: "no" as const }, effects: [] }))],
+      run: () => ({ result: { verdict: "ok" as const }, effects: [] }),
+    }) } })).toThrow("guard in shared reads $.n, which may be left out: write its absence as a case of a sum");
+  });
+});

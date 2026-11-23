@@ -625,7 +625,8 @@ function checkGuards(
     if (offGrid !== undefined) {
       throw new SpecificationError(`guard in ${decision.id} ${offGrid}`);
     }
-    const roots = { scope: guardScope(definition, tag) };
+    const declared = new Set(Object.values(definition.input.variants).flatMap(variant => Object.keys((variant as { readonly shape: object }).shape)));
+    const roots = { scope: guardScope(definition, tag), declared };
     if (decision.expression !== undefined) {
       const found = leftOutReadInModel(decision.runs ?? decision.expression, roots);
       if (found !== undefined) throw new SpecificationError(`model ${decision.id} ${found}`);
@@ -871,6 +872,7 @@ export function traceSync(
   const iterations: WayTaken[] = [];
   const comparisons: ComparisonReached[] = [];
   const steps: { distinction: Branch; outcome: boolean | string }[] = [];
+  const pendingCall = Symbol("a call answering a promise");
   try {
     const execution = decide(
       decision,
@@ -881,6 +883,10 @@ export function traceSync(
       (distinction, outcome) => steps.push({ distinction, outcome }),
       implementation.behavior,
       (within, taken) => iterations.push({ decision: decision.id, steps: taken, within }),
+      pending => {
+        Promise.resolve(pending).catch(() => undefined);
+        throw pendingCall;
+      },
     );
     // A dependency that answers a promise ends the trace where it is called:
     // the comparisons and the way so far are what can be read synchronously.
@@ -889,6 +895,7 @@ export function traceSync(
       return { comparisons, way: { decision: decision.id, steps }, iterations };
     }
   } catch (error) {
+    if (error === pendingCall) return { comparisons, way: { decision: decision.id, steps }, iterations };
     // Not undefined: the way is settled before a handler runs, so a handler
     // that needs a stand-in generate does not have leaves the way intact.
     return { comparisons, way: { decision: decision.id, steps }, iterations, error };

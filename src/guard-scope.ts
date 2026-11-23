@@ -167,19 +167,7 @@ export function framesFor(definition: AnyBehavior, tag: string, decision: { read
     if (keys[0]?.startsWith("#local:") && frames.elements[keys[0]] === undefined) continue;
     const collection = schemaAt(frame.scope, keys);
     if (collection?.kind !== "array") continue;
-    const suffix = keys.map(key => `.${key}`).join("");
-    frames = {
-      root: frames.root,
-      elements: {
-        ...frames.elements,
-        [iteration.name]: {
-          scope: (collection as ArraySchema<unknown>).element,
-          path: `${pathOf(frame, keys)}[]`,
-          segments: [...segmentsOf(frame, keys), "[]"],
-          label: `${frame.label}${suffix}[]`,
-        },
-      },
-    };
+    frames = { root: frames.root, elements: { ...frames.elements, [iteration.name]: elementFrame(frame, keys, collection as ArraySchema<unknown>) } };
   }
   return frames;
 }
@@ -201,18 +189,16 @@ export function enter(rule: Rule & { readonly kind: "all" | "any" }, frames: Fra
   if (collection?.kind !== "array") {
     return undefined;
   }
-  const suffix = keys.map(key => `.${key}`).join("");
+  return { root: frames.root, elements: { ...frames.elements, [rule.element]: elementFrame(frame, keys, collection as ArraySchema<unknown>) } };
+}
+
+// The element of an array a frame holds, standing where `$all` and an iteration read it.
+function elementFrame(frame: Frame, keys: readonly string[], collection: ArraySchema<unknown>): Frame {
   return {
-    root: frames.root,
-    elements: {
-      ...frames.elements,
-      [rule.element]: {
-        scope: (collection as ArraySchema<unknown>).element,
-        path: `${frame.path}${suffix}[]`,
-        segments: [...segmentsOf(frame, keys), "[]"],
-        label: `${frame.label}${suffix}[]`,
-      },
-    },
+    scope: collection.element,
+    path: `${pathOf(frame, keys)}[]`,
+    segments: [...segmentsOf(frame, keys), "[]"],
+    label: `${frame.label}${keys.map(key => `.${key}`).join("")}[]`,
   };
 }
 
@@ -350,27 +336,32 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
         described: describeRule(rule, frames.root.label, labelsOf(frames)),
         segments: [...frame.segments, ...steps],
         schema: schemaAlong(frame.scope, keys, steps) ?? schema,
-        inherited: inheritedAt(frame.scope, keys),
+        inherited: inheritedAt(frame.scope, keys, steps),
         rule,
       }));
 }
 
-export function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {
+export function inheritedAt(scope: AnySchema, keys: readonly string[], steps?: readonly string[]): readonly Rule[] {
   const [key, ...rest] = keys;
   const unwrapped =
     scope.kind === "optional" ? (scope as OptionalSchema<unknown>).schema : scope;
-  if (key === undefined || unwrapped.kind !== "object") {
+  // Through a sum, the invariants of the case the steps name are inherited too.
+  const tag = steps !== undefined && key !== undefined && isVariantsSchema(unwrapped) && key !== unwrapped.discriminant && steps[0]?.startsWith("@") ? steps[0].slice(1) : undefined;
+  const owner = tag === undefined ? unwrapped : (unwrapped as AnyVariantsSchema).variants[tag] as AnySchema | undefined;
+  if (key === undefined || owner === undefined || owner.kind !== "object") {
     return [];
   }
-  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
-  const here = unwrapped.invariants.flatMap(conjuncts).flatMap(rule => {
+  const own = tag === undefined ? owner.invariants : [...owner.invariants, ...unwrapped.invariants];
+  const field = (owner as ObjectSchema<ObjectShape>).shape[key];
+  const here = own.flatMap(conjuncts).flatMap(rule => {
     const stepped = keys.reduce<Rule | undefined>(
       (current, next) => (current === undefined ? undefined : stepInto(current, next)),
       rule,
     );
     return stepped === undefined ? [] : [stepped];
   });
-  return field === undefined ? here : [...here, ...inheritedAt(field, rest)];
+  const below = steps === undefined ? undefined : steps.slice(tag === undefined ? 1 : 2);
+  return field === undefined ? here : [...here, ...inheritedAt(field, rest, below)];
 }
 
 // The schema a path reaches through the case of a sum that declares the next key.
