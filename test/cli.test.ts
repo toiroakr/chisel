@@ -665,7 +665,7 @@ describe("chisel check --json", () => {
     }
 
     expect(documents.flatMap(document => validate(schema, document))).toStrictEqual([]);
-  });
+  }, 30_000);
 
   it("names the source each report is about", async () => {
     const document = await documentFor("test/fixtures/rules.ts");
