@@ -333,7 +333,16 @@ describe("chisel check and generate with the limit of the ways listed", () => {
   it("leaves a decision with more ways than the limit unmeasured in check", async () => {
     const result = await run(["check", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "3"]);
 
-    expect(stdoutOf(result)).toMatch(/^  道筋 +計測不能 \(not measured\); 読めないdecision: 多い$/m);
+    expect(stdoutOf(result)).toMatch(/^  道筋 +計測しない \(not measured, to be changed first\): 多い（先に変更する）$/m);
+  });
+
+  it("says what to change in the model before the report", async () => {
+    const result = await run(["check", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "5"]);
+    const stdout = stdoutOf(result);
+
+    expect(stdout.startsWith("計測の前に:\n  ↻ 多い: 道筋が13本あり、上限の5本を超えるため計測しない。")).toBe(true);
+    expect(stdout).toContain("guard 1（4本）、guard 2（4本）をそれぞれbehaviorにしてcomposeでつなげば、各段は上限の内で計測される。");
+    expect(stdout.indexOf("計測の前に:")).toBeLessThan(stdout.indexOf("多さ (数える)"));
   });
 
   it("names such a decision instead of composing its ways in generate", async () => {

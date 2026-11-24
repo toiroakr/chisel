@@ -19,9 +19,11 @@ import type {
   Implementation,
   Todo,
 } from "./behavior.js";
-import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
+import type { ArmTaken, ComparisonReached, RulesDecision, WayTaken } from "./behavior.js";
 import type { Step, Way } from "./ways.js";
 import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
+import { changeOf } from "./changes.js";
+import type { ModelChange } from "./changes.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import { answerSchema } from "./guard-scope.js";
@@ -178,6 +180,10 @@ export interface AdequacyReport {
   readonly pairs: readonly PairCount[];
   readonly fakeIssues: readonly string[];
   readonly fakeWarnings: readonly string[];
+  // The decisions left unmeasured for having more ways than the limit, each
+  // with what to change in the model so that it is measured (Souther's
+  // `toBeChangedFirst`).
+  readonly toBeChangedFirst: readonly ModelChange[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -852,6 +858,7 @@ export async function check(
     borders.every(border => border.beside?.status !== "not told");
 
   const plans = plansOf(specification.implementation, combinations, wayLimit);
+  const toBeChangedFirst = changesFrom(specification.implementation, plans, wayLimit);
   const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans, usableFakes);
   const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans, usableFakes);
   const lines = [
@@ -907,6 +914,7 @@ export async function check(
     pairs: countPairs(pairablesOf(positions, guardPartitions), answeredGivens),
     fakeIssues: fakeIssues.map(item => item.issue),
     fakeWarnings: fakeWarningsOf(definition.dependencies, specification.fakes),
+    toBeChangedFirst,
     evidence: {
       input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,
@@ -933,6 +941,30 @@ export async function check(
     adequate: verdict === "satisfied",
     verdict,
   };
+}
+
+// What to change in the model before measuring it: the decisions `check`
+// would leave unmeasured for having more ways than the limit, each with where
+// its ways multiply and which part, declared as a behavior of its own, leaves
+// the rest within the limit. Read off the shape of the model, without running
+// a row, so it can be said before the measurement and is not changed by it.
+export function modelChanges(specification: Specification, options: CheckOptions = {}): readonly ModelChange[] {
+  const combinations = positiveLimit("feasibility.combinations", options.feasibility?.combinations, FEASIBILITY_COMBINATION_LIMIT);
+  const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  return changesFrom(specification.implementation, plansOf(specification.implementation, combinations, wayLimit), wayLimit);
+}
+
+function changesFrom(
+  implementation: AnyImplementation | undefined,
+  plans: ReadonlyMap<unknown, WayPlan>,
+  wayLimit: number,
+): readonly ModelChange[] {
+  if (implementation === undefined || implementation.pipeline !== undefined || implementation.external !== undefined) return [];
+  return decisionsWithCases(implementation).flatMap(([decision]) => {
+    if (decision.kind !== "rules" || plans.get(decision)?.kind !== "too many") return [];
+    const change = changeOf(decision as RulesDecision<unknown, unknown, unknown>, wayLimit);
+    return change === undefined ? [] : [change];
+  });
 }
 
 export interface GenerationReport {

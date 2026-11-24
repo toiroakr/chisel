@@ -21,7 +21,9 @@ import {
   examples,
   generate,
   isSpecification,
+  modelChanges,
 } from "./specification.js";
+import type { ModelChange } from "./changes.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
 import { isMachine, runMachine } from "./machine.js";
@@ -101,6 +103,11 @@ const checkCommand = defineCommand({
       ...(args.disregardCombinations === undefined ? {} : { combinations: args.disregardCombinations }),
       ...(args.disregardCandidates === undefined ? {} : { candidates: args.disregardCandidates }),
     };
+    if (!args.json) {
+      // Said before the measurement, which may take long and does not change it.
+      const changes = targets.flatMap(target => modelChanges(target.specification, { feasibility: feasibilityOptions(args) }));
+      if (changes.length > 0) console.log(formatChanges(changes));
+    }
     const reports = await Promise.all(
       targets.map(target =>
         check(target.specification, {
@@ -553,9 +560,9 @@ function formatReport(report: AdequacyReport): string {
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
     ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
     `  実装                 ${implementation}`,
-    `  分岐                 ${formatMeasure(report.measures.arms)}`,
+    `  分岐                 ${formatMeasure(report.measures.arms, report.toBeChangedFirst)}`,
     ...formatArms(report.measures.arms),
-    `  道筋                 ${formatMeasure(report.measures.rules)}`,
+    `  道筋                 ${formatMeasure(report.measures.rules, report.toBeChangedFirst)}`,
     ...formatRules(report.measures.rules),
     `  比較                 ${
       report.measures.comparisons.status === "complete"
@@ -786,17 +793,29 @@ function formatEnsures(ensures: EnsuresReport): string[] {
   ];
 }
 
-function formatMeasure(measure: Measure | RulesMeasure): string {
+function formatMeasure(measure: Measure | RulesMeasure, changes: readonly ModelChange[] = []): string {
+  const toChange = new Set(changes.map(change => change.decision));
+  const named = (ids: readonly string[]) => ids.map(id => (toChange.has(id) ? `${id}（先に変更する）` : id)).join(", ");
   switch (measure.status) {
     case "complete":
       return "計測済み (complete)";
     case "partial":
-      return `一部のみ (partial); 読めないdecision: ${measure.notRead.join(", ")}`;
+      return `一部のみ (partial); 読めないdecision: ${named(measure.notRead)}`;
     case "unavailable":
-      return measure.reason === "not applicable"
-        ? "対象なし (not applicable)"
-        : `計測不能 (not measured); 読めないdecision: ${measure.notRead.join(", ")}`;
+      if (measure.reason === "not applicable") return "対象なし (not applicable)";
+      return measure.notRead.every(id => toChange.has(id))
+        ? `計測しない (not measured, to be changed first): ${named(measure.notRead)}`
+        : `計測不能 (not measured); 読めないdecision: ${named(measure.notRead)}`;
   }
+}
+
+// What to change in the model, printed before the measurement starts.
+function formatChanges(changes: readonly ModelChange[]): string {
+  return [
+    "計測の前に:",
+    ...changes.map(change => `  ↻ ${change.message}`),
+    "  ここに述べたことは計測の結果で変わらない。計測を待たずにモデルを変更し、変更してから計測できる。",
+  ].join("\n");
 }
 
 function formatCoverage(

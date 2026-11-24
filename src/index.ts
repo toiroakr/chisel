@@ -122,8 +122,10 @@ export {
   evaluate,
   generate,
   isSpecification,
+  modelChanges,
   test,
 } from "./specification.js";
+export type { ModelChange, ModelChangePart } from "./changes.js";
 export type {
   AdequacyReport,
   CheckOptions,
