@@ -61,16 +61,7 @@ function indent(level: number): string {
 const TEMPORAL_TYPES = ["Instant", "PlainDate", "PlainTime", "PlainDateTime"] as const;
 
 function temporalTypeOf(value: unknown): (typeof TEMPORAL_TYPES)[number] | undefined {
-  const temporal = (
-    globalThis as unknown as {
-      readonly Temporal?: Partial<Record<(typeof TEMPORAL_TYPES)[number], abstract new (...args: never[]) => unknown>>;
-    }
-  ).Temporal;
-  if (temporal === undefined) {
-    throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
-  }
-  return TEMPORAL_TYPES.find(type => {
-    const constructor = temporal[type];
-    return constructor !== undefined && value instanceof constructor;
-  });
+  if (typeof value !== "object" || value === null) return undefined;
+  const tag = Object.prototype.toString.call(value);
+  return TEMPORAL_TYPES.find(type => tag === `[object Temporal.${type}]`);
 }

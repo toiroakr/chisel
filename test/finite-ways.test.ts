@@ -100,19 +100,9 @@ describe("ways measured by the combinations of finite values a decision reads", 
     ]);
   });
 
-  it("reaches an arm through a field left out, since a comparison of an absent value holds", async () => {
-    const 選ぶ = behavior("選ぶ", {
-      input: variants("状態", { 入力済み: object({ 甲: enumOf(["w", "x", "y"]).optional() }) }).refine(v =>
-        v.甲.$ne("w"),
-      ),
-      result: 結果,
-      effects: variants("種類", {}),
-    });
-    const wなら = implement(選ぶ, {
-      cases: { 入力済み: action("wなら", { guards: 入力 => [入力.甲.$eq("w").$else(却下)], run: 受付 }) },
-    });
-
-    expect((await measured(選ぶ, wなら)).arms).toStrictEqual(['$.甲 == "w" holds: gap', '$.甲 == "w" else: gap']);
+  it("refuses an invariant comparing a field that may be left out", () => {
+    expect(() => variants("状態", { 入力済み: object({ 甲: enumOf(["w", "x", "y"]).optional() }) }).refine(v => v.甲.$ne("w")))
+      .toThrow("refine reads $.甲, which may be left out: write its absence as a case of a sum");
   });
 
   it("lists only the ways some combination takes, however many ways the guards spell", async () => {

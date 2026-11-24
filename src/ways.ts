@@ -1,4 +1,8 @@
-import { modelPaths } from "./model.js";
+import { iterationEntries, iterationsOf, modelPaths } from "./model.js";
+import type { IterationEntry } from "./model.js";
+import { isTerm } from "./rule.js";
+import { outcomesOf } from "./outcomes.js";
+export { outcomesOf } from "./outcomes.js";
 import type { Branch, RulesDecision } from "./behavior.js";
 import type { Rule } from "./rule.js";
 import { describeRule, describeTerm } from "./rule.js";
@@ -12,11 +16,18 @@ export interface Way {
   readonly choices?: readonly { readonly condition: Rule; readonly outcome: boolean }[];
   readonly steps: readonly Step[];
   readonly exit: number | "otherwise" | "case";
+  // The map or fold whose body one element takes this way through.
+  readonly within?: IterationNode;
+  // The steps of each way the choices around that iteration lead into it; one of them must hold. Left off where the iteration is entered unconditionally (or where `entryUnlisted` says there are too many to list).
+  readonly entered?: readonly (readonly Step[])[];
+  // Set where the ways into the iteration were too many to list, so a body way is feasible only as far as the way entering it is unknown.
+  readonly entryUnlisted?: true;
 }
 
-interface Outcome {
-  readonly steps: readonly Step[];
-  readonly result: boolean;
+export interface IterationNode {
+  readonly kind: "map" | "fold";
+  readonly name: string;
+  readonly values: unknown;
 }
 
 // How many ways through a decision's guards are listed before its rules and
@@ -32,6 +43,22 @@ export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): read
 export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): Generator<Way> {
   if (decision.expression !== undefined) {
     for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
+    const entries: IterationEntry[] = [];
+    let listed = true;
+    for (const entry of iterationEntries(decision.expression)) {
+      if (entries.length >= WAY_LIMIT) { listed = false; break; }
+      entries.push(entry);
+    }
+    for (const iteration of new Set(iterationsOf(decision.expression))) {
+      // A body with no distinction is one path with no steps and owes nothing of its own; read lazily, since a body may have far more paths than a caller will list.
+      const paths = modelPaths(iteration.body);
+      const first = paths.next();
+      if (first.done === true || first.value.steps.length === 0) continue;
+      const alternatives = entries.filter(entry => entry.node === iteration).map(entry => entry.steps);
+      const reached = !listed ? { entryUnlisted: true as const } : alternatives.length > 0 && alternatives.every(steps => steps.length > 0) ? { entered: alternatives } : {};
+      yield { steps: first.value.steps, choices: first.value.choices, exit: "otherwise", within: iteration, ...reached };
+      for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration, ...reached };
+    }
     return;
   }
   function* from(index: number, before: readonly Step[]): Generator<Way> {
@@ -81,42 +108,8 @@ export function describeWay(way: Way): string {
     return steps;
   }
   const exit = way.exit === "otherwise" ? "otherwise" : `else of guard ${way.exit + 1}`;
-  return steps === "" ? exit : `${steps} → ${exit}`;
-}
-
-export function* outcomesOf(rule: Rule): Generator<Outcome> {
-  switch (rule.kind) {
-    case "compare":
-    case "all":
-    case "any":
-      yield { steps: [{ distinction: rule, outcome: true }], result: true };
-      yield { steps: [{ distinction: rule, outcome: false }], result: false };
-      return;
-    case "not":
-      for (const outcome of outcomesOf(rule.rule)) {
-        yield { ...outcome, result: !outcome.result };
-      }
-      return;
-    case "and":
-    case "or": {
-      const settles = rule.kind === "or";
-      const { rules } = rule;
-      function* from(index: number, before: readonly Step[]): Generator<Outcome> {
-        const part = rules[index];
-        if (part === undefined) {
-          yield { steps: before, result: !settles };
-          return;
-        }
-        for (const next of outcomesOf(part)) {
-          const steps = [...before, ...next.steps];
-          if (next.result === settles) {
-            yield { steps, result: next.result };
-          } else {
-            yield* from(index + 1, steps);
-          }
-        }
-      }
-      yield* from(0, []);
-    }
-  }
+  const described = steps === "" ? exit : `${steps} → ${exit}`;
+  if (way.within === undefined) return described;
+  const over = isTerm(way.within.values) ? `${describeTerm(way.within.values)}[]` : "an element";
+  return `each of ${over}: ${described}`;
 }

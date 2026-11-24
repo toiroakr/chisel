@@ -3,52 +3,16 @@ import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
-import {
-  bordersOf,
-  decimalUnitsCarrier,
-  integerCarrier,
-  nanosecondCarrier,
-  normalize,
-  numberCarrier,
-} from "./border.js";
+import { bordersOf, decimalUnitsCarrier, integerCarrier, nanosecondCarrier, normalize, numberCarrier } from "./border.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf, writeExactly } from "./partition.js";
-import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
-import {
-  DEPS,
-  boundTermPath,
-  conjuncts,
-  describeRule,
-  holds,
-  isDecimal,
-  isTerm,
-  readOperand,
-  selfTerm,
-  shiftTerms,
-  stepInto,
-  termData,
-  termPaths,
-  positionData,
-  positionOf,
-  positionTerm,
-  differenceOf,
-  withDeps,
-  decimalOfUnits,
-  decimalUnits,
-  counts,
-  measured,
-} from "./rule.js";
-import { enumOf, holdsNoDecimal, int, isVariantsSchema, object, offGridEquality, schemaAtPath } from "./schema.js";
-import type {
-  AnySchema,
-  ArraySchema,
-  DecimalSchema,
-  ObjectSchema,
-  ObjectShape,
-  OptionalSchema,
-} from "./schema.js";
-
+import type { CompareRule, Rule, Term } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
+import { enumOf, int, isVariantsSchema, object, variants } from "./schema.js";
+import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
+import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
+import type { Frame, Frames, Threshold } from "./guard-scope.js";
 export interface GuardBorder {
   readonly path: string;
   readonly segments: readonly string[];
@@ -61,6 +25,8 @@ export interface GuardBorder {
     readonly tag: string;
   };
   readonly form?: BorderForm;
+  // The case of each sum the border is drawn under, which a row standing at it must hold.
+  readonly cases?: readonly { readonly at: readonly string[]; readonly discriminant: string; readonly tag: string }[];
   coordinateOf(reached: ComparisonReached): unknown;
   // How many ways compose has of writing a point, tried in order as `side`.
   readonly sides?: number;
@@ -78,23 +44,16 @@ export interface BorderForm {
   }[];
 }
 
-export function guardScope(definition: AnyBehavior, tag: string): AnySchema {
-  const variant = definition.input.variants[tag] as ObjectSchema<ObjectShape>;
-  const values = Object.entries(definition.dependencies).flatMap(([name, declared]) =>
-    declared.takes === "nothing" ? [[name, declared.output as AnySchema] as const] : [],
-  );
-  if (values.length === 0) {
-    return variant;
-  }
-  const deps = { ...object(Object.fromEntries(values)) } as AnySchema;
-  return { ...variant, shape: { ...variant.shape, [DEPS]: deps } } as AnySchema;
-}
-
 // The case as feasibility reads it: the invariants written on the input sum
 // hold of every case, as the partition passes them down, and read the
 // discriminant as the one value it has under this case.
-export function feasibilityScope(definition: AnyBehavior, tag: string): AnySchema {
-  const scope = guardScope(definition, tag) as ObjectSchema<ObjectShape>;
+export function feasibilityScope(
+  definition: AnyBehavior,
+  tag: string,
+  decision?: { readonly expression?: unknown },
+  steps: readonly { readonly distinction: unknown; readonly outcome: boolean | string }[] = [],
+): AnySchema {
+  const scope = guardScope(definition, tag, decision, steps) as ObjectSchema<ObjectShape>;
   const { discriminant } = definition.input;
   return {
     ...scope,
@@ -116,13 +75,13 @@ export function guardBordersOf(implementation: AnyImplementation): readonly Guar
       : decision.guards.flatMap(candidate =>
           walk(
             candidate.condition,
-            framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$"),
+            framesFor(implementation.behavior, tag, decision),
             at,
             asGuard,
           ).map(
             drawn => ({
               ...drawn,
-              origin: { decision, scope: feasibilityScope(implementation.behavior, tag), tag },
+              origin: { decision, scope: feasibilityScope(implementation.behavior, tag, decision), tag },
             }),
           ),
         ),
@@ -351,16 +310,6 @@ export interface GuardPartition {
   readonly excluded: readonly string[];
 }
 
-interface Threshold {
-  readonly path: string;
-  readonly label: string;
-  readonly described: string;
-  readonly segments: readonly string[];
-  readonly schema: AnySchema;
-  readonly inherited: readonly Rule[];
-  readonly rule: CompareRule;
-}
-
 export function guardPartitionsOf(implementation: AnyImplementation): readonly GuardPartition[] {
   const input = implementation.behavior.input;
   const thresholds = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
@@ -369,7 +318,7 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
       : decision.guards.flatMap(candidate =>
           thresholdsIn(
             candidate.condition,
-            framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$"),
+            framesFor(implementation.behavior, tag, decision),
           ),
         ),
   );
@@ -385,124 +334,6 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
     );
     return partition === undefined ? [] : [partition];
   });
-}
-
-// Guards are read here rather than through offGridEquality, since a guard's
-// terms reach the dependencies and are located through the guard's frames.
-export function offGridEqualityIn(
-  definition: AnyBehavior,
-  tag: string,
-  decision: RulesDecision<unknown, unknown, unknown, unknown>,
-): string | undefined {
-  const frames = framesAt(guardScope(definition, tag), `@${tag}`, "$");
-  for (const threshold of decision.guards.flatMap(candidate => thresholdsIn(candidate.condition, frames))) {
-    const { operator, bound } = normalize(threshold.rule)!;
-    if (holdsNoDecimal(threshold.schema, operator, bound)) {
-      const scale = (threshold.schema as DecimalSchema).scale;
-      return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
-    }
-  }
-  const scope = guardScope(definition, tag);
-  return decision.guards
-    .map(candidate => offGridEquality(candidate.condition, path => schemaAtPath(scope, path), "$"))
-    .find(found => found !== undefined);
-}
-
-interface Frame {
-  readonly scope: AnySchema;
-  readonly path: string;
-  readonly segments: readonly string[];
-  readonly label: string;
-}
-
-interface Frames {
-  readonly root: Frame;
-  readonly elements: Readonly<Record<string, Frame>>;
-}
-
-function framesAt(scope: AnySchema, path: string, label: string): Frames {
-  return { root: { scope, path, segments: [path], label }, elements: {} };
-}
-
-function locate(
-  term: Term<unknown>,
-  frames: Frames,
-): { readonly frame: Frame; readonly keys: readonly string[] } {
-  const keys = positionOf(term).path;
-  const element = keys[0] === undefined ? undefined : frames.elements[keys[0]];
-  return element === undefined
-    ? { frame: frames.root, keys }
-    : { frame: element, keys: keys.slice(1) };
-}
-
-function enter(rule: Rule & { readonly kind: "all" | "any" }, frames: Frames): Frames | undefined {
-  const { frame, keys } = locate(rule.of, frames);
-  const collection = schemaAt(frame.scope, keys);
-  if (collection?.kind !== "array") {
-    return undefined;
-  }
-  const suffix = keys.map(key => `.${key}`).join("");
-  return {
-    root: frames.root,
-    elements: {
-      ...frames.elements,
-      [rule.element]: {
-        scope: (collection as ArraySchema<unknown>).element,
-        path: `${frame.path}${suffix}[]`,
-        segments: [...segmentsOf(frame, keys), "[]"],
-        label: `${frame.label}${suffix}[]`,
-      },
-    },
-  };
-}
-
-function labelsOf(frames: Frames): ElementLabels {
-  return Object.fromEntries(
-    Object.entries(frames.elements).map(([name, frame]) => [name, frame.label]),
-  );
-}
-
-function pathOf(frame: Frame, keys: readonly string[]): string {
-  return `${frame.path}${keys.map(key => `.${key}`).join("")}`;
-}
-
-// The rendered path is for reports; positions are found by segments, since a
-// key holding "." renders the same as the nested path it spells.
-function segmentsOf(frame: Frame, keys: readonly string[]): readonly string[] {
-  return [...frame.segments, ...keys.map(key => `.${key}`)];
-}
-
-function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
-  if (rule.kind === "and" || rule.kind === "or") {
-    return rule.rules.flatMap(part => thresholdsIn(part, frames));
-  }
-  if (rule.kind === "not") {
-    return thresholdsIn(rule.rule, frames);
-  }
-  if (rule.kind === "all" || rule.kind === "any") {
-    const inner = enter(rule, frames);
-    return inner === undefined ? [] : thresholdsIn(rule.each, inner);
-  }
-  const normalized = normalize(rule);
-  if (rule.kind !== "compare" || normalized === undefined || normalized.measure !== "value") {
-    return [];
-  }
-  const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
-  const { frame, keys } = locate(term, frames);
-  const schema = schemaAt(frame.scope, keys);
-  return schema === undefined
-    ? []
-    : [
-        {
-          path: pathOf(frame, keys),
-          label: `${frame.label}${keys.map(key => `.${key}`).join("")}`,
-          described: describeRule(rule, frames.root.label, labelsOf(frames)),
-          segments: segmentsOf(frame, keys),
-          schema,
-          inherited: inheritedAt(frame.scope, keys),
-          rule,
-        },
-      ];
 }
 
 interface Edge {
@@ -593,24 +424,6 @@ function partitionAt(
   return { path, segments, classes, excluded };
 }
 
-export function inheritedAt(scope: AnySchema, keys: readonly string[]): readonly Rule[] {
-  const [key, ...rest] = keys;
-  const unwrapped =
-    scope.kind === "optional" ? (scope as OptionalSchema<unknown>).schema : scope;
-  if (key === undefined || unwrapped.kind !== "object") {
-    return [];
-  }
-  const field = (unwrapped as ObjectSchema<ObjectShape>).shape[key];
-  const here = unwrapped.invariants.flatMap(conjuncts).flatMap(rule => {
-    const stepped = keys.reduce<Rule | undefined>(
-      (current, next) => (current === undefined ? undefined : stepInto(current, next)),
-      rule,
-    );
-    return stepped === undefined ? [] : [stepped];
-  });
-  return field === undefined ? here : [...here, ...inheritedAt(field, rest)];
-}
-
 function admittedRange(
   invariants: readonly Rule[],
   carrier: Carrier,
@@ -675,31 +488,36 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
   }
   const { frame, keys } = locate(term, frames);
   const { measure } = positionOf(term);
-  const schema = schemaAt(frame.scope, keys);
-  if (schema === undefined) {
+  const whole = schemaAt(frame.scope, keys);
+  if (whole === undefined) {
     return [];
   }
-  const borders = bordersOf([rule], found => carrierOf(schema, found), {
-    source: reading.source,
-    describe: () => reading.describe(rule, frames),
-    admits: coordinate =>
-      measure !== "value" ||
-      (schema.parse(coordinate).success &&
-        inheritedAt(frame.scope, keys).every(inherited => holds(inherited, coordinate))),
+  // A field the cases of a sum share is drawn under each, read as that case declares it.
+  return everyStepsOf(frame.scope, keys).flatMap(steps => {
+    const schema = schemaAlong(frame.scope, keys, steps) ?? whole;
+    const borders = bordersOf([rule], found => carrierOf(schema, found), {
+      source: reading.source,
+      describe: () => reading.describe(rule, frames),
+      admits: coordinate =>
+        measure !== "value" ||
+        (schema.parse(coordinate).success &&
+          inheritedAt(frame.scope, keys, steps).every(inherited => holds(inherited, coordinate))),
+    });
+    const positionPath = pathOf(frame, keys, steps);
+    const positionSegments = [...frame.segments, ...steps];
+    return borders.map(border => ({
+      path: positionPath,
+      segments: positionSegments,
+      comparison: rule,
+      border,
+      cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at], discriminant: item.sum.discriminant, tag: item.tag })),
+      coordinateOf: (reached: { readonly scope: unknown }) => onTrail(frame.scope, keys, steps, frame === frames.root ? reached.scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), reached.scope)) ? readOperand(term, reached.scope) : undefined,
+      compose: (given: unknown, coordinate: unknown) => {
+        const position = at(positionSegments);
+        return position === undefined ? undefined : writeExactly(position, given, measure, coordinate);
+      },
+    }));
   });
-  const positionPath = pathOf(frame, keys);
-  const positionSegments = segmentsOf(frame, keys);
-  return borders.map(border => ({
-    path: positionPath,
-    segments: positionSegments,
-    comparison: rule,
-    border,
-    coordinateOf: reached => readOperand(term, reached.scope),
-    compose: (given, coordinate) => {
-      const position = at(positionSegments);
-      return position === undefined ? undefined : writeExactly(position, given, measure, coordinate);
-    },
-  }));
 }
 
 function betweenExpression(
@@ -712,21 +530,54 @@ function betweenExpression(
   if (rule.operator === "==" || rule.operator === "!=" || typeof form.constant !== "number") {
     return [];
   }
-  const parts = form.parts.map(part => {
+  // Every trail through the cases of the sums each part passes, the parts under one sum read under the same case of it.
+  const options = form.parts.map(part => {
     const term = positionTerm(part.path, part.measure);
     const { frame, keys } = locate(term, frames);
-    const schema = schemaAt(frame.scope, keys);
+    return everyStepsOf(frame.scope, keys).map(steps => ({
+      part, term, frame, keys, steps,
+      cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at], discriminant: item.sum.discriminant, tag: item.tag })),
+    }));
+  });
+  const agree = (a: NonNullable<GuardBorder["cases"]>, b: NonNullable<GuardBorder["cases"]>) =>
+    a.every(one => b.every(other => one.at.join("\u0000") !== other.at.join("\u0000") || one.tag === other.tag));
+  const trails = options.reduce<(typeof options)[number][]>(
+    (all, choices) => all.flatMap(prefix => choices.filter(choice => prefix.every(held => agree(held.cases, choice.cases))).map(choice => [...prefix, choice])),
+    [[]] as never,
+  ) as unknown as (typeof options)[number][];
+  return (trails as unknown as (typeof options)[number][]).flatMap(chosen => betweenExpressionOn(rule, form, chosen as never, frames, at, reading));
+}
+
+function betweenExpressionOn(
+  rule: CompareRule & { readonly name?: string },
+  form: ReturnType<typeof differenceOf>,
+  chosen: readonly {
+    readonly part: ReturnType<typeof differenceOf>["parts"][number];
+    readonly term: Term<unknown>;
+    readonly frame: Frame;
+    readonly keys: readonly string[];
+    readonly steps: readonly string[];
+    readonly cases: NonNullable<GuardBorder["cases"]>;
+  }[],
+  frames: Frames,
+  at: PositionAt,
+  reading: Reading,
+): GuardBorder[] {
+  const parts = chosen.map(({ part, term, frame, keys, steps }) => {
+    const schema = schemaAlong(frame.scope, keys, steps) ?? schemaAt(frame.scope, keys);
     const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
       term,
       coefficient: part.coefficient,
       measure: part.measure,
       standsIn,
-      path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
-      segments: segmentsOf(frame, keys),
+      path: measureLabel(standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys, steps), part.measure),
+      segments: [...frame.segments, ...steps],
       kind: counts(part.measure) ? "integer" : schema?.kind,
+      onTrail: (scope: unknown) => onTrail(frame.scope, keys, steps, frame === frames.root ? scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), scope)),
     };
   });
+  const cases = chosen.flatMap(item => item.cases).filter((item, index, all) => all.findIndex(other => other.at.join("\u0000") === item.at.join("\u0000")) === index);
   const carrier = parts.every(part => part.kind === "integer")
     ? integerCarrier
     : parts.every(part => part.kind === "integer" || part.kind === "number")
@@ -735,7 +586,7 @@ function betweenExpression(
   if (carrier === undefined || parts.length === 0) {
     return [];
   }
-  const constant = form.constant;
+  const constant = form.constant as number;
   const difference: Rule = {
     ...(rule.name === undefined ? {} : { name: rule.name }),
     kind: "compare",
@@ -781,7 +632,9 @@ function betweenExpression(
     comparison: rule,
     border,
     ...(weighed === undefined ? {} : { form: weighed }),
+    cases,
     coordinateOf: reached => {
+      if (!parts.every(part => part.onTrail(reached.scope))) return undefined;
       let total = constant;
       for (const part of parts) {
         const value = valueOf(part, reached.scope);
@@ -833,6 +686,9 @@ function betweenExpression(
   }));
 }
 
+// A side of a pair read down one trail through the cases of the sums it passes.
+interface Option { readonly term: Term<unknown>; readonly frame: Frame; readonly keys: readonly string[]; readonly steps: readonly string[]; readonly cases: NonNullable<GuardBorder["cases"]> }
+
 function between(
   rule: CompareRule & { readonly name?: string },
   left: Term<unknown>,
@@ -841,19 +697,38 @@ function between(
   at: PositionAt,
   reading: Reading,
 ): GuardBorder[] {
-  const sides = [left, right].map(term => {
+  const options = [left, right].map(term => {
     const { frame, keys } = locate(term, frames);
+    return everyStepsOf(frame.scope, keys).map((steps): Option => ({
+      term, frame, keys, steps,
+      cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at], discriminant: item.sum.discriminant, tag: item.tag })),
+    }));
+  }) as [Option[], Option[]];
+  // Two sides under one sum are read under the same case of it.
+  const compatible = (a: Option, b: Option) => a.cases.every(one => b.cases.every(other => one.at.join("\u0000") !== other.at.join("\u0000") || one.tag === other.tag));
+  return options[0].flatMap(a => options[1].filter(b => compatible(a, b)).flatMap(b => betweenOn(rule, [a, b], frames, at, reading)));
+}
+
+function betweenOn(
+  rule: CompareRule & { readonly name?: string },
+  options: readonly [Option, Option],
+  frames: Frames,
+  at: PositionAt,
+  reading: Reading,
+): GuardBorder[] {
+  const sides = options.map(({ term, frame, keys, steps }) => {
     const { measure } = positionOf(term);
-    const schema = schemaAt(frame.scope, keys);
+    const schema = schemaAlong(frame.scope, keys, steps) ?? schemaAt(frame.scope, keys);
     const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
       term,
       measure,
       standsIn,
-      path: standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys),
-      segments: segmentsOf(frame, keys),
+      path: measureLabel(standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys, steps), measure),
+      segments: [...frame.segments, ...steps],
       kind: counts(measure) ? "integer" : schema?.kind,
       scale: measure === "value" && schema?.kind === "decimal" ? (schema as DecimalSchema).scale : 0,
+      onTrail: (scope: unknown) => onTrail(frame.scope, keys, steps, frame === frames.root ? scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), scope)),
     };
   });
   const [first, second] = sides as [(typeof sides)[number], (typeof sides)[number]];
@@ -905,7 +780,9 @@ function between(
     comparison: rule,
     border,
     ...(form === undefined ? {} : { form }),
+    cases: [...options[0].cases, ...options[1].cases.filter(other => !options[0].cases.some(one => one.at.join("\u0000") === other.at.join("\u0000")))],
     coordinateOf: reached => {
+      if (!first.onTrail(reached.scope) || !second.onTrail(reached.scope)) return undefined;
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
@@ -1055,7 +932,7 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
-          unreadIn(candidate.condition, framesAt(guardScope(implementation.behavior, tag), `@${tag}`, "$")).map(
+          unreadIn(candidate.condition, framesFor(implementation.behavior, tag, decision)).map(
             text => `${decision.id}: ${text}`,
           ),
         ),
@@ -1078,6 +955,8 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
     }
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
+      // Two constants settle without reading anything.
+      if (terms.length === 0) return [];
       if (terms.some(term => positionData(term) === undefined)) {
         const kinds = differenceOf(rule).parts.map(part => {
           const { frame, keys } = locate(positionTerm(part.path, part.measure), frames);
@@ -1115,8 +994,4 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
       return readable ? [] : [describeRule(rule, frames.root.label, labelsOf(frames))];
     }
   }
-}
-
-function schemaAt(schema: AnySchema, keys: readonly string[]): AnySchema | undefined {
-  return schemaAtPath(schema, keys);
 }

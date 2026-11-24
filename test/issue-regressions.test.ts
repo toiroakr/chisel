@@ -13,22 +13,18 @@ describe("issue regressions", () => {
     expect(c.generate(c.examples(price, {}))).toHaveProperty("rows");
   });
 
-  it.each(["$eq", "$ne", "$gte"] as const)("checks an omitted optional string with %s (#54)", async method => {
+  it.each(["$eq", "$ne", "$gte"] as const)("refuses a guard comparing an optional string with %s (#54)", method => {
     const note = c.behavior("note", {
       input: c.variants("kind", { go: c.object({ note: c.string().optional() }) }),
       result: c.variants("outcome", { a: c.object({}), b: c.object({}) }),
       effects: c.variants("type", {}),
     });
-    const implementation = c.implement(note, {
+    expect(() => c.implement(note, {
       cases: { go: c.action("go", {
         guards: r => [r.note[method]("ab").$else(() => ({ result: { outcome: "b" as const }, effects: [] }))],
         run: () => ({ result: { outcome: "a" as const }, effects: [] }),
       }) },
-    });
-    const rows = c.examples(note, { left: { given: { kind: "go" }, expect: { result: { outcome: "b" }, effects: [] } } });
-    const specification = c.spec("note", { examples: rows, implementation });
-    await expect(c.check(specification)).resolves.toBeDefined();
-    expect(c.generate(rows, implementation)).toHaveProperty("rows");
+    })).toThrow("guard in go reads $.note, which may be left out: write its absence as a case of a sum");
   });
 
   it.each(["+275760-09-13", "-271821-04-19"])("checks a date bound at %s (#55)", async text => {

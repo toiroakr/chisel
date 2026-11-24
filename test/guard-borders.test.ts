@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
+import * as c from "../src/index.js";
 import {
   generate,
   action,
@@ -21,6 +22,9 @@ import {
   string,
   time,
   variants,
+  model,
+  choose,
+  map as mapOf,
 } from "../src/index.js";
 import type { Condition, Rule, TermOf } from "../src/index.js";
 
@@ -864,11 +868,11 @@ describe("a border an input invariant draws between two positions", () => {
 
     expect({
       rows: rows
-        .filter(row => row.name.startsWith("並べる: @入力済み.甲 − @入力済み.乙"))
+        .filter(row => row.name.startsWith("並べる: length(@入力済み.甲) − length(@入力済み.乙)"))
         .map(row => ({ name: row.name, parsed: 並べる.input.parse(row.given).success })),
       notComposed,
     }).toStrictEqual({
-      rows: [{ name: "並べる: @入力済み.甲 − @入力済み.乙 IN (< 0)", parsed: true }],
+      rows: [{ name: "並べる: length(@入力済み.甲) − length(@入力済み.乙) IN (< 0)", parsed: true }],
       notComposed: [],
     });
   });
@@ -992,32 +996,6 @@ describe("a border an input invariant draws between two positions", () => {
     }).toStrictEqual({ borders: [], modelIssues: ["@入力済み: 不変条件を満たす値がありません (invariant $.数量 < $.数量)"] });
   });
 
-  it("reports no model error for a self-cancelling invariant on a field that may be left out, which an input without it keeps", async () => {
-    const 省略できる = behavior("省略できる", {
-      input: variants("状態", { 入力済み: object({ 数量: int().optional() }).refine(v => v.数量.$lt(v.数量)) }),
-      result: variants("結果", { 受付: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const report = await check(spec("省略できる", { examples: examples(省略できる, {}) }));
-
-    expect(report.modelIssues).toStrictEqual([]);
-  });
-
-  it("reports no model error for a self-cancelling invariant on a field one case of a sum field may leave out", async () => {
-    const 選べる = behavior("選べる", {
-      input: variants("状態", {
-        入力済み: object({
-          選択: variants("種類", { 甲: object({ 数量: int() }), 乙: object({ 数量: int().optional() }) }),
-        }).refine(v => v.選択.数量.$lt(v.選択.数量)),
-      }),
-      result: variants("結果", { 受付: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const report = await check(spec("選べる", { examples: examples(選べる, {}) }));
-
-    expect(report.modelIssues).toStrictEqual([]);
-  });
-
   it("reports a self-cancelling invariant on decimals compared with a decimal that no value keeps as a model error", async () => {
     const 小数 = behavior("小数", {
       input: variants("状態", {
@@ -1114,21 +1092,6 @@ describe("a border an input invariant draws between two positions", () => {
     expect(report.modelIssues).toStrictEqual([
       "@入力済み.数量 − @入力済み.上限: 不変条件を満たす値がありません (invariant $.数量 <= $.上限, invariant $.上限 < $.数量)",
     ]);
-  });
-
-  it("reports no model error for invariants on two positions that leave no value, when one may be left out", async () => {
-    const 省略できる = behavior("省略できる", {
-      input: variants("状態", {
-        入力済み: object({ 数量: int().optional(), 上限: int() })
-          .refine(v => v.数量.$lte(v.上限))
-          .refine(v => v.上限.$lt(v.数量)),
-      }),
-      result: variants("結果", { 受付: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const report = await check(spec("省略できる", { examples: examples(省略できる, {}) }));
-
-    expect(report.modelIssues).toStrictEqual([]);
   });
 
   it("draws no border when the behavior disregards either of the two positions", async () => {
@@ -1576,30 +1539,6 @@ describe("a guard comparing an expression of positions", () => {
     ).toStrictEqual(["ON gap", "OFF no row owed", "IN gap", "OUT no row owed"]);
   });
 
-  it("leaves a way through an expression of a field that may be left out undecided, as a comparison with it absent holds", async () => {
-    const 省略 = behavior("省略", {
-      input: variants("状態", { 入力済み: object({ 甲: int().optional(), 乙: int() }) }),
-      result: variants("結果", { 受付: object({}), 却下: object({}) }),
-      effects: variants("種類", {}),
-    });
-    const 両方 = implement(省略, {
-      cases: {
-        入力済み: action("両方", {
-          guards: 入力 => [
-            入力.甲.$plus(入力.乙).$gte(1).$else(却下),
-            入力.甲.$plus(入力.乙).$lt(1).$else(却下),
-          ],
-          run: () => ({ result: { 結果: "受付" }, effects: [] }),
-        }),
-      },
-    });
-    const report = await check(spec("両方", { examples: examples(省略, {}), implementation: 両方 }));
-
-    expect(
-      report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => rule.status)[0] : undefined,
-    ).toBe("undecided");
-  });
-
   it("writes a point of an expression by moving a part that still reaches the guard, past an earlier guard on another", () => {
     const 先に = implement(釣り合わせる, {
       cases: {
@@ -1702,5 +1641,108 @@ describe("an equality between two positions", () => {
     const report = await reportFor(入力 => 入力.請求額.$ne(入力.入金額));
 
     expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
+  });
+});
+
+describe("a guard on a field the cases of a sum share", () => {
+  it("draws a border under each case, held to the bounds that case declares", async () => {
+    const sum = variants("t", { a: object({ n: int().min(10) }), b: object({ n: int().min(0) }) });
+    const definition = behavior("shared field", { input: variants("kind", { go: object({ s: sum }) }), result: int(), effects: variants("kind", {}) });
+    const implementation = implement(definition, { cases: { go: action("g", {
+      guards: input => [input.s.n.$gte(5).$else(() => ({ result: 0, effects: [] }))], run: () => ({ result: 1, effects: [] }),
+    }) } });
+    const rows = examples(definition, { b: { given: { kind: "go", s: { t: "b", n: 5 } }, expect: { result: 1, effects: [] } } });
+    const report = await check(spec("shared field", { implementation, examples: rows }));
+    const points = report.borders.filter(border => border.rule === "guard $.s.n >= 5").map(border => border.points.map(point => `${point.role} ${point.status}`));
+    expect(points).toStrictEqual([
+      ["ON excluded", "OFF excluded", "IN gap", "OUT excluded"],
+      ["ON met", "OFF gap", "IN gap", "OUT gap"],
+    ]);
+  });
+});
+
+describe("a guard on a field the cases of a sum share, read from an element of an iteration", () => {
+  it("is met only by an element of the case the border is drawn under", async () => {
+    const sum = variants("t", { a: object({ n: int().min(10) }), b: object({ n: int().min(0) }) });
+    const definition = behavior("shared element", { input: variants("kind", { go: object({ xs: array(sum) }) }), result: array(int()), effects: variants("kind", {}) });
+    const implementation = implement(definition, { cases: { go: model("go", input => ({
+      result: mapOf(sum, int(), input.xs, x => choose(x.n.$gte(5), 1, 0)), effects: [],
+    })) } });
+    const rows = examples(definition, { b: { given: { kind: "go", xs: [{ t: "a", n: 10 }] }, expect: { result: [1], effects: [] } } });
+    const report = await check(spec("shared element", { implementation, examples: rows }));
+    const points = report.borders.filter(border => border.rule.startsWith("guard") && border.rule.includes(">= 5")).map(border => border.points.map(point => `${point.role} ${point.status}`));
+    expect(points).toStrictEqual([["ON excluded", "OFF excluded", "IN met", "OUT excluded"], ["ON gap", "OFF gap", "IN gap", "OUT gap"]]);
+  });
+});
+
+describe("a guard on a field of a sum's case whose own invariant bounds the field", () => {
+  it("excludes the points that invariant refuses", async () => {
+    const sum = variants("t", { a: object({ n: int() }).refine(value => value.n.$gte(10)), b: object({ n: int().min(0) }) });
+    const definition = behavior("case invariant", { input: variants("kind", { go: object({ s: sum }) }), result: int(), effects: variants("kind", {}) });
+    const implementation = implement(definition, { cases: { go: action("g", {
+      guards: input => [input.s.n.$gte(5).$else(() => ({ result: 0, effects: [] }))], run: () => ({ result: 1, effects: [] }),
+    }) } });
+    const rows = examples(definition, { b: { given: { kind: "go", s: { t: "b", n: 5 } }, expect: { result: 1, effects: [] } } });
+    const report = await check(spec("case invariant", { implementation, examples: rows }));
+    const first = report.borders.find(border => border.rule === "guard $.s.n >= 5")!;
+    expect(first.points.map(point => `${point.role} ${point.status}`)).toStrictEqual(["ON excluded", "OFF excluded", "IN gap", "OUT excluded"]);
+  });
+});
+
+describe("a guard on a field the cases of a sum share", () => {
+  it("owes no row at the points of a case the guard before it has already excluded", async () => {
+    const shared = c.variants("t", { a: c.object({ n: c.int() }), b: c.object({ n: c.int() }) });
+    const definition = c.behavior("shared field", {
+      input: c.variants("kind", { go: c.object({ s: shared }) }), result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}),
+    });
+    const none = { result: { verdict: "none" as const }, effects: [] };
+    const impl = c.implement(definition, { cases: { go: c.action("only a", {
+      guards: input => [input.s.t.$eq("a").$and(input.s.n.$gte(5)).$else(() => none)], run: () => none,
+    }) } });
+    const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "a", n: 7 } }, expect: none } });
+    const report = await c.check(c.spec("shared field", { implementation: impl, examples: rows }));
+    const under = (tag: string) => report.borders.filter(border => border.rule.includes(">= 5") && border.path.includes(`@${tag}`)).flatMap(border => border.points.map(point => point.status));
+    expect(under("b").length).toBeGreaterThan(0);
+    expect(under("b").filter(status => status === "gap")).toStrictEqual([]);
+    expect(under("a")).toContain("gap");
+  });
+});
+
+describe("a guard comparing two fields the cases of a sum share", () => {
+  it("draws the border under each case, with the scale each case declares", async () => {
+    const shared = c.variants("t", {
+      coarse: c.object({ a: c.decimal(1), b: c.decimal(1) }),
+      fine: c.object({ a: c.decimal(2), b: c.decimal(2) }),
+    });
+    const definition = c.behavior("pair", {
+      input: c.variants("kind", { go: c.object({ s: shared }) }), result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}),
+    });
+    const none = { result: { verdict: "none" as const }, effects: [] };
+    const impl = c.implement(definition, { cases: { go: c.action("ordered", {
+      guards: input => [input.s.a.$gte(input.s.b).$else(() => none)], run: () => none,
+    }) } });
+    const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "coarse", a: new Decimal("1.0"), b: new Decimal("1.0") } }, expect: none } });
+    const report = await c.check(c.spec("pair", { implementation: impl, examples: rows }));
+    const paths = report.borders.filter(border => border.rule.includes(">=")).map(border => border.path);
+    expect(paths.some(path => path.includes("@coarse"))).toBe(true);
+    expect(paths.some(path => path.includes("@fine"))).toBe(true);
+  });
+});
+
+describe("a guard comparing an expression of fields the cases of a sum share", () => {
+  it("draws the border under each case", async () => {
+    const shared = c.variants("t", { coarse: c.object({ a: c.int(), b: c.int() }), fine: c.object({ a: c.int(), b: c.int() }) });
+    const definition = c.behavior("expression", {
+      input: c.variants("kind", { go: c.object({ s: shared }) }), result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}),
+    });
+    const none = { result: { verdict: "none" as const }, effects: [] };
+    const impl = c.implement(definition, { cases: { go: c.action("ordered", {
+      guards: input => [input.s.a.$plus(1).$gte(input.s.b).$else(() => none)], run: () => none,
+    }) } });
+    const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "coarse", a: 1, b: 1 } }, expect: none } });
+    const report = await c.check(c.spec("expression", { implementation: impl, examples: rows }));
+    const paths = report.borders.filter(border => border.rule.includes(">=")).map(border => border.path);
+    expect(paths.some(path => path.includes("@coarse"))).toBe(true);
+    expect(paths.some(path => path.includes("@fine"))).toBe(true);
   });
 });

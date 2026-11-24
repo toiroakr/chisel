@@ -7,6 +7,8 @@ import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./sche
 import { schemaAtPath } from "./schema.js";
 import type { Step } from "./ways.js";
 import { deepEqual } from "./equal.js";
+import { compatibleBound } from "./bounds.js";
+export { compatibleBound } from "./bounds.js";
 import { DURATION_LIMIT, fixedLength, onTimeline, takesUnit, temporalKindOf, timelineOf, TIMELINE_RANGE } from "./temporal.js";
 
 interface Interval {
@@ -29,17 +31,6 @@ function boundOf(value: unknown, kind: string): Rational | undefined {
   try { return fractionOf(value as number); } catch { return undefined; }
 }
 
-export function compatibleBound(value: unknown, kind: string): boolean {
-  if (onTimeline(kind)) return temporalKindOf(value) === kind;
-  if (kind === "number" || kind === "integer") return typeof value === "number" && Number.isFinite(value);
-  if (kind === "bigint" || kind === "int64") return typeof value === "bigint";
-  if (kind === "rational") return isRational(value);
-  if (kind === "decimal") {
-    if (!isDecimal(value) && typeof value !== "number" && typeof value !== "string" && typeof value !== "bigint") return false;
-    try { return new Decimal(value as Decimal.Value).isFinite(); } catch { return false; }
-  }
-  return true;
-}
 // Whether a date, time, date-time or instant meets its schema: a time of day
 // moved by clock units always does, since it wraps at midnight; a date,
 // date-time or instant does when its range on the timeline stays where Temporal
@@ -217,4 +208,44 @@ function optionalAlong(schema: AnySchema, path: readonly string[]): boolean {
   if (schema.kind !== "object") return true;
   const child = (schema as ObjectSchema<ObjectShape>).shape[path[0]!];
   return !child || optionalAlong(child, path.slice(1));
+}
+
+// The values a sum, difference or product of numbers may take, read from the
+// bounds of the positions it reads and what the steps settle of them, as exact
+// rationals with no limit of size, for telling a comparison it never meets. A
+// `number` is added and multiplied in floating point at run time: one that is
+// not a whole number is not read, and a result past the safe integers is widened
+// by the relative error one rounding may make.
+export function rangeOf(value: unknown, scope: AnySchema, steps: readonly Step[]): { readonly low: Rational; readonly high: Rational } | undefined {
+  const range = measuredRange(value, scope, steps);
+  return range === undefined ? undefined : { low: range.low, high: range.high };
+}
+const rounding = new Rational(1n, 1n << 52n);
+function widened(low: Rational, high: Rational): { readonly low: Rational; readonly high: Rational } {
+  const room = (bound: Rational) => (bound.comparedTo(zero) < 0 ? bound.times(new Rational(-1n)) : bound).times(rounding);
+  return {
+    low: low.comparedTo(fractionOf(Number.MIN_SAFE_INTEGER)) < 0 ? low.minus(room(low)) : low,
+    high: high.comparedTo(fractionOf(Number.MAX_SAFE_INTEGER)) > 0 ? high.plus(room(high)) : high,
+  };
+}
+function measuredRange(value: unknown, scope: AnySchema, steps: readonly Step[]): { readonly low: Rational; readonly high: Rational; readonly floating: boolean } | undefined {
+  const node = nodeOf(value);
+  if (node?.kind === "construct") return measuredRange(node.value, scope, steps);
+  if (node?.kind === "operation" && (node.operator === "add" || node.operator === "subtract" || node.operator === "multiply")) {
+    const left = measuredRange(node.left, scope, steps), right = measuredRange(node.right, scope, steps);
+    if (!left || !right) return undefined;
+    let low: Rational, high: Rational;
+    if (node.operator === "add") { low = left.low.plus(right.low); high = left.high.plus(right.high); }
+    else if (node.operator === "subtract") { low = left.low.minus(right.high); high = left.high.minus(right.low); }
+    else {
+      const values = [left.low, left.high].flatMap(a => [right.low, right.high].map(b => a.times(b)));
+      low = values.reduce(min); high = values.reduce(max);
+    }
+    const floating = left.floating || right.floating;
+    return floating ? { ...widened(low, high), floating } : { low, high, floating };
+  }
+  const found = interval(value, scope, steps);
+  if (found === undefined || onTimeline(found.kind)) return undefined;
+  const floating = found.kind === "number";
+  return floating && !found.integral ? undefined : { low: found.low, high: found.high, floating };
 }

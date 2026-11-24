@@ -152,6 +152,7 @@ const generateCommand = defineCommand({
           ways: args.ways,
           feasibility: feasibilityOptions(args),
           pairs: pairOptions(args),
+          fakes: target.specification.fakes,
         },
       );
       return [
@@ -545,7 +546,8 @@ function formatReport(report: AdequacyReport): string {
     ...formatPartitions(report.partitions),
     ...formatBorders(report.borders),
     ...formatPairs(report.pairs),
-    ...report.measures.pairs.obligations.filter(pair => pair.status !== "met").map(pair => `    ${pair.status === "gap" || pair.status === "answer owed" ? "!" : "?"} ${pair.positions.join(" × ")}: ${pair.classes.join(" × ")} (${pair.status})${pair.reason === undefined ? "" : ` — ${pair.reason}`}`),
+    ...report.measures.pairs.obligations.filter(pair => pair.status !== "met" && pair.status !== "no row owed").map(pair => `    ${pair.status === "gap" || pair.status === "answer owed" ? "!" : "?"} ${pair.positions.join(" × ")}: ${pair.classes.join(" × ")} (${pair.status})${pair.reason === undefined ? "" : ` — ${pair.reason}`}`),
+    ...countedPairs(report.measures.pairs.obligations),
     ...report.measures.pairs.notRead.map(reason => `    ? 組み合わせ未計測: ${reason}`),
     ...formatEvidence("証拠（入力）", report.evidence.input, ["specified", "executed", "verified"]),
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
@@ -714,6 +716,17 @@ const countedLabels: Readonly<Record<"no row owed" | "undecided", string>> = {
   "no row owed": "行は不要 (no row owed)",
   undecided: "未決 (undecided)",
 };
+
+// A pair no row is owed is counted under its reason, as an arm or a way is.
+function countedPairs(obligations: AdequacyReport["measures"]["pairs"]["obligations"]): string[] {
+  const counted = new Map<string, number>();
+  for (const pair of obligations) {
+    if (pair.status !== "no row owed") continue;
+    const key = `${countedLabels["no row owed"]}: ${pair.reason ?? ""}`;
+    counted.set(key, (counted.get(key) ?? 0) + 1);
+  }
+  return [...counted].map(([key, count]) => `    ${key} — ${count}件`);
+}
 
 function formatLines<T extends { readonly status: CoverageStatus; readonly reason?: string }>(
   items: readonly T[],

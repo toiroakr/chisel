@@ -131,8 +131,12 @@ type TermOperator =
   | "$plus"
   | "$minus";
 
+// A sum's term reaches the fields of every case: implement refuses a comparison
+// reading one where the guards before it leave other cases possible.
+type KeysOfCases<T> = T extends unknown ? keyof T : never;
+type FieldOfCases<T, K extends PropertyKey> = T extends unknown ? (K extends keyof T ? T[K] : never) : never;
 type Fields<T> = {
-  readonly [K in Exclude<keyof T & string, TermOperator>]-?: TermOf<Exclude<T[K], undefined>>;
+  readonly [K in Exclude<KeysOfCases<T> & string, TermOperator>]-?: TermOf<Exclude<FieldOfCases<T, K>, undefined>>;
 };
 
 export type TermOf<T> = Term<T> &
@@ -291,6 +295,23 @@ export function termPaths(rule: Rule): readonly (readonly string[])[] {
       return rule.rules.flatMap(termPaths);
     case "not":
       return termPaths(rule.rule);
+  }
+}
+
+// Every path the rule reads, inside a quantifier's condition too, less those
+// of the element it ranges over.
+export function pathsRead(rule: Rule): readonly (readonly string[])[] {
+  switch (rule.kind) {
+    case "compare":
+      return termPaths(rule);
+    case "all":
+    case "any":
+      return [positionOf(rule.of).path, ...pathsRead(rule.each).filter(path => path[0] !== rule.element)];
+    case "and":
+    case "or":
+      return rule.rules.flatMap(pathsRead);
+    case "not":
+      return pathsRead(rule.rule);
   }
 }
 
@@ -643,6 +664,13 @@ export function leftAsItReads(value: unknown, transforms: readonly Transform[]):
   return typeof value === "string" && compareText(transformed(value, transforms) as string, value) === 0;
 }
 
+// A location as `measure` reads it: `length(lowercase(trim($.x)))`.
+export function measureLabel(location: string, measure: Measure): string {
+  const { transforms, reading } = partsOfMeasure(measure);
+  const read = transforms.reduce((inner, transform) => `${transform}(${inner})`, location);
+  return reading === "length" ? `length(${read})` : read;
+}
+
 // What `measure` reads of a value found at a term's path.
 export function measured(value: unknown, measure: Measure): unknown {
   const { transforms, reading } = partsOfMeasure(measure);
@@ -920,8 +948,16 @@ function ordering(left: unknown, right: unknown): number {
   return Number.NaN;
 }
 
-export function describeTerm(term: Term<unknown>, path = "$"): string {
-  return describeOperand(term, path);
+// A local bound to a dependency's answer reads as the call, any other by its number.
+export function localLabel(name: string): string {
+  const rest = name.slice("#local:".length);
+  if (rest.startsWith("call:")) return `${rest.slice("call:".length, rest.lastIndexOf(":"))}()`;
+  const at = rest.indexOf("@");
+  return at === -1 ? `local${rest}` : rest.slice(at + 1);
+}
+
+export function describeTerm(term: Term<unknown>, path = "$", elements: ElementLabels = {}): string {
+  return describeOperand(term, path, elements);
 }
 
 function describeOperand(operand: unknown, path: string, elements: ElementLabels = {}): string {
@@ -937,7 +973,9 @@ function describeOperand(operand: unknown, path: string, elements: ElementLabels
   const location = (
     first === DEPS
       ? ["deps", ...rest]
-      : elements[first] !== undefined
+      : first.startsWith("#local:")
+        ? [localLabel(first), ...rest]
+        : elements[first] !== undefined
         ? [elements[first], ...rest]
         : [path, ...keys]
   )
@@ -953,4 +991,173 @@ function isPlainDate(value: unknown): boolean {
   const constructor = (globalThis as { readonly Temporal?: { readonly PlainDate?: abstract new (...args: never[]) => unknown } })
     .Temporal?.PlainDate;
   return constructor !== undefined && value instanceof constructor;
+}
+
+export function rebaseTerm(term: Term<unknown>, move: (path: readonly string[]) => readonly string[]): Term<unknown> {
+  const data = termData(term);
+  return data.kind === "position"
+    ? termAt(move(data.path), data.measure)
+    : linearTerm({ ...data, parts: data.parts.map(part => ({ ...part, path: move(part.path) })) });
+}
+
+// The rule with every term moved by `move`, which takes a path and answers the
+// path to read instead; constants, operators, names and element roots are kept.
+export function rebaseRule(rule: Rule, move: (path: readonly string[]) => readonly string[]): Rule {
+  const term = (value: unknown): unknown => (isTerm(value) ? rebaseTerm(value, move) : value);
+  const named = <R extends Rule>(rebased: R): R => (rule.name === undefined ? rebased : { ...rebased, name: rule.name });
+  switch (rule.kind) {
+    case "compare":
+      return named({ kind: "compare", operator: rule.operator, left: term(rule.left), right: term(rule.right) });
+    case "all":
+    case "any":
+      return named({ ...rule, of: term(rule.of) as Term<readonly unknown[]>, each: rebaseRule(rule.each, path => (path[0] === rule.element ? path : move(path))) });
+    case "and":
+    case "or":
+      return named({ kind: rule.kind, rules: rule.rules.map(part => rebaseRule(part, move)) });
+    case "not":
+      return named({ kind: "not", rule: rebaseRule(rule.rule, move) });
+  }
+}
+
+// A sum of operands weighed by whole numbers: a term where any operand is one,
+// otherwise the constant it adds up to. Undefined where a term is not a value
+// of a position or an expression of them.
+function foldsExactly(items: readonly { readonly operand: unknown; readonly coefficient: number }[], folded: number): boolean {
+  try {
+    const exact = items.reduce((total, { operand, coefficient }) => total.plus(fractionOf(linearOf(operand).constant as number | Decimal).times(fractionOf(coefficient))), fractionOf(0));
+    return fractionOf(folded).comparedTo(exact) === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function linearCombination(items: readonly { readonly operand: unknown; readonly coefficient: number }[]): unknown {
+  let parts: LinearPart[] = [];
+  let constant: unknown = 0;
+  for (const { operand, coefficient } of items) {
+    const data = linearOf(operand);
+    for (const part of data.parts) {
+      const index = parts.findIndex(existing => existing.measure === part.measure && deepEqual(existing.path, part.path));
+      const weight = part.coefficient * coefficient;
+      const total = index === -1 ? weight : parts[index]!.coefficient + weight;
+      // A weight or a running total that rounds could cancel to a value the exact sum does not have.
+      if (!Number.isSafeInteger(weight) || !Number.isSafeInteger(total)) return undefined;
+      if (index === -1) parts.push({ ...part, coefficient: total });
+      else parts[index] = { ...parts[index]!, coefficient: total };
+    }
+    constant = sum(constant, scaled(data.constant, coefficient));
+  }
+  parts = parts.filter(part => part.coefficient !== 0);
+  // A constant is read exactly, as a term reads it: a fold that rounds is not read.
+  if (typeof constant === "number" && (!Number.isFinite(constant) || (Number.isInteger(constant) && !Number.isSafeInteger(constant)) || !foldsExactly(items, constant))) return undefined;
+  // What decimals add to stays a decimal where their parts cancel.
+  if (typeof constant === "number" && items.some(({ operand }) => isDecimal(operand) || (isTerm(operand) && isDecimal(linearOf(operand).constant)))) constant = decimalOf(fractionOf(constant));
+  if (parts.length === 0) return constant;
+  if (parts.length === 1 && parts[0]!.coefficient === 1 && constant === 0) return termAt(parts[0]!.path, parts[0]!.measure);
+  return linearTerm({ kind: "linear", parts, constant: constant as number | Decimal });
+}
+
+// The rule with each operand `replace` answers for put in its place: a path it
+// answers is read as the term or constant it gives, measured as the operand
+// read it. Undefined where a replacement cannot stand in: a length or a
+// transform of an expression, or an expression inside a quantifier's range.
+// A replacement may be a value divided by a whole number (`over`), as a
+// quotient by a constant is: it stands in only where a comparison can be
+// multiplied out, never as a value of its own.
+export interface Replacement {
+  readonly with: unknown;
+  readonly over?: number;
+}
+
+export function substitutedOperand(value: unknown, replace: (path: readonly string[]) => Replacement | undefined): Replacement | undefined {
+  {
+    if (!isTerm(value)) return { with: value };
+    const data = termData(value);
+    if (data.kind === "position") {
+      const found = replace(data.path);
+      if (found === undefined) return { with: value };
+      if (data.measure === "value") return found;
+      if (found.over !== undefined) return undefined;
+      if (isTerm(found.with)) {
+        const inner = termData(found.with);
+        return inner.kind === "position" && inner.measure === "value" ? { with: termAt(inner.path, data.measure) } : undefined;
+      }
+      return { with: measured(found.with, data.measure) };
+    }
+    const items: { operand: unknown; coefficient: number }[] = [{ operand: data.constant, coefficient: 1 }];
+    for (const part of data.parts) {
+      const found = part.measure === "value" ? replace(part.path) : undefined;
+      if (found === undefined && part.measure !== "value" && replace(part.path) !== undefined) return undefined;
+      if (found?.over !== undefined) return undefined;
+      items.push({ operand: found === undefined ? termAt(part.path, part.measure) : found.with, coefficient: part.coefficient });
+    }
+    const combined = linearCombination(items);
+    return combined === undefined ? undefined : { with: combined };
+  }
+}
+
+export function substitutedRule(rule: Rule, replace: (path: readonly string[]) => Replacement | undefined): Rule | undefined {
+  const operand = (value: unknown) => substitutedOperand(value, replace);
+  const named = <R extends Rule>(made: R): R => (rule.name === undefined ? made : { ...made, name: rule.name });
+  switch (rule.kind) {
+    case "compare": {
+      const left = operand(rule.left), right = operand(rule.right);
+      if (left === undefined || right === undefined) return undefined;
+      if (left.over === undefined && right.over === undefined) return named({ kind: "compare", operator: rule.operator, left: left.with, right: right.with });
+      if (left.over !== undefined && right.over !== undefined) return undefined;
+      // x / k op y is x op y * k, the order turned where k is negative. A
+      // quotient is a rational, which compares as written only with a rational.
+      const divisor = (left.over ?? right.over)!;
+      if (!isRational(left.over === undefined ? left.with : right.with)) return undefined;
+      const multiplied = scaledBy(left.over === undefined ? left.with : right.with, divisor);
+      if (multiplied === undefined) return undefined;
+      const operator = divisor < 0 ? mirrored[rule.operator] : rule.operator;
+      return left.over !== undefined
+        ? named({ kind: "compare", operator, left: left.with, right: multiplied })
+        : named({ kind: "compare", operator, left: multiplied, right: right.with });
+    }
+    case "all":
+    case "any": {
+      const of = operand(rule.of);
+      const each = substitutedRule(rule.each, replace);
+      return of === undefined || !isTerm(of.with) || each === undefined ? undefined : named({ ...rule, of: of.with as Term<readonly unknown[]>, each });
+    }
+    case "and":
+    case "or": {
+      const rules = rule.rules.map(part => substitutedRule(part, replace));
+      return rules.some(part => part === undefined) ? undefined : named({ kind: rule.kind, rules: rules as Rule[] });
+    }
+    case "not": {
+      const inner = substitutedRule(rule.rule, replace);
+      return inner === undefined ? undefined : named({ kind: "not", rule: inner });
+    }
+  }
+}
+
+// A value multiplied by a whole number, a term or a number, decimal or rational
+// constant; undefined where a rational does not come out whole.
+function scaledBy(value: unknown, factor: number): unknown {
+  if (isRational(value)) {
+    const product = value.times(new Rational(BigInt(factor)));
+    return product.denominator === 1n && product.numerator <= BigInt(Number.MAX_SAFE_INTEGER) && product.numerator >= BigInt(Number.MIN_SAFE_INTEGER)
+      ? Number(product.numerator) : undefined;
+  }
+  return linearCombination([{ operand: value, coefficient: factor }]);
+}
+
+export function normalize(
+  rule: Rule,
+): { operator: Operator; bound: unknown; measure: Measure } | undefined {
+  if (rule.kind !== "compare") {
+    return undefined;
+  }
+  const left = isTerm(rule.left) ? positionData(rule.left as Term<unknown>) : undefined;
+  const right = isTerm(rule.right) ? positionData(rule.right as Term<unknown>) : undefined;
+  if (left !== undefined && !isTerm(rule.right)) {
+    return { operator: rule.operator, bound: rule.right, measure: left.measure };
+  }
+  if (right !== undefined && !isTerm(rule.left)) {
+    return { operator: mirrored[rule.operator], bound: rule.left, measure: right.measure };
+  }
+  return undefined;
 }

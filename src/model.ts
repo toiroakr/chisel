@@ -2,11 +2,12 @@ import { isPromiseLike, snapshotValue } from "./data.js";
 import type { Decimal } from "decimal.js";
 import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
-import type { Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
-import { DEPS, depsTerm, holds, isDecimal, isTerm, positionData, readOperand, selfTerm, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
+import type { Replacement, Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
+import { DEPS, depsTerm, describeTerm, holds, rebaseRule, rebaseTerm, pathsRead as pathsReadOfRule, isDecimal, isTerm, linearCombination, positionData, readOperand, selfTerm, substitutedOperand, substitutedRule, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
+import { isVariantsSchema } from "./schema.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
-import { outcomesOf } from "./ways.js";
+import { outcomesOf } from "./outcomes.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
 import { countBetween, moveTemporal } from "./temporal.js";
@@ -34,34 +35,74 @@ function expression<T>(node: Node): Expression<T> {
 }
 const LOCAL = "#local:";
 let nextLocal = 0;
-function localName(): string { return `${LOCAL}${nextLocal++}`; }
-export function bind<Value, Result>(schema: Schema<Value>, value: Template<NoInfer<Value>>, build: (value: TermOf<Value>) => Template<Result>): Expression<Result> {
-  const name = localName();
+// A local's name says what it holds, for reports (localLabel): a dependency's
+// answer `#local:call:<dependency>:<n>`, an element `#local:<n>@<collection>[]`,
+// an accumulator `#local:<n>@accumulator`, any other `#local:<n>`.
+function localName(value?: unknown, role?: "element" | "accumulator"): string {
+  const node = nodeOf(value);
+  if (node?.kind === "call") return `${LOCAL}call:${dependencyName(node.dependency)}:${nextLocal++}`;
+  if (role === "accumulator") return `${LOCAL}${nextLocal++}@accumulator`;
+  if (role === "element") {
+    const position = isTerm(value) ? positionData(value) : undefined;
+    const over = position?.measure === "value" && position.path.length > 0 && !position.path[0]!.startsWith("#") ? `$.${position.path.join(".")}[]` : "element";
+    return `${LOCAL}${nextLocal++}@${over}`;
+  }
+  const described = node?.kind === "choose" ? "choose" : node === undefined ? undefined : describeOperand(value);
+  return described === undefined || described === "…" ? `${LOCAL}${nextLocal++}` : `${LOCAL}${nextLocal++}@${described}`;
+}
+
+function describeOperand(value: unknown): string {
+  if (isTerm(value)) {
+    const position = positionData(value);
+    if (position === undefined) return "…";
+    if (position.path[0] === DEPS) return ["deps", ...position.path.slice(1)].join(".");
+    return position.path.some(key => key.startsWith("#")) ? "…" : describeTerm(value);
+  }
+  const node = nodeOf(value);
+  if (node?.kind === "call") return `${dependencyName(node.dependency)}()`;
+  if (node?.kind === "operation" || node?.kind === "temporal") return `${node.operator}(${describeOperand(node.left)}, ${describeOperand(node.right)})`;
+  if (node !== undefined) return "…";
+  return typeof value === "string" ? JSON.stringify(value) : atom(value) ? String(value) : "…";
+}
+export function bind<Value, Result>(schema: Schema<Value>, value: NoInfer<Template<Value>>, build: (value: TermOf<Value>) => Template<Result>): Expression<Result> {
+  const name = localName(value);
   return expression({ kind: "bind", name, schema: schema as Schema<unknown>, value, body: build(rootTerm<Value>(name)) });
 }
-export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value: Template<NoInfer<Infer<S>>>, cases: { readonly [Tag in Tags<S>]: (value: TermOf<VariantOf<S, Tag>>) => Template<Result> }): Expression<Result> {
+export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value: NoInfer<Template<Infer<S>>>, cases: { readonly [Tag in Tags<S>]: (value: TermOf<VariantOf<S, Tag>>) => Template<Result> }): Expression<Result> {
   const tags = schema.variantTags as readonly Tags<S>[];
   if (tags.length === 0 || Object.keys(cases).length !== tags.length || tags.some(tag => !Object.hasOwn(cases, tag) || typeof cases[tag] !== "function")) throw new Error("matchValue requires exactly one body for every variant");
-  const name = localName();
+  const name = localName(value);
   const handlers = cases as unknown as Readonly<Record<string, (value: TermOf<unknown>) => unknown>>;
   const bodies = tags.map(tag => handlers[tag]!(rootTerm(name)));
   let body: unknown = bodies.at(-1);
   for (let index = tags.length - 2; index >= 0; index--) body = expression({ kind: "choose", condition: { kind: "compare", left: positionTerm([name, schema.discriminant], "value"), operator: "==", right: tags[index] }, yes: bodies[index], no: body });
   return expression({ kind: "bind", name, schema, value, body });
 }
-export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: (value: TermOf<Element>) => Template<NoInfer<Result>>): Expression<readonly Result[]> {
-  const name = localName();
+export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: (value: TermOf<Element>) => NoInfer<Template<Result>>): Expression<readonly Result[]> {
+  const name = localName(values, "element");
   return expression({ kind: "map", name, element: element as Schema<unknown>, output: output as Schema<unknown>, values, body: build(rootTerm<Element>(name)) });
 }
-export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: Template<NoInfer<Accumulator>>, build: (accumulator: TermOf<Accumulator>, value: TermOf<Element>) => Template<NoInfer<Accumulator>>): Expression<Accumulator> {
-  const name = localName(), accumulator = localName();
+export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: NoInfer<Template<Accumulator>>, build: (accumulator: TermOf<Accumulator>, value: TermOf<Element>) => NoInfer<Template<Accumulator>>): Expression<Accumulator> {
+  const name = localName(values, "element"), accumulator = localName(undefined, "accumulator");
   return expression({ kind: "fold", name, accumulator, element: element as Schema<unknown>, output: output as Schema<unknown>, values, initial, body: build(rootTerm<Accumulator>(accumulator), rootTerm<Element>(name)) });
 }
-export function hasScopedChoices(value: unknown): boolean {
-  const node = nodeOf(value);
-  if (node?.kind === "choose" && localRoots(node.condition).length > 0) return true;
-  if ((node?.kind === "map" || node?.kind === "fold") && choicesOf(node.body).length > 0) return true;
-  return childrenOf(value).some(hasScopedChoices);
+export function isAnswer(local: string): boolean {
+  return local.startsWith(`${LOCAL}call:`);
+}
+
+// Each dependency's answer a bind holds outside a map or a fold, by its local's
+// name, with the schema it is bound under and the call it holds the answer of.
+export function bindingsOf(template: unknown): readonly (readonly [string, Schema<unknown>])[] {
+  return answersOf(template).map(({ name, schema }) => [name, schema] as const);
+}
+
+export function answersOf(template: unknown): readonly { readonly name: string; readonly schema: Schema<unknown>; readonly dependency: string; readonly input: unknown }[] {
+  const node = nodeOf(template);
+  const call = node?.kind === "bind" ? nodeOf(node.value) : undefined;
+  const own = node?.kind === "bind" && call?.kind === "call" && isAnswer(node.name)
+    ? [{ name: node.name, schema: node.schema, dependency: dependencyName(call.dependency), input: call.input }]
+    : [];
+  return [...own, ...childrenOf(template).flatMap(answersOf)];
 }
 export function localRoots(value: unknown): readonly string[] {
   if (isTerm(value)) {
@@ -70,13 +111,13 @@ export function localRoots(value: unknown): readonly string[] {
   }
   return childrenOf(value).flatMap(localRoots);
 }
-export function choose<T>(condition: Rule, yes: Template<T>, no: Template<NoInfer<T>>): Expression<T> {
+export function choose<Yes, No = Yes>(condition: Rule, yes: Template<Yes>, no: Template<No>): Expression<Yes | No> {
   return expression({ kind: "choose", condition, yes, no });
 }
-export function construct<T>(schema: Schema<T>, value: Template<NoInfer<T extends object ? Pick<T, Extract<keyof T, string | number>> : T>>): Expression<T> {
+export function construct<T>(schema: Schema<T>, value: NoInfer<Template<T extends object ? Pick<T, Extract<keyof T, string | number>> : T>>): Expression<T> {
   return expression({ kind: "construct", schema: schema as Schema<unknown>, value });
 }
-export function call<Input, Output>(dependency: Term<(input: Input) => Output>, input: Template<NoInfer<Input>>): Expression<Output> {
+export function call<Input, Output>(dependency: Term<(input: Input) => Output>, input: NoInfer<Template<Input>>): Expression<Output> {
   dependencyName(dependency);
   return expression({ kind: "call", dependency, input });
 }
@@ -88,7 +129,7 @@ export function dependencyName(dependency: Term<unknown>): string {
 export function concat(left: Template<string>, right: Template<string>): Expression<string> {
   return expression({ kind: "operation", operator: "concat", left, right });
 }
-export function arithmetic<T extends number | bigint | Rational | Decimal>(operator: "add" | "subtract" | "multiply" | "divide", left: Template<T>, right: Template<NoInfer<T>>): Expression<T> {
+export function arithmetic<T extends number | bigint | Rational | Decimal>(operator: "add" | "subtract" | "multiply" | "divide", left: Template<T>, right: NoInfer<Template<T>>): Expression<T> {
   return expression({ kind: "operation", operator, left, right });
 }
 type PlainDate = TemporalTypes.PlainDate;
@@ -175,6 +216,8 @@ export function modelDependencyIssue(template: unknown, definition: AnyBehavior,
       const names = node.kind === "fold" ? [node.name, node.accumulator] : [node.name];
       if (names.some(name => declared.has(name))) return "Model binding cannot be reused; declare a separate binding for each evaluation";
       names.forEach(name => declared.add(name));
+      const refused = node.kind === "bind" ? answerRefusedBy(node.value, node.schema, definition) : undefined;
+      if (refused) return refused;
       const before = node.kind === "bind" ? [node.value] : node.kind === "map" ? [node.values] : [node.values, node.initial];
       for (const child of before) { const issue = inspect(child, locals); if (issue) return issue; }
       return inspect(node.body, new Set([...locals, ...names]));
@@ -190,6 +233,17 @@ export function modelDependencyIssue(template: unknown, definition: AnyBehavior,
     return undefined;
   }
   return inspect(template);
+}
+// A call whose answer is a sum bound under a sum sharing none of its cases: every answer fails to bind.
+function answerRefusedBy(value: unknown, bound: Schema<unknown>, definition: AnyBehavior): string | undefined {
+  const call = nodeOf(value);
+  if (call?.kind !== "call") return undefined;
+  const name = dependencyName(call.dependency);
+  const output = Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name]!.output : undefined;
+  if (output === undefined || !isVariantsSchema(output) || !isVariantsSchema(bound) || output.discriminant !== bound.discriminant) return undefined;
+  const declared = output.variantTags as readonly string[];
+  return declared.some(tag => (bound.variantTags as readonly string[]).includes(tag)) ? undefined
+    : `Model binds the answer of ${name} under a schema taking none of the cases it declares (${declared.join(", ")}), so every run fails`;
 }
 function atom(value: unknown): boolean {
   return value === null || typeof value !== "object" || isDecimal(value) ||
@@ -238,7 +292,7 @@ export function model<Input, Result, Effect, Deps = unknown>(
   const template = checkedTemplate(build(selfTerm<NoInfer<Input>>(), depsTerm<NoInfer<Deps>>()));
   return Object.freeze({
     kind: "rules", id, expression: template,
-    guards: choicesOf(template).map(node => ({ kind: "guard" as const, condition: node.condition, orElse: () => { throw new Error("Expression guards are interpreted"); } })),
+    guards: guardsOf(template) as RulesDecision<Input, Result, Effect, Deps>["guards"],
     otherwise: () => { throw new Error("Expression models are interpreted"); },
   });
 }
@@ -253,9 +307,16 @@ export function interpret(template: unknown, scope: unknown, options: {
   readonly observe?: ComparisonObserver;
   readonly distinguish?: (distinction: Branch, outcome: boolean | string) => void;
   readonly arm?: (index: number, outcome: boolean) => void;
+  // The steps one element of a map or a fold took through its body, which are
+  // not steps of the way through the model around it.
+  readonly iterate?: (iteration: Node, steps: readonly Step[]) => void;
+  // A caller that cannot await abandons the evaluation at the first pending
+  // call instead of resuming it, so no later call is made behind its back.
+  readonly onPending?: (pending: PromiseLike<unknown>) => never;
 } = {}): unknown {
   let remaining = options.steps ?? 100000;
   const choices = choicesOf(template);
+  let distinguishing = options.distinguish;
   function parsed(schema: Schema<unknown>, value: unknown): unknown {
     const result = schema.parse(value);
     if (!result.success) throw new Error(`Invalid local construction: ${result.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
@@ -274,7 +335,18 @@ export function interpret(template: unknown, scope: unknown, options: {
       for (const value of values) {
         const elementScope = withLocal(current, node.name, parsed(node.element, value));
         const iterationScope = node.kind === "fold" ? withLocal(elementScope, node.accumulator, accumulator) : elementScope;
-        const next = parsed(node.output, yield* read(node.body, iterationScope));
+        const around = distinguishing;
+        const steps: Step[] = [];
+        distinguishing = (distinction, outcome) => steps.push({ distinction, outcome });
+        let answer: unknown;
+        try {
+          answer = yield* read(node.body, iterationScope);
+        } finally {
+          // An element whose body fails took the way it failed on.
+          distinguishing = around;
+          options.iterate?.(node, steps);
+        }
+        const next = parsed(node.output, answer);
         if (node.kind === "fold") accumulator = next; else result.push(next);
       }
       return node.kind === "fold" ? accumulator : result;
@@ -285,7 +357,7 @@ export function interpret(template: unknown, scope: unknown, options: {
       return isPromiseLike(answer) ? yield answer : answer;
     }
     if (node?.kind === "choose") {
-      const outcome = holds(node.condition, current, options.observe, options.distinguish);
+      const outcome = holds(node.condition, current, options.observe, distinguishing);
       options.arm?.(choices.indexOf(node), outcome);
       return yield* read(outcome ? node.yes : node.no, current);
     }
@@ -332,7 +404,12 @@ export function interpret(template: unknown, scope: unknown, options: {
   }
   const evaluation = read(template);
   const first = evaluation.next();
-  return first.done ? first.value : resume(evaluation, first.value);
+  if (first.done) return first.value;
+  if (options.onPending !== undefined) {
+    evaluation.return(undefined);
+    return options.onPending(first.value);
+  }
+  return resume(evaluation, first.value);
 }
 
 // A generator over the expression being read: it yields a call's pending
@@ -386,4 +463,288 @@ export function replaceChildren(template: unknown, values: readonly unknown[]): 
   if (node?.kind === "construct") return expression({ ...node, value: values[0] });
   if (node?.kind === "operation" || node?.kind === "temporal") return expression({ ...node, left: values[0], right: values[1] });
   return Array.isArray(template) ? values : Object.fromEntries(Object.keys(template as object).map((key, index) => [key, values[index]]));
+}
+
+// What a model binds, read where the binding is read, so its choices are
+// conditions on the input and measured like any guard:
+// - a field of the input is the field itself; bound under another schema than
+//   the field's, the binding is kept to parse the field with it;
+// - a sum or difference of input numbers, a multiple of one by a whole number,
+//   a constant, or an object of such values is read as that expression, unless
+//   it is computed and the schema it is bound under has invariants of its own.
+// A binding of anything else (a quotient, a concatenation, a temporal value,
+// an iteration's answer) is left as it is and read as a value of its own.
+export function inlineInputBindings(template: unknown, schemaAt: (path: readonly string[]) => Schema<unknown> | undefined): unknown {
+  let inlined = false;
+  type Alias = (rest: readonly string[]) => Replacement | undefined;
+  // Integers and decimals are added exactly at run time as in an expression;
+  // a number is added in floating point, so a sum of numbers is not read.
+  const kindAt = (path: readonly string[]) => (schemaAt(path) as { readonly kind?: string } | undefined)?.kind;
+  const aliasOf = (value: unknown): Alias | undefined => {
+    if (isTerm(value)) {
+      const data = termData(value);
+      if (data.kind === "position") {
+        return data.measure === "value" ? rest => ({ with: rest.length === 0 ? value : positionTerm([...data.path, ...rest], "value") }) : undefined;
+      }
+      return rest => (rest.length === 0 ? { with: value } : undefined);
+    }
+    const node = nodeOf(value);
+    if (node === undefined) {
+      if (atom(value)) return rest => (rest.length === 0 ? { with: value } : undefined);
+      return rest => {
+        const [key, ...more] = rest;
+        if (key === undefined || !Object.hasOwn(value as object, key)) return undefined;
+        return aliasOf((value as Record<string, unknown>)[key])?.(more);
+      };
+    }
+    if (node.kind === "construct") return aliasOf(node.value);
+    if (node.kind !== "operation" || !["add", "subtract", "multiply", "quotient"].includes(node.operator)) return undefined;
+    const kindOf = (side: unknown): "integer" | "decimal" | "either" | undefined => {
+      if (typeof side === "number") return Number.isSafeInteger(side) ? "either" : undefined;
+      if (isDecimal(side)) return "decimal";
+      if (!isTerm(side)) return undefined;
+      const data = termData(side);
+      const kinds = new Set((data.kind === "position" ? [data.path] : data.parts.map(part => part.path)).map(path => (path[0]!.startsWith(LOCAL) ? undefined : kindAt(path))));
+      if (data.kind === "linear") kinds.add(isDecimal(data.constant) ? "decimal" : "integer");
+      return kinds.size === 1 && (kinds.has("integer") || kinds.has("decimal")) ? [...kinds][0] as "integer" | "decimal" : undefined;
+    };
+    const left = aliasOf(node.left)?.([]), right = aliasOf(node.right)?.([]);
+    if (left === undefined || right === undefined || left.over !== undefined || right.over !== undefined) return undefined;
+    const [leftKind, rightKind] = [kindOf(left.with), kindOf(right.with)];
+    if (leftKind === undefined || rightKind === undefined) return undefined;
+    // A decimal and a plain number are no sum the model computes as written.
+    if (leftKind !== rightKind && leftKind !== "either" && rightKind !== "either") return undefined;
+    if (node.operator !== "multiply" && (leftKind === "decimal" || rightKind === "decimal") && (leftKind === "either" || rightKind === "either")) return undefined;
+    if (node.operator === "quotient") {
+      // A quotient by a whole number stands in a comparison multiplied out.
+      const divisor = right.with;
+      return typeof divisor === "number" && Number.isSafeInteger(divisor) && divisor !== 0
+        ? rest => (rest.length === 0 ? { with: left.with, over: divisor } : undefined)
+        : undefined;
+    }
+    const combined = node.operator === "multiply"
+      ? (Number.isSafeInteger(right.with) ? linearCombination([{ operand: left.with, coefficient: right.with as number }])
+        : Number.isSafeInteger(left.with) ? linearCombination([{ operand: right.with, coefficient: left.with as number }]) : undefined)
+      : linearCombination([{ operand: left.with, coefficient: 1 }, { operand: right.with, coefficient: node.operator === "add" ? 1 : -1 }]);
+    if (combined === undefined) return undefined;
+    const decimal = leftKind === "decimal" || rightKind === "decimal";
+    const exact = decimal && typeof combined === "number" ? decimalOf(fractionOf(combined)) : combined;
+    return rest => (rest.length === 0 ? { with: exact } : undefined);
+  };
+  // A local is bound once, so a condition or a node written in two places is
+  // rewritten alike in both, and stands for one rewritten object.
+  const rewrittenRules = new Map<Rule, Rule>();
+  const rewrittenNodes = new Map<object, unknown>();
+  const visit = (value: unknown, aliases: ReadonlyMap<string, Alias>): unknown => {
+    const node = nodeOf(value);
+    if (node === undefined) return rewrite(value, aliases);
+    if (!rewrittenNodes.has(node)) rewrittenNodes.set(node, rewrite(value, aliases));
+    return rewrittenNodes.get(node);
+  };
+  const rewrite = (value: unknown, aliases: ReadonlyMap<string, Alias>): unknown => {
+    const replace = (path: readonly string[]) => (path.length > 0 ? aliases.get(path[0]!)?.(path.slice(1)) : undefined);
+    if (isTerm(value)) {
+      if (aliases.size === 0) return value;
+      const found = substitutedOperand(value, replace);
+      return found === undefined || found.over !== undefined ? value : found.with;
+    }
+    const node = nodeOf(value);
+    if (node === undefined) {
+      if (atom(value)) return value;
+      return Array.isArray(value) ? value.map(item => visit(item, aliases))
+        : Object.fromEntries(Object.entries(value as object).map(([key, child]) => [key, visit(child, aliases)]));
+    }
+    switch (node.kind) {
+      case "bind": {
+        const bound = visit(node.value, aliases);
+        const position = isTerm(bound) ? positionData(bound) : undefined;
+        if (position !== undefined && position.measure === "value" && position.path.length > 0 && !position.path[0]!.startsWith(LOCAL)) {
+          inlined = true;
+          // The binding is kept, so the field is still parsed with its schema
+          // and a read the field cannot stand in for still reads the local.
+          const body = visit(node.body, new Map([...aliases, [node.name, rest => ({ with: positionTerm([...position.path, ...rest], "value") })]]));
+          return expression({ ...node, value: bound, body });
+        }
+        // A computed value bound under a schema with invariants may be one the
+        // schema refuses at run time, which the expression it would stand for
+        // does not say, so it stays a local of its own.
+        const refusable = nodeOf(bound) !== undefined && node.schema.invariants.length > 0;
+        const alias = isAnswer(node.name) || refusable ? undefined : aliasOf(bound);
+        if (alias !== undefined) inlined = true;
+        return expression({ ...node, value: bound, body: visit(node.body, alias === undefined ? aliases : new Map([...aliases, [node.name, alias]])) });
+      }
+      case "choose": {
+        if (!rewrittenRules.has(node.condition)) rewrittenRules.set(node.condition, aliases.size === 0 ? node.condition : substitutedRule(node.condition, replace) ?? node.condition);
+        const condition = rewrittenRules.get(node.condition)!;
+        return expression({ ...node, condition, yes: visit(node.yes, aliases), no: visit(node.no, aliases) });
+      }
+      case "map":
+        return expression({ ...node, values: visit(node.values, aliases), body: visit(node.body, aliases) });
+      case "fold":
+        return expression({ ...node, values: visit(node.values, aliases), initial: visit(node.initial, aliases), body: visit(node.body, aliases) });
+      case "call":
+        return expression({ ...node, input: visit(node.input, aliases) });
+      case "construct":
+        return expression({ ...node, value: visit(node.value, aliases) });
+      case "operation":
+      case "temporal":
+        return expression({ ...node, left: visit(node.left, aliases), right: visit(node.right, aliases) });
+    }
+  };
+  const result = visit(template, new Map());
+  return inlined ? result : template;
+}
+
+export function guardsOf(template: unknown): RulesDecision<unknown, unknown, unknown>["guards"] {
+  return choicesOf(template).map(node => ({ kind: "guard" as const, condition: node.condition, orElse: () => { throw new Error("Expression guards are interpreted"); } }));
+}
+
+// The calls a model makes, by dependency, with the argument each is written with.
+export function callsIn(template: unknown): readonly { readonly dependency: string; readonly input: unknown }[] {
+  const node = nodeOf(template);
+  const own = node?.kind === "call" ? [{ dependency: dependencyName(node.dependency), input: node.input }] : [];
+  return [...own, ...childrenOf(template).flatMap(callsIn)];
+}
+
+// The input with an argument written so it reads `value`: each field of the
+// input the argument reads takes the part of `value` it stands at, and a
+// constant must already be `value`. Undefined where the argument is computed
+// or reads anything but the input.
+export function writtenArgument(input: unknown, argument: unknown, value: unknown): unknown {
+  if (isTerm(argument)) {
+    const position = positionData(argument);
+    if (position === undefined || position.measure !== "value") return undefined;
+    const [first] = position.path;
+    if (first !== undefined && (first === DEPS || first.startsWith(LOCAL))) return undefined;
+    return writePath(input, position.path, value);
+  }
+  if (nodeOf(argument) !== undefined) return undefined;
+  if (atom(argument)) return deepEqualValue(argument, value) ? input : undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(argument) !== Array.isArray(value)) return undefined;
+  const keys = Object.keys(argument as object);
+  if (keys.length !== Object.keys(value).length) return undefined;
+  let written: unknown = input;
+  for (const key of keys) {
+    if (!Object.hasOwn(value, key)) return undefined;
+    written = writtenArgument(written, (argument as Record<string, unknown>)[key], (value as Record<string, unknown>)[key]);
+    if (written === undefined) return undefined;
+  }
+  return written;
+}
+
+function writePath(value: unknown, path: readonly string[], leaf: unknown): unknown {
+  const [key, ...rest] = path;
+  if (key === undefined) return leaf;
+  const record = (typeof value === "object" && value !== null ? value : {}) as Readonly<Record<string, unknown>>;
+  return { ...record, [key]: writePath(record[key], rest, leaf) };
+}
+
+function deepEqualValue(left: unknown, right: unknown): boolean {
+  return left === right || (isDecimal(left) && isDecimal(right) && left.equals(right));
+}
+
+// Every map and fold in a model with the steps the choices around it take to
+// reach it, one entry per way of reaching it.
+export interface IterationEntry { readonly node: Extract<Node, { kind: "map" | "fold" }>; readonly steps: readonly Step[] }
+export function* iterationEntries(template: unknown, steps: readonly Step[] = []): Generator<IterationEntry> {
+  const node = nodeOf(template);
+  if (node?.kind === "choose") {
+    // A choice whose branches hold no iteration is not expanded: its outcomes may be far more than any iteration needs.
+    if (iterationsOf(node.yes).length === 0 && iterationsOf(node.no).length === 0) return;
+    for (const outcome of outcomesOf(node.condition)) yield* iterationEntries(outcome.result ? node.yes : node.no, [...steps, ...outcome.steps]);
+    return;
+  }
+  if (node?.kind === "map" || node?.kind === "fold") yield { node, steps };
+  for (const child of childrenOf(template)) yield* iterationEntries(child, steps);
+}
+
+// Every map and fold in a model, each with the body one element is read in.
+export function iterationsOf(template: unknown): readonly Extract<Node, { kind: "map" | "fold" }>[] {
+  const node = nodeOf(template);
+  const own = node?.kind === "map" || node?.kind === "fold" ? [node] : [];
+  return [...own, ...childrenOf(template).flatMap(iterationsOf)];
+}
+
+// The values a model reads that no input field holds, each under the schema it
+// takes, besides a dependency's answer: what a bind holds that is read as a
+// value of its own, an element of a map or a fold, and a fold's accumulator.
+// `opaque` where the input settles the value in a way no position shows, so a
+// way reading it is told only by a row taking it: a computed value, an
+// accumulator, and an element of anything but an array the input holds.
+export function localsOf(template: unknown, opaque: ReadonlySet<string> = new Set()): readonly { readonly name: string; readonly schema: Schema<unknown>; readonly opaque: boolean }[] {
+  const node = nodeOf(template);
+  const rootedIn = (value: unknown, seen: ReadonlySet<string>): boolean => {
+    const position = isTerm(value) ? positionData(value) : undefined;
+    const first = position?.path[0];
+    return position !== undefined && position.measure === "value" && first !== undefined && first !== DEPS && !isAnswer(first) && !seen.has(first);
+  };
+  if (node?.kind === "bind" && !isAnswer(node.name)) {
+    const inner = new Set([...opaque, node.name]);
+    return [{ name: node.name, schema: node.schema, opaque: true }, ...childrenOf(template).flatMap(child => localsOf(child, inner))];
+  }
+  if (node?.kind === "map" || node?.kind === "fold") {
+    const elementOpaque = !rootedIn(node.values, opaque);
+    const own = [{ name: node.name, schema: node.element, opaque: elementOpaque }, ...(node.kind === "fold" ? [{ name: node.accumulator, schema: node.output, opaque: true }] : [])];
+    const inner = new Set([...opaque, ...own.filter(local => local.opaque).map(local => local.name)]);
+    return [...own, ...childrenOf(template).flatMap(child => localsOf(child, inner))];
+  }
+  return childrenOf(template).flatMap(child => localsOf(child, opaque));
+}
+
+// The top-level input fields a run of the model may turn on: every field it
+// reads, since a value computed before a choice may throw on one, less what a
+// dependency is asked where `matters` says neither its answer nor its refusal
+// of the argument differs with it. Undefined where the model reads the whole
+// input.
+export function fieldsTurnedOn(template: unknown, matters: (dependency: string, argument: unknown) => boolean = () => true): ReadonlySet<string> | undefined {
+  const fields = new Set<string>();
+  let whole = false;
+  const add = (path: readonly string[]) => {
+    if (path.length === 0) whole = true;
+    else if (!path[0]!.startsWith(LOCAL) && path[0] !== DEPS) fields.add(path[0]!);
+  };
+  const visit = (value: unknown): void => {
+    if (isTerm(value)) {
+      const data = termData(value);
+      (data.kind === "position" ? [data.path] : data.parts.map(part => part.path)).forEach(add);
+      return;
+    }
+    const node = nodeOf(value);
+    if (node?.kind === "choose") pathsReadOfRule(node.condition).forEach(add);
+    if (node?.kind === "call" && !matters(dependencyName(node.dependency), node.input)) return;
+    childrenOf(value).forEach(visit);
+  };
+  visit(template);
+  return whole ? undefined : fields;
+}
+
+// The rules and nodes of a rewritten model standing for those of the model as
+// written, read off the two trees side by side: the rewrite keeps every node
+// and the shape of every condition.
+export interface Translation {
+  readonly rules: ReadonlyMap<object, object>;
+  readonly nodes: ReadonlyMap<object, object>;
+}
+export function translationOf(written: unknown, rewritten: unknown): Translation {
+  const rules = new Map<object, object>();
+  const nodes = new Map<object, object>();
+  const pairRules = (a: Rule, b: Rule): void => {
+    if (a === b) return;
+    rules.set(a, b);
+    if ((a.kind === "and" || a.kind === "or") && (b.kind === "and" || b.kind === "or")) a.rules.forEach((part, index) => b.rules[index] && pairRules(part, b.rules[index]!));
+    if (a.kind === "not" && b.kind === "not") pairRules(a.rule, b.rule);
+    if ((a.kind === "all" || a.kind === "any") && (b.kind === "all" || b.kind === "any")) pairRules(a.each, b.each);
+  };
+  const walk = (a: unknown, b: unknown): void => {
+    if (a === b) return;
+    const left = nodeOf(a), right = nodeOf(b);
+    if (left !== undefined && right !== undefined) {
+      nodes.set(left, right);
+      if (left.kind === "choose" && right.kind === "choose") pairRules(left.condition, right.condition);
+    }
+    const [first, second] = [childrenOf(a), childrenOf(b)];
+    first.forEach((child, index) => walk(child, second[index]));
+  };
+  walk(written, rewritten);
+  return { rules, nodes };
 }

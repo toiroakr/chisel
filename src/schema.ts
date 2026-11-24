@@ -1,3 +1,5 @@
+import { TEMPORAL_UNAVAILABLE, temporalGlobal } from "./temporal-global.js";
+import { leftOutReadIn } from "./absence.js";
 import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { Decimal } from "decimal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
@@ -270,6 +272,10 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
       const offGrid = offGridEquality(refined, keys => fieldOf(schema as unknown as AnySchema, keys), "$");
       if (offGrid !== undefined) {
         throw new Error(`refine ${offGrid}`);
+      }
+      const leftOut = leftOutReadIn(refined, { scope: schema as unknown as AnySchema });
+      if (leftOut !== undefined) {
+        throw new Error(`refine ${leftOut}`);
       }
       return refinable<S>(core, [...invariants, refined]);
     },
@@ -705,28 +711,14 @@ export function tagOf(schema: AnyVariantsSchema, value: unknown): string | undef
 }
 
 function temporalInstant(): TemporalTypes.InstantConstructor {
-  const temporal = (
-    globalThis as unknown as {
-      readonly Temporal?: {
-        readonly Instant?: TemporalTypes.InstantConstructor;
-      };
-    }
-  ).Temporal;
-  if (temporal?.Instant === undefined) {
-    throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
-  }
-  return temporal.Instant;
+  const instant = temporalGlobal()?.Instant;
+  if (instant === undefined) throw new Error(TEMPORAL_UNAVAILABLE);
+  return instant;
 }
 
 function temporalPlain(type: PlainType): { from(text: string): unknown; new (...args: never[]): unknown } {
-  const constructor = (
-    globalThis as unknown as {
-      readonly Temporal?: Partial<Record<PlainType, { from(text: string): unknown; new (...args: never[]): unknown }>>;
-    }
-  ).Temporal?.[type];
-  if (constructor === undefined) {
-    throw new Error("Temporal is unavailable; Chisel requires Node.js 26 or later");
-  }
+  const constructor = temporalGlobal()?.[type] as { from(text: string): unknown; new (...args: never[]): unknown } | undefined;
+  if (constructor === undefined) throw new Error(TEMPORAL_UNAVAILABLE);
   return constructor;
 }
 

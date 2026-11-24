@@ -1,9 +1,11 @@
+import { requireTemporal } from "./temporal-global.js";
 import { temporalNeighbor } from "./temporal.js";
 import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { compareText } from "./text.js";
 import type { Measure, Operator, Rule, Term } from "./rule.js";
 import { Decimal } from "decimal.js";
-import { decimalStep, describeRule, isDecimal, isTerm, termData, positionData } from "./rule.js";
+import { decimalStep, describeRule, isDecimal, isTerm, normalize, termData, positionData } from "./rule.js";
+export { normalize } from "./rule.js";
 
 export type PointRole = "ON" | "OFF" | "IN" | "OUT";
 export type PointStatus = "owed" | "excluded" | "not named" | "no point";
@@ -172,8 +174,7 @@ function plainTime(text: string): unknown {
 }
 
 function temporalValue(kind: "Instant" | "PlainDate" | "PlainDateTime" | "PlainTime", text: string): unknown {
-  return (globalThis as unknown as { readonly Temporal: Record<typeof kind, { from(text: string): unknown }> })
-    .Temporal[kind].from(text);
+  return requireTemporal()[kind].from(text);
 }
 
 function epochNanoseconds(value: unknown): bigint {
@@ -575,28 +576,3 @@ function inPoint(
     : { role: "IN", relation, status: "owed", witness, contains };
 }
 
-const mirrored: Readonly<Record<Operator, Operator>> = {
-  "<": ">",
-  "<=": ">=",
-  ">": "<",
-  ">=": "<=",
-  "==": "==",
-  "!=": "!=",
-};
-
-export function normalize(
-  rule: Rule,
-): { operator: Operator; bound: unknown; measure: Border["measure"] } | undefined {
-  if (rule.kind !== "compare") {
-    return undefined;
-  }
-  const left = isTerm(rule.left) ? positionData(rule.left as Term<unknown>) : undefined;
-  const right = isTerm(rule.right) ? positionData(rule.right as Term<unknown>) : undefined;
-  if (left !== undefined && !isTerm(rule.right)) {
-    return { operator: rule.operator, bound: rule.right, measure: left.measure };
-  }
-  if (right !== undefined && !isTerm(rule.left)) {
-    return { operator: mirrored[rule.operator], bound: rule.left, measure: right.measure };
-  }
-  return undefined;
-}

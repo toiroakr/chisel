@@ -2,7 +2,7 @@ import { compatibleBound } from "./interval.js";
 import { deepEqual } from "./equal.js";
 import type { Carrier } from "./border.js";
 import { integerCarrier, normalize, numberCarrier } from "./border.js";
-import { inheritedAt } from "./guard-borders.js";
+import { inheritedAt } from "./guard-scope.js";
 import { carrierOf } from "./partition.js";
 import type { CompareRule, LinearTermData, Measure, Operator, Rule, Term } from "./rule.js";
 import { DEPS, boundTermPath, conjuncts, describeRule, differenceOf, holds, isTerm, positionData, positionOf, readOperand, termData, termPaths, counts, partsOfMeasure, positionTerm } from "./rule.js";
@@ -1120,10 +1120,23 @@ export function refusedJointly(
   value: unknown,
   combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): boolean {
+  return refusedTogether(scope, [{ path, value }], combinations);
+}
+
+// No combination the invariants relating finite positions keep gives every
+// one of these finite positions its value.
+export function refusedTogether(
+  scope: AnySchema,
+  coordinates: readonly { readonly path: readonly string[]; readonly value: unknown }[],
+  combinations: number = FEASIBILITY_COMBINATION_LIMIT,
+): boolean {
   return (
-    finiteDomainAt(scope, path) !== undefined &&
-    jointAssignment([{ path, measure: "value", constraints: [{ operator: "==", bound: value }] }], scope, combinations) ===
-      "none"
+    coordinates.every(({ path }) => finiteDomainAt(scope, path) !== undefined) &&
+    jointAssignment(
+      coordinates.map(({ path, value }) => ({ path, measure: "value" as const, constraints: [{ operator: "==" as const, bound: value }] })),
+      scope,
+      combinations,
+    ) === "none"
   );
 }
 
