@@ -11,7 +11,7 @@ import type { CompareRule, Rule, Term } from "./rule.js";
 import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
 import { enumOf, int, isVariantsSchema, object, variants } from "./schema.js";
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
-import { enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
+import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
 import type { Frame, Frames, Threshold } from "./guard-scope.js";
 export interface GuardBorder {
   readonly path: string;
@@ -25,6 +25,8 @@ export interface GuardBorder {
     readonly tag: string;
   };
   readonly form?: BorderForm;
+  // The case of each sum the border is drawn under, which a row standing at it must hold.
+  readonly cases?: readonly { readonly at: readonly string[]; readonly discriminant: string; readonly tag: string }[];
   coordinateOf(reached: ComparisonReached): unknown;
   // How many ways compose has of writing a point, tried in order as `side`.
   readonly sides?: number;
@@ -508,6 +510,7 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
       segments: positionSegments,
       comparison: rule,
       border,
+      cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at], discriminant: item.sum.discriminant, tag: item.tag })),
       coordinateOf: (reached: { readonly scope: unknown }) => onTrail(frame.scope, keys, steps, frame === frames.root ? reached.scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), reached.scope)) ? readOperand(term, reached.scope) : undefined,
       compose: (given: unknown, coordinate: unknown) => {
         const position = at(positionSegments);
@@ -648,6 +651,9 @@ function betweenExpression(
   }));
 }
 
+// A side of a pair read down one trail through the cases of the sums it passes.
+interface Option { readonly term: Term<unknown>; readonly frame: Frame; readonly keys: readonly string[]; readonly steps: readonly string[]; readonly cases: NonNullable<GuardBorder["cases"]> }
+
 function between(
   rule: CompareRule & { readonly name?: string },
   left: Term<unknown>,
@@ -656,19 +662,38 @@ function between(
   at: PositionAt,
   reading: Reading,
 ): GuardBorder[] {
-  const sides = [left, right].map(term => {
+  const options = [left, right].map(term => {
     const { frame, keys } = locate(term, frames);
+    return everyStepsOf(frame.scope, keys).map((steps): Option => ({
+      term, frame, keys, steps,
+      cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at], discriminant: item.sum.discriminant, tag: item.tag })),
+    }));
+  }) as [Option[], Option[]];
+  // Two sides under one sum are read under the same case of it.
+  const compatible = (a: Option, b: Option) => a.cases.every(one => b.cases.every(other => one.at.join("\u0000") !== other.at.join("\u0000") || one.tag === other.tag));
+  return options[0].flatMap(a => options[1].filter(b => compatible(a, b)).flatMap(b => betweenOn(rule, [a, b], frames, at, reading)));
+}
+
+function betweenOn(
+  rule: CompareRule & { readonly name?: string },
+  options: readonly [Option, Option],
+  frames: Frames,
+  at: PositionAt,
+  reading: Reading,
+): GuardBorder[] {
+  const sides = options.map(({ term, frame, keys, steps }) => {
     const { measure } = positionOf(term);
-    const schema = schemaAt(frame.scope, keys);
+    const schema = schemaAlong(frame.scope, keys, steps) ?? schemaAt(frame.scope, keys);
     const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
       term,
       measure,
       standsIn,
-      path: measureLabel(standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys), measure),
-      segments: segmentsOf(frame, keys),
+      path: measureLabel(standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys, steps), measure),
+      segments: [...frame.segments, ...steps],
       kind: counts(measure) ? "integer" : schema?.kind,
       scale: measure === "value" && schema?.kind === "decimal" ? (schema as DecimalSchema).scale : 0,
+      onTrail: (scope: unknown) => onTrail(frame.scope, keys, steps, frame === frames.root ? scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), scope)),
     };
   });
   const [first, second] = sides as [(typeof sides)[number], (typeof sides)[number]];
@@ -720,7 +745,9 @@ function between(
     comparison: rule,
     border,
     ...(form === undefined ? {} : { form }),
+    cases: [...options[0].cases, ...options[1].cases.filter(other => !options[0].cases.some(one => one.at.join("\u0000") === other.at.join("\u0000")))],
     coordinateOf: reached => {
+      if (!first.onTrail(reached.scope) || !second.onTrail(reached.scope)) return undefined;
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);

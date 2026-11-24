@@ -20,7 +20,7 @@ import type {
   Todo,
 } from "./behavior.js";
 import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
-import type { Way } from "./ways.js";
+import type { Step, Way } from "./ways.js";
 import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
@@ -2025,8 +2025,7 @@ function askingTogether(input: unknown, calls: readonly { readonly dependency: s
 
 // A way through the body of an iteration over a field is taken only by an input
 // whose array holds an element, so the way also asks for one.
-function withEntry(way: Way): Way {
-  const entered = way.entered ?? [];
+function withEntry(way: Way, entered: readonly Step[] = []): Way {
   const values = way.within?.values;
   const position = isTerm(values) ? positionData(values) : undefined;
   if (position === undefined || position.measure !== "value") return entered.length === 0 ? way : { ...way, steps: [...way.steps, ...entered] };
@@ -2048,8 +2047,12 @@ function wayFeasibility(
   const settled = way.steps.find(step =>
     step.distinction.kind !== "match" && termPaths(step.distinction).length === 0 && holds(step.distinction, {}) !== step.outcome);
   if (settled !== undefined) return { kind: "infeasible", reason: "値を読まない条件で、この結果にならない" };
-  const entering = withEntry(way);
-  const found = feasibilityOf(entering, scopeOf(implementation, tag, decision as { readonly expression?: unknown }, entering), undefined, combinations);
+  // An iteration entered several ways is reachable where any of them is.
+  const entries = (way.entered ?? [[]]).map(entered => {
+    const entering = withEntry(way, entered);
+    return feasibilityOf(entering, scopeOf(implementation, tag, decision as { readonly expression?: unknown }, entering), undefined, combinations);
+  });
+  const found = entries.find(item => item.kind === "feasible") ?? entries.find(item => item.kind === "undecided") ?? entries[0]!;
   const expression = (decision as { readonly expression?: unknown }).expression;
   if (found.kind !== "feasible" || expression === undefined) return found;
   const read = opaqueRead(way, decision);
@@ -2376,9 +2379,14 @@ function reachOf(
       prefixes.push(way.steps.slice(0, index));
     }
   }
+  // A row at the border is of the case it is drawn under.
+  const inCases: readonly Step[] = (drawn.cases ?? []).map(item => ({
+    distinction: { kind: "compare", operator: "==", left: positionTerm([...item.at, item.discriminant], "value"), right: item.tag } as Step["distinction"],
+    outcome: true,
+  }));
   return prefixes.length === 0
     ? [{ kind: "feasible" }]
-    : prefixes.map(steps => feasibilityOf({ steps }, scope, placement, combinations));
+    : prefixes.map(steps => feasibilityOf({ steps: [...steps, ...inCases] }, scope, placement, combinations));
 }
 
 function scopeOf(

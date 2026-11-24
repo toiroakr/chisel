@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
+import * as c from "../src/index.js";
 import {
   generate,
   action,
@@ -1685,5 +1686,44 @@ describe("a guard on a field of a sum's case whose own invariant bounds the fiel
     const report = await check(spec("case invariant", { implementation, examples: rows }));
     const first = report.borders.find(border => border.rule === "guard $.s.n >= 5")!;
     expect(first.points.map(point => `${point.role} ${point.status}`)).toStrictEqual(["ON excluded", "OFF excluded", "IN gap", "OUT excluded"]);
+  });
+});
+
+describe("a guard on a field the cases of a sum share", () => {
+  it("owes no row at the points of a case the guard before it has already excluded", async () => {
+    const shared = c.variants("t", { a: c.object({ n: c.int() }), b: c.object({ n: c.int() }) });
+    const definition = c.behavior("shared field", {
+      input: c.variants("kind", { go: c.object({ s: shared }) }), result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}),
+    });
+    const none = { result: { verdict: "none" as const }, effects: [] };
+    const impl = c.implement(definition, { cases: { go: c.action("only a", {
+      guards: input => [input.s.t.$eq("a").$and(input.s.n.$gte(5)).$else(() => none)], run: () => none,
+    }) } });
+    const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "a", n: 7 } }, expect: none } });
+    const report = await c.check(c.spec("shared field", { implementation: impl, examples: rows }));
+    const under = (tag: string) => report.borders.filter(border => border.rule.includes(">= 5") && border.path.includes(`@${tag}`)).flatMap(border => border.points.map(point => point.status));
+    expect(under("b").filter(status => status === "gap")).toStrictEqual([]);
+    expect(under("a")).toContain("gap");
+  });
+});
+
+describe("a guard comparing two fields the cases of a sum share", () => {
+  it("draws the border under each case, with the scale each case declares", async () => {
+    const shared = c.variants("t", {
+      coarse: c.object({ a: c.decimal(1), b: c.decimal(1) }),
+      fine: c.object({ a: c.decimal(2), b: c.decimal(2) }),
+    });
+    const definition = c.behavior("pair", {
+      input: c.variants("kind", { go: c.object({ s: shared }) }), result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}),
+    });
+    const none = { result: { verdict: "none" as const }, effects: [] };
+    const impl = c.implement(definition, { cases: { go: c.action("ordered", {
+      guards: input => [input.s.a.$gte(input.s.b).$else(() => none)], run: () => none,
+    }) } });
+    const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "coarse", a: new Decimal("1.0"), b: new Decimal("1.0") } }, expect: none } });
+    const report = await c.check(c.spec("pair", { implementation: impl, examples: rows }));
+    const paths = report.borders.filter(border => border.rule.includes(">=")).map(border => border.path);
+    expect(paths.some(path => path.includes("@coarse"))).toBe(true);
+    expect(paths.some(path => path.includes("@fine"))).toBe(true);
   });
 });

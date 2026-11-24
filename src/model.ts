@@ -645,7 +645,8 @@ function deepEqualValue(left: unknown, right: unknown): boolean {
 
 // Every map and fold in a model with the steps the choices around it take to
 // reach it, one entry per way of reaching it.
-export function* iterationEntries(template: unknown, steps: readonly Step[] = []): Generator<{ readonly node: Extract<Node, { kind: "map" | "fold" }>; readonly steps: readonly Step[] }> {
+export interface IterationEntry { readonly node: Extract<Node, { kind: "map" | "fold" }>; readonly steps: readonly Step[] }
+export function* iterationEntries(template: unknown, steps: readonly Step[] = []): Generator<IterationEntry> {
   const node = nodeOf(template);
   if (node?.kind === "choose") {
     // A choice whose branches hold no iteration is not expanded: its outcomes may be far more than any iteration needs.

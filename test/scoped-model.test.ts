@@ -365,3 +365,39 @@ it("lists iteration discovery without expanding the choices that hold no iterati
   expect([...iterationEntries((impl.cases.go as never as { expression: unknown }).expression)]).toHaveLength(1);
   expect(Date.now() - started).toBeLessThan(2000);
 });
+
+it("proves a field under a choice that settles a sum to the case that leaves out a field an invariant reads behind its discriminant", () => {
+  const sum = c.variants("t", { a: c.object({ x: c.int() }), b: c.object({}) });
+  const shape = c.object({ s: sum, n: c.int().min(0) }).refine(v => v.s.t.$ne("a").$or(v.s.x.$gte(1)));
+  const definition = c.behavior("settled sum", { input: c.variants("kind", { go: shape }), result: c.int().min(0), effects: emptyEffects });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({ result: c.choose(input.s.t.$eq("b"), input.n, 0), effects: [] })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("owes no row for the body of an iteration that every way of entering it contradicts", async () => {
+  const shape = c.object({ a: c.boolean(), b: c.boolean(), xs: c.array(c.int()) }).refine(v => v.a.$eq(false).$and(v.b.$eq(false)));
+  const definition = c.behavior("entered twice", { input: c.variants("kind", { go: shape }), result: c.array(c.int()), effects: emptyEffects });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.choose(input.a.$eq(true).$or(input.b.$eq(true)), c.map(c.int(), c.int(), input.xs, x => c.choose(x.$gte(5), 1, 0)), []), effects: [],
+  })) } });
+  const rows = c.examples(definition, { none: { given: { kind: "go", a: false, b: false, xs: [] }, expect: { result: [], effects: [] } } });
+  const rules = (await c.check(c.spec("entered twice", { implementation: impl, examples: rows }))).measures.rules;
+  expect(rules.status === "complete" ? rules.rules.filter(rule => rule.way.startsWith("each of")).map(rule => rule.status) : rules).toStrictEqual(["no row owed", "no row owed"]);
+});
+
+it("stops looking for the ways into an iteration past a bound, however many outcomes the choices before it have", () => {
+  const flags = Array.from({ length: 28 }, (_, index) => `f${index}`);
+  const element = c.object({ ...Object.fromEntries(flags.flatMap(name => [[`${name}a`, c.boolean()], [`${name}b`, c.boolean()]])), ys: c.array(c.int()) });
+  const definition = c.behavior("nested", { input: c.variants("kind", { go: c.object({ xs: c.array(element) }) }), result: c.array(c.int()), effects: emptyEffects });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(element, c.int(), input.xs, x => {
+      const row = x as unknown as Record<string, c.TermOf<boolean> & c.TermOf<number[]>>;
+      const condition = flags.map(name => row[`${name}a`]!.$eq(true).$or(row[`${name}b`]!.$eq(true))).reduce((all, one) => all.$and(one));
+      return c.choose(condition, c.map(c.int(), c.int(), (x as unknown as { ys: never }).ys, y => c.choose(y.$gte(1), 1, 0)), 0) as never;
+    }), effects: [],
+  })) } });
+  const started = Date.now();
+  const ways = eachWayOf(impl.cases.go as never);
+  for (let index = 0; index < 3; index++) ways.next();
+  expect(Date.now() - started).toBeLessThan(2000);
+});

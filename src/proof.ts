@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, pathsRead, positionData, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -241,7 +241,8 @@ function narrowedBy(scope: AnySchema, steps: readonly Step[], path: readonly str
     return [key, next];
   }));
   if (!changed) return scope;
-  return (scope as ObjectSchema<ObjectShape>).invariants.reduce((current, rule) => current.refine(() => rule), object(narrowed));
+  // The invariants were checked against the whole sum; declaring them again on the narrowed shape would refuse a read the case leaves out.
+  return { ...scope, shape: narrowed } as AnySchema;
 }
 function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema, steps: readonly Step[], limit: number): boolean {
   const scope = narrowedBy(unnarrowed, steps);
@@ -289,8 +290,19 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
   });
 }
 // The rendered text alone cannot tell the key "a.b" from the path a.b, so the paths read are part of the identity.
-function identityOf(rule: Rule): string {
-  return `${describeRule(rule, "$")} ${JSON.stringify(pathsRead(rule))}`;
+export function identityOf(rule: Rule): string {
+  return `${describeRule(rule, "$")} ${JSON.stringify(pathsWithin(rule))}`;
+}
+// Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
+function pathsWithin(rule: Rule): readonly (readonly string[])[] {
+  switch (rule.kind) {
+    case "compare": return termPaths(rule);
+    case "all":
+    case "any": return [positionOf(rule.of).path, ...pathsWithin(rule.each)];
+    case "and":
+    case "or": return rule.rules.flatMap(pathsWithin);
+    case "not": return pathsWithin(rule.rule);
+  }
 }
 function includesSchema(target: AnySchema, source: AnySchema, limit: number): boolean {
   if (source.kind === "optional") {

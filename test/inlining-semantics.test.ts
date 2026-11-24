@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 import { Decimal } from "decimal.js";
 import { interpret } from "../src/model.js";
+import { identityOf } from "../src/proof.js";
 import { linearCombination, positionTerm } from "../src/rule.js";
 
 const effects = c.variants("kind", {});
@@ -245,4 +246,10 @@ it("does not read a sum whose weights are rounded before they cancel", () => {
   const big = Number.MAX_SAFE_INTEGER;
   const scaled = linearCombination([{ operand: positionTerm(["z"], "value"), coefficient: big }]);
   expect(linearCombination([{ operand: scaled, coefficient: 3 }, { operand: scaled, coefficient: -2 }, { operand: scaled, coefficient: -1 }])).toBeUndefined();
+});
+
+it("tells an invariant over the key a.b under a quantifier from one over the path a.b", () => {
+  const ofKey = c.object({ xs: c.array(c.object({ "a.b": c.int() })) }).refine(v => v.xs.$all(x => x["a.b"].$gte(0))).invariants[0]!;
+  const ofPath = c.object({ xs: c.array(c.object({ a: c.object({ b: c.int() }) })) }).refine(v => v.xs.$all(x => x.a.b.$gte(0))).invariants[0]!;
+  expect(identityOf(ofKey)).not.toBe(identityOf(ofPath));
 });

@@ -1,4 +1,5 @@
 import { iterationEntries, modelPaths } from "./model.js";
+import type { IterationEntry } from "./model.js";
 import { isTerm } from "./rule.js";
 import { outcomesOf } from "./outcomes.js";
 export { outcomesOf } from "./outcomes.js";
@@ -17,8 +18,8 @@ export interface Way {
   readonly exit: number | "otherwise" | "case";
   // The map or fold whose body one element takes this way through.
   readonly within?: IterationNode;
-  // The steps the choices around that iteration take to reach it, held only where one way reaches it.
-  readonly entered?: readonly Step[];
+  // The steps of each way the choices around that iteration lead into it; one of them must hold. Left off where there are too many to list.
+  readonly entered?: readonly (readonly Step[])[];
 }
 
 export interface IterationNode {
@@ -40,15 +41,19 @@ export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): read
 export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): Generator<Way> {
   if (decision.expression !== undefined) {
     for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
-    const entries = [...iterationEntries(decision.expression)];
-    for (const [index, { node: iteration, steps: entered }] of entries.entries()) {
-      if (entries.findIndex(entry => entry.node === iteration) !== index) continue;
+    const entries: IterationEntry[] = [];
+    let listed = true;
+    for (const entry of iterationEntries(decision.expression)) {
+      if (entries.length >= WAY_LIMIT) { listed = false; break; }
+      entries.push(entry);
+    }
+    for (const iteration of new Set(entries.map(entry => entry.node))) {
       // A body with no distinction is one path with no steps and owes nothing of its own; read lazily, since a body may have far more paths than a caller will list.
       const paths = modelPaths(iteration.body);
       const first = paths.next();
       if (first.done === true || first.value.steps.length === 0) continue;
-      // An iteration several choices reach is entered by any of them, so no entry is required of it.
-      const reached = entries.filter(entry => entry.node === iteration).length === 1 ? { entered } : {};
+      const alternatives = entries.filter(entry => entry.node === iteration).map(entry => entry.steps);
+      const reached = listed && alternatives.every(steps => steps.length > 0) ? { entered: alternatives } : {};
       yield { steps: first.value.steps, choices: first.value.choices, exit: "otherwise", within: iteration, ...reached };
       for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration, ...reached };
     }
