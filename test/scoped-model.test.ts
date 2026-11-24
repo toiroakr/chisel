@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
 import { interpret, localsOf } from "../src/model.js";
@@ -268,4 +269,46 @@ it.each([[0, "no row owed"], [3, "gap"]] as const)("owes a row for the body of a
   const report = await c.check(c.spec("entry", { implementation: impl, examples: rows }));
   const rules = report.measures.rules;
   expect(rules.status === "complete" ? rules.rules.filter(rule => rule.way.startsWith("each of")).map(rule => rule.status) : rules).toStrictEqual([status, status]);
+});
+
+it.each([[true, "no row owed"], [false, "gap"]] as const)("carries the choice that leads into an iteration to its body ways (enabled held to false: %s)", async (held, status) => {
+  const shape = c.object({ enabled: c.boolean(), xs: c.array(c.int()) });
+  const definition = c.behavior("entered", {
+    input: c.variants("kind", { go: held ? shape.refine(v => v.enabled.$eq(false)) : shape }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.choose(input.enabled.$eq(true), c.map(c.int(), c.int(), input.xs, x => c.choose(x.$gte(5), 1, 0)), []), effects: [],
+  })) } });
+  const rows = c.examples(definition, { none: { given: { kind: "go", enabled: false, xs: [] }, expect: { result: [], effects: [] } } });
+  const report = await c.check(c.spec("entered", { implementation: impl, examples: rows }));
+  const rules = report.measures.rules;
+  expect(rules.status === "complete" ? rules.rules.filter(rule => rule.way.startsWith("each of")).map(rule => rule.status) : rules).toStrictEqual([status, status]);
+});
+
+it("reads a decimal threshold only under the cases of a sum the enclosing choices leave possible", () => {
+  const payload = c.variants("tier", { coarse: c.object({ amount: c.decimal(1) }), fine: c.object({ amount: c.decimal(2) }) });
+  const definition = c.behavior("tiered", {
+    input: c.variants("kind", { go: c.object({ payload }) }), result: c.int(), effects: emptyEffects,
+  });
+  const build = (tier: "coarse" | "fine") => () => c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.choose(input.payload.tier.$eq(tier), c.choose(input.payload.amount.$eq(new Decimal("0.01")), 1, 0), 0), effects: [],
+  })) } });
+  expect(build("fine")).not.toThrow();
+  expect(build("coarse")).toThrow("which no decimal(1) holds");
+});
+
+it("holds a dependency's answer bound inside an iteration to the schema it is bound under, so a choice no answer can take owes no row", async () => {
+  const definition = c.behavior("answered body", {
+    input: c.variants("kind", { go: c.object({ xs: c.array(c.int()).max(3) }) }), result: c.array(c.int()), effects: emptyEffects,
+    dependencies: { lookup: c.dependency(c.int(), c.boolean()) },
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", (input, deps) => ({
+    result: c.map(c.int(), c.int(), input.xs, x =>
+      c.bind(c.boolean().refine(v => v.$eq(true)), c.call(deps.lookup, x), found => c.choose(found.$eq(true), 1, 0))),
+    effects: [],
+  })) } });
+  const rows = c.examples(definition, { none: { given: { kind: "go", xs: [] }, expect: { result: [], effects: [] } } });
+  const report = await c.check(c.spec("answered body", { implementation: impl, examples: rows }));
+  const rules = report.measures.rules;
+  expect(rules.status === "complete" ? rules.rules.filter(rule => rule.way.startsWith("each of")).map(rule => rule.status) : rules).toStrictEqual(["gap", "no row owed"]);
 });

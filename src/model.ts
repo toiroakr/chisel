@@ -98,7 +98,6 @@ export function bindingsOf(template: unknown): readonly (readonly [string, Schem
 
 export function answersOf(template: unknown): readonly { readonly name: string; readonly schema: Schema<unknown>; readonly dependency: string; readonly input: unknown }[] {
   const node = nodeOf(template);
-  if (node?.kind === "map" || node?.kind === "fold") return [];
   const call = node?.kind === "bind" ? nodeOf(node.value) : undefined;
   const own = node?.kind === "bind" && call?.kind === "call" && isAnswer(node.name)
     ? [{ name: node.name, schema: node.schema, dependency: dependencyName(call.dependency), input: call.input }]
@@ -642,6 +641,18 @@ function writePath(value: unknown, path: readonly string[], leaf: unknown): unkn
 
 function deepEqualValue(left: unknown, right: unknown): boolean {
   return left === right || (isDecimal(left) && isDecimal(right) && left.equals(right));
+}
+
+// Every map and fold in a model with the steps the choices around it take to
+// reach it, one entry per way of reaching it.
+export function* iterationEntries(template: unknown, steps: readonly Step[] = []): Generator<{ readonly node: Extract<Node, { kind: "map" | "fold" }>; readonly steps: readonly Step[] }> {
+  const node = nodeOf(template);
+  if (node?.kind === "choose") {
+    for (const outcome of outcomesOf(node.condition)) yield* iterationEntries(outcome.result ? node.yes : node.no, [...steps, ...outcome.steps]);
+    return;
+  }
+  if (node?.kind === "map" || node?.kind === "fold") yield { node, steps };
+  for (const child of childrenOf(template)) yield* iterationEntries(child, steps);
 }
 
 // Every map and fold in a model, each with the body one element is read in.

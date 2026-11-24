@@ -225,6 +225,39 @@ describe("a way through a value computed from a dependency", () => {
   });
 });
 
+describe("a border point on a computed product", () => {
+  const small = c.object({ a: c.int().min(0).max(9), b: c.int().min(0).max(9) });
+  const sized = c.behavior("sized", { input: c.variants("kind", { request: small }), result: c.int(), effects });
+  const product = c.implement(sized, { cases: { request: c.model("product", input => ({
+    result: c.bind(c.int(), c.arithmetic("multiply", input.a, input.b), total => c.choose(total.$gte(50), 1, 0)), effects: [],
+  })) } });
+
+  it("is offered the input the search ran that stands there, since the product cannot be written", () => {
+    const rows = c.examples(sized, { one: { given: { kind: "request", a: 1, b: 1 }, expect: { result: 0, effects: [] } } });
+    const generated = c.generate(rows, product);
+    expect(generated.notComposed.filter(item => item.includes("OFF"))).toStrictEqual([]);
+    expect(generated.rows.filter(row => row.name.includes("OFF")).map(row => (row.given as { a: number; b: number }).a * (row.given as { a: number; b: number }).b)).toStrictEqual([49]);
+  });
+});
+
+describe("a way that needs two dependencies asked at once", () => {
+  const twice = c.behavior("twice", {
+    input: c.variants("kind", { request: c.object({ left: c.string(), right: c.string() }) }), result: c.int(), effects,
+    dependencies: { price: c.dependency(c.string(), c.int().min(1).max(100)), rate: c.dependency(c.string(), c.int().min(1).max(100)) },
+  });
+  const product = c.implement(twice, { cases: { request: c.model("product", (input, deps) => ({
+    result: c.bind(c.int(), c.arithmetic("multiply", c.call(deps.price, input.left), c.call(deps.rate, input.right)), total => c.choose(total.$gte(50), 1, 0)),
+    effects: [],
+  })) } });
+  const fakes = [c.fake(twice, "price", [["A", 10]]), c.fake(twice, "rate", [["B", 7]])];
+
+  it("offers a row asking both what their fake rows answer, which neither request alone writes", () => {
+    const generated = c.generate(c.examples(twice, {}), product, { fakes, ways: true });
+    expect(generated.rows.map(row => row.given)).toContainEqual({ kind: "request", left: "A", right: "B" });
+    expect(generated.notComposed.some(item => item.includes("holds"))).toBe(false);
+  });
+});
+
 describe("a concatenation", () => {
   it("is read as a value of its own, as NFC may join its parts into fewer characters", async () => {
     const named = c.behavior("named", { input: c.variants("kind", { request: c.object({ first: c.string(), last: c.string() }) }), result: c.int(), effects });

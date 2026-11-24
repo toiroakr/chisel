@@ -7,7 +7,7 @@ import type { AnySchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema,
 // so it is refused where it is written: an absence is a case of a sum, and a
 // field of some cases of a sum is read under a test of its discriminant.
 
-interface Fact {
+export interface Fact {
   readonly rule: Rule;
   readonly outcome: boolean;
 }
@@ -135,6 +135,26 @@ function leftOutAt(path: readonly string[], roots: Roots, facts: readonly Fact[]
     return undefined;
   };
   return from(local ?? roots.scope, local === undefined ? 0 : 1);
+}
+
+// What the choices around each choose settle when it is read: the condition of
+// each enclosing choose, held in its yes and failed in its no. A choose reached
+// under different facts keeps none, since neither holds of every read of it.
+export function choiceFacts(template: unknown): ReadonlyMap<unknown, readonly Fact[]> {
+  const found = new Map<unknown, readonly Fact[] | undefined>();
+  function visit(value: unknown, facts: readonly Fact[]) {
+    const node = nodeOf(value);
+    if (node?.kind === "choose") {
+      const known = found.get(node);
+      found.set(node, found.has(node) && (known === undefined || known.length !== facts.length || known.some((fact, index) => fact !== facts[index])) ? undefined : facts);
+      visit(node.yes, [...facts, ...factsOf(node.condition, true)]);
+      visit(node.no, [...facts, ...factsOf(node.condition, false)]);
+      return;
+    }
+    childrenOf(value).forEach(child => visit(child, facts));
+  }
+  visit(template, []);
+  return new Map([...found].map(([node, facts]) => [node, facts ?? []]));
 }
 
 export function casesLeft(sum: { readonly discriminant: string; readonly variants: VariantTable }, at: readonly string[], facts: readonly Fact[]): readonly string[] {

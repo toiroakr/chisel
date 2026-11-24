@@ -1,7 +1,8 @@
 import { compatibleBound } from "./bounds.js";
 import { isRational } from "./exact.js";
-import { answersOf, iterationsOf, localsOf } from "./model.js";
-import { casesLeft, factsOf } from "./absence.js";
+import { answersOf, choicesOf, iterationsOf, localsOf } from "./model.js";
+import { casesLeft, choiceFacts, factsOf } from "./absence.js";
+import type { Fact } from "./absence.js";
 import type { AnyBehavior, RulesDecision } from "./behavior.js";
 import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
 import { DEPS, conjuncts, describeRule, holds, isTerm, normalize, stepInto, pathsRead, positionData, positionOf, positionTerm, localLabel, rebaseRule } from "./rule.js";
@@ -118,7 +119,14 @@ export function offGridEqualityIn(
   decision: RulesDecision<unknown, unknown, unknown, unknown>,
 ): string | undefined {
   const frames = framesFor(definition, tag, decision);
-  for (const threshold of decision.guards.flatMap(candidate => thresholdsIn(candidate.condition, frames))) {
+  const facts = decision.expression === undefined ? undefined : choiceFacts(decision.expression);
+  const choices = decision.expression === undefined ? [] : choicesOf(decision.expression);
+  const reachable = (threshold: Threshold, known: readonly Fact[]) =>
+    threshold.cases.every(item => casesLeft(item.sum, item.at, known).includes(item.tag));
+  for (const threshold of decision.guards.flatMap((candidate, index) => {
+    const known = facts?.get(choices[index]) ?? [];
+    return thresholdsIn(candidate.condition, frames).filter(item => reachable(item, known));
+  })) {
     const { operator, bound } = normalize(threshold.rule)!;
     const kind = threshold.schema.kind;
     if ((kind === "number" || kind === "integer") && typeof bound === "number" && !Number.isFinite(bound)) {
@@ -278,6 +286,25 @@ export function onTrail(scope: AnySchema, keys: readonly string[], steps: readon
   return true;
 }
 
+// The case of each sum a path passes through by the steps `everyStepsOf` gave for it.
+export function casesOnTrail(scope: AnySchema, keys: readonly string[], steps: readonly string[]): Threshold["cases"] {
+  const found: { at: readonly string[]; sum: AnyVariantsSchema; tag: string }[] = [];
+  let current: AnySchema | undefined = scope;
+  let index = 0;
+  for (const [position, key] of keys.entries()) {
+    if (current?.kind === "optional") current = (current as OptionalSchema<unknown>).schema as AnySchema;
+    if (current !== undefined && isVariantsSchema(current) && steps[index]?.startsWith("@")) {
+      const tag = steps[index]!.slice(1);
+      found.push({ at: keys.slice(0, position), sum: current as AnyVariantsSchema, tag });
+      current = current.variants[tag] as AnySchema | undefined;
+      index++;
+    }
+    index++;
+    current = current?.kind === "object" ? (current as ObjectSchema<ObjectShape>).shape[key] : undefined;
+  }
+  return found;
+}
+
 // The segments a path takes from a scope, naming the case of each sum it
 // passes through as the partition does (`.a`, `@given`, `.b`): the case that
 // declares the next key, the first of them where several do. A sum's
@@ -308,6 +335,8 @@ export interface Threshold {
   readonly schema: AnySchema;
   readonly inherited: readonly Rule[];
   readonly rule: CompareRule;
+  // The case of each sum the path passes through, named from the frame it stands in (none for an element frame).
+  readonly cases: readonly { readonly at: readonly string[]; readonly sum: AnyVariantsSchema; readonly tag: string }[];
 }
 
 export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
@@ -338,6 +367,7 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
         schema: schemaAlong(frame.scope, keys, steps) ?? schema,
         inherited: inheritedAt(frame.scope, keys, steps),
         rule,
+        cases: frame === frames.root ? casesOnTrail(frame.scope, keys, steps) : [],
       }));
 }
 

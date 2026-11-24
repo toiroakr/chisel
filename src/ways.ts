@@ -1,4 +1,4 @@
-import { iterationsOf, modelPaths } from "./model.js";
+import { iterationEntries, modelPaths } from "./model.js";
 import { isTerm } from "./rule.js";
 import { outcomesOf } from "./outcomes.js";
 export { outcomesOf } from "./outcomes.js";
@@ -17,6 +17,8 @@ export interface Way {
   readonly exit: number | "otherwise" | "case";
   // The map or fold whose body one element takes this way through.
   readonly within?: IterationNode;
+  // The steps the choices around that iteration take to reach it, held only where one way reaches it.
+  readonly entered?: readonly Step[];
 }
 
 export interface IterationNode {
@@ -38,13 +40,16 @@ export function waysOf(decision: RulesDecision<unknown, unknown, unknown>): read
 export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): Generator<Way> {
   if (decision.expression !== undefined) {
     for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
-    for (const iteration of iterationsOf(decision.expression)) {
+    const entries = [...iterationEntries(decision.expression)];
+    for (const { node: iteration, steps: entered } of entries) {
       // A body with no distinction is one path with no steps and owes nothing of its own; read lazily, since a body may have far more paths than a caller will list.
       const paths = modelPaths(iteration.body);
       const first = paths.next();
       if (first.done === true || first.value.steps.length === 0) continue;
-      yield { steps: first.value.steps, choices: first.value.choices, exit: "otherwise", within: iteration };
-      for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration };
+      // An iteration several choices reach is entered by any of them, so no entry is required of it.
+      const reached = entries.filter(entry => entry.node === iteration).length === 1 ? { entered } : {};
+      yield { steps: first.value.steps, choices: first.value.choices, exit: "otherwise", within: iteration, ...reached };
+      for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration, ...reached };
     }
     return;
   }
