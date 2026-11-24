@@ -1,7 +1,7 @@
 import { Decimal } from "decimal.js";
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
-import { interpret, iterationEntries, localsOf } from "../src/model.js";
+import { interpret, iterationEntries, iterationsOf, localsOf } from "../src/model.js";
 import { eachWayOf } from "../src/ways.js";
 import { choiceFacts } from "../src/absence.js";
 
@@ -400,4 +400,29 @@ it("stops looking for the ways into an iteration past a bound, however many outc
   const ways = eachWayOf(impl.cases.go as never);
   for (let index = 0; index < 3; index++) ways.next();
   expect(Date.now() - started).toBeLessThan(2000);
+});
+
+it("proves under a case of a sum whose own invariant reads a field only another case declares", () => {
+  const sum = c.variants("t", { a: c.object({ p: c.object({ x: c.int() }) }), b: c.object({ p: c.object({}) }) })
+    .refine(v => v.t.$ne("a").$or(v.p.x.$gte(1)));
+  const definition = c.behavior("sum invariant", { input: c.variants("kind", { go: c.object({ s: sum, n: c.int().min(0) }) }), result: c.int().min(0), effects: emptyEffects });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({ result: c.choose(input.s.t.$eq("b"), input.n, 0), effects: [] })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("still lists the body ways of an iteration whose ways in are too many to list, and marks them unlisted", () => {
+  const flags = Array.from({ length: 14 }, (_, index) => `f${index}`);
+  const element = c.object({ ...Object.fromEntries(flags.flatMap(name => [[`${name}a`, c.boolean()], [`${name}b`, c.boolean()]])), ys: c.array(c.int()) });
+  const definition = c.behavior("many ways in", { input: c.variants("kind", { go: c.object({ xs: c.array(element) }) }), result: c.array(c.int()), effects: emptyEffects });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(element, c.int(), input.xs, x => {
+      const row = x as unknown as Record<string, c.TermOf<boolean>>;
+      const condition = flags.map(name => row[`${name}a`]!.$eq(true).$or(row[`${name}b`]!.$eq(true))).reduce((all, one) => all.$and(one));
+      return c.choose(condition, c.map(c.int(), c.int(), (x as unknown as { ys: never }).ys, y => c.choose(y.$gte(1), 1, 0)), 0) as never;
+    }), effects: [],
+  })) } });
+  const inner = iterationsOf((impl.cases.go as never as { expression: unknown }).expression).find(node => node.body !== undefined && iterationsOf(node.body).length === 0);
+  const ways = [...eachWayOf(impl.cases.go as never)].filter(way => way.within === inner);
+  expect(ways.length).toBeGreaterThan(0);
+  expect(ways.every(way => way.entryUnlisted === true && way.entered === undefined)).toBe(true);
 });

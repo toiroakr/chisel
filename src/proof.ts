@@ -218,7 +218,13 @@ export function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<Ob
   const declared = Object.hasOwn(variant.shape, sum.discriminant) ? variant.shape[sum.discriminant] : undefined;
   const discriminant = declared ? declared.refine(value => ({ kind: "compare", left: value, operator: "==", right: tag })) : literal(tag);
   const schema = object({ ...variant.shape, [sum.discriminant]: discriminant });
-  return [...variant.invariants, ...sum.invariants].reduce((current, rule) => current.refine(() => rule), schema);
+  const invariants = [...variant.invariants, ...sum.invariants];
+  try {
+    return invariants.reduce((current, rule) => current.refine(() => rule), schema);
+  } catch {
+    // An invariant reading a field only another case declares was checked against the whole sum; declaring it again on this case would refuse the read.
+    return { ...schema, invariants } as ObjectSchema<ObjectShape>;
+  }
 }
 function summarize(decisions: readonly ConstructionProof[]): ProofReport {
   return { status: decisions.some(item => item.status === "refuted") ? "refuted" : decisions.every(item => item.status === "verified") ? "verified" : "undetermined", decisions };

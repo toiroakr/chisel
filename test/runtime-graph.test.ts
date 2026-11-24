@@ -39,6 +39,13 @@ describe("production import graph", () => {
     }
   });
 
+  it("exports the number types and temporal arithmetic a model reads at run time", async () => {
+    const runtime = await import("../src/runtime.js");
+    for (const name of ["int64", "rational", "Rational", "plus", "minus", "between", "quotient"]) {
+      expect(typeof (runtime as Record<string, unknown>)[name], name).toBe("function");
+    }
+  });
+
   it("keeps the production example independent from its specification", async () => {
     const imports = await dependencies(resolve(import.meta.dirname, "../examples/order-machine.ts"));
     expectRuntimeOnly(imports);

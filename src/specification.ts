@@ -2053,6 +2053,7 @@ function wayFeasibility(
     return feasibilityOf(entering, scopeOf(implementation, tag, decision as { readonly expression?: unknown }, entering), undefined, combinations);
   });
   const found = entries.find(item => item.kind === "feasible") ?? entries.find(item => item.kind === "undecided") ?? entries[0]!;
+  if (found.kind === "feasible" && way.entryUnlisted === true) return { kind: "undecided", reason: "反復に入る道筋が多すぎて、すべては調べきれない" };
   const expression = (decision as { readonly expression?: unknown }).expression;
   if (found.kind !== "feasible" || expression === undefined) return found;
   const read = opaqueRead(way, decision);

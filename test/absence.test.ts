@@ -244,4 +244,10 @@ describe("a guard shared by several input cases", () => {
     const definition = c.behavior("declaring", { input: declaring, result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}) });
     expect(() => c.implement(definition, { cases: { $default: c.action("shared", { guards: ((input: any) => [input.kind.$eq("a").$else(reject)]) as never, run: reject }) } as never })).not.toThrow();
   });
+
+  it("reads the discriminant as present though a case declares it as optional", () => {
+    const optional = c.variants("kind", { go: c.object({ kind: c.literal("go").optional() }), other: c.object({}) });
+    const definition = c.behavior("optional discriminant", { input: optional, result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}) });
+    expect(() => c.implement(definition, { cases: { $default: c.action("shared", { guards: ((input: any) => [input.kind.$eq("go").$else(reject)]) as never, run: reject }) } as never })).not.toThrow();
+  });
 });

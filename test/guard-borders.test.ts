@@ -1702,6 +1702,7 @@ describe("a guard on a field the cases of a sum share", () => {
     const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "a", n: 7 } }, expect: none } });
     const report = await c.check(c.spec("shared field", { implementation: impl, examples: rows }));
     const under = (tag: string) => report.borders.filter(border => border.rule.includes(">= 5") && border.path.includes(`@${tag}`)).flatMap(border => border.points.map(point => point.status));
+    expect(under("b").length).toBeGreaterThan(0);
     expect(under("b").filter(status => status === "gap")).toStrictEqual([]);
     expect(under("a")).toContain("gap");
   });

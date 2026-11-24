@@ -1,4 +1,4 @@
-import { iterationEntries, modelPaths } from "./model.js";
+import { iterationEntries, iterationsOf, modelPaths } from "./model.js";
 import type { IterationEntry } from "./model.js";
 import { isTerm } from "./rule.js";
 import { outcomesOf } from "./outcomes.js";
@@ -20,6 +20,8 @@ export interface Way {
   readonly within?: IterationNode;
   // The steps of each way the choices around that iteration lead into it; one of them must hold. Left off where there are too many to list.
   readonly entered?: readonly (readonly Step[])[];
+  // Set where the ways into the iteration were too many to list, so a body way is feasible only as far as the way entering it is unknown.
+  readonly entryUnlisted?: true;
 }
 
 export interface IterationNode {
@@ -47,13 +49,13 @@ export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): 
       if (entries.length >= WAY_LIMIT) { listed = false; break; }
       entries.push(entry);
     }
-    for (const iteration of new Set(entries.map(entry => entry.node))) {
+    for (const iteration of new Set(iterationsOf(decision.expression))) {
       // A body with no distinction is one path with no steps and owes nothing of its own; read lazily, since a body may have far more paths than a caller will list.
       const paths = modelPaths(iteration.body);
       const first = paths.next();
       if (first.done === true || first.value.steps.length === 0) continue;
       const alternatives = entries.filter(entry => entry.node === iteration).map(entry => entry.steps);
-      const reached = listed && alternatives.every(steps => steps.length > 0) ? { entered: alternatives } : {};
+      const reached = !listed ? { entryUnlisted: true as const } : alternatives.length > 0 && alternatives.every(steps => steps.length > 0) ? { entered: alternatives } : {};
       yield { steps: first.value.steps, choices: first.value.choices, exit: "otherwise", within: iteration, ...reached };
       for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration, ...reached };
     }

@@ -111,6 +111,8 @@ function render(path: readonly string[], label: string, roots: Roots): string {
 // where the value it reads is always there.
 function leftOutAt(path: readonly string[], roots: Roots, facts: readonly Fact[]): number | undefined {
   if (roots.input !== undefined && !casesLeft(roots.input.sum, [], facts).includes(roots.input.tag)) return undefined;
+  // The input's discriminant is restored by parse whatever a case declares of it.
+  if (roots.input !== undefined && roots.locals?.get(path[0] ?? "") === undefined && path[0] === roots.input.sum.discriminant) return undefined;
   const local = path.length > 0 ? roots.locals?.get(path[0]!) : undefined;
   // Every case a sum may still hold is walked, so a field one of them leaves
   // out is found whichever case is declared first.
