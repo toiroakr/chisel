@@ -423,6 +423,27 @@ it("still lists the body ways of an iteration whose ways in are too many to list
   })) } });
   const inner = iterationsOf((impl.cases.go as never as { expression: unknown }).expression).find(node => node.body !== undefined && iterationsOf(node.body).length === 0);
   const ways = [...eachWayOf(impl.cases.go as never)].filter(way => way.within === inner);
-  expect(ways.length).toBeGreaterThan(0);
+  expect(ways).toHaveLength(2);
   expect(ways.every(way => way.entryUnlisted === true && way.entered === undefined)).toBe(true);
+});
+
+it("proves under a case of a sum that declares its own discriminant as optional", () => {
+  const sum = c.variants("t", { a: c.object({ t: c.literal("a").optional() }), b: c.object({}) });
+  const definition = c.behavior("optional tag", { input: c.variants("kind", { go: c.object({ s: sum, n: c.int().min(0) }) }), result: c.int().min(0), effects: emptyEffects });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({ result: c.choose(input.s.t.$eq("a"), input.n, 0), effects: [] })) } });
+  expect(c.verify(impl).status).toBe("verified");
+});
+
+it("gives the border points of an iteration body no row where the array it ranges over can hold none", async () => {
+  const definition = c.behavior("empty array", {
+    input: c.variants("kind", { go: c.object({ xs: c.array(c.int()).max(0) }) }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(c.int(), c.int(), input.xs, x => c.choose(x.$gte(5), 1, 0)), effects: [],
+  })) } });
+  const rows = c.examples(definition, { none: { given: { kind: "go", xs: [] }, expect: { result: [], effects: [] } } });
+  const report = await c.check(c.spec("empty array", { implementation: impl, examples: rows }));
+  const points = report.borders.filter(border => border.rule.includes(">= 5")).flatMap(border => border.points.map(point => point.status));
+  expect(points.length).toBeGreaterThan(0);
+  expect(points.filter(status => status === "gap")).toStrictEqual([]);
 });

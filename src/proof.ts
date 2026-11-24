@@ -215,7 +215,9 @@ function pipelineBoundary(first: AnyImplementation, second: AnyImplementation, l
 }
 export function taggedCase(sum: AnyVariantsSchema, tag: string): ObjectSchema<ObjectShape> {
   const variant = sum.variants[tag] as ObjectSchema<ObjectShape>;
-  const declared = Object.hasOwn(variant.shape, sum.discriminant) ? variant.shape[sum.discriminant] : undefined;
+  const own = Object.hasOwn(variant.shape, sum.discriminant) ? variant.shape[sum.discriminant] : undefined;
+  // The sum always carries its tag, so a discriminant a case declares as optional is read as present.
+  const declared = own?.kind === "optional" ? presentSchema(own as OptionalSchema<unknown>) : own;
   const discriminant = declared ? declared.refine(value => ({ kind: "compare", left: value, operator: "==", right: tag })) : literal(tag);
   const schema = object({ ...variant.shape, [sum.discriminant]: discriminant });
   const invariants = [...variant.invariants, ...sum.invariants];
@@ -297,7 +299,18 @@ function provesValue(schema: AnySchema, original: unknown, unnarrowed: AnySchema
 }
 // The rendered text alone cannot tell the key "a.b" from the path a.b, so the paths read are part of the identity.
 export function identityOf(rule: Rule): string {
-  return `${describeRule(rule, "$")} ${JSON.stringify(pathsWithin(rule))}`;
+  return `${describeRule(rule, "$")} ${JSON.stringify(pathsWithin(rule))} ${constantsWithin(rule).join(",")}`;
+}
+// The constants a rule compares with, each with the type that carries it: 1n and a rational one render alike but accept different values.
+function constantsWithin(rule: Rule): readonly string[] {
+  switch (rule.kind) {
+    case "compare": return [rule.left, rule.right].filter(operand => !isTerm(operand)).map(value => `${typeof value}:${(value as { constructor?: { name?: string } } | null)?.constructor?.name ?? ""}:${String(value)}`);
+    case "all":
+    case "any": return constantsWithin(rule.each);
+    case "and":
+    case "or": return rule.rules.flatMap(constantsWithin);
+    case "not": return constantsWithin(rule.rule);
+  }
 }
 // Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
 function pathsWithin(rule: Rule): readonly (readonly string[])[] {

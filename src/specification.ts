@@ -2369,6 +2369,7 @@ function reachOf(
     return [{ kind: "feasible" }];
   }
   const prefixes: (readonly Way["steps"][number][])[] = [];
+  let unlisted = false;
   let followed = 0;
   for (const way of eachWayOf(decision)) {
     followed += 1;
@@ -2377,7 +2378,11 @@ function reachOf(
     }
     const index = way.steps.findIndex(step => step.distinction === drawn.comparison);
     if (index !== -1) {
-      prefixes.push(way.steps.slice(0, index));
+      // A comparison in an iteration's body is reached only through the iteration, entered and over an array that holds an element.
+      for (const entered of way.entered ?? [[]]) {
+        prefixes.push([...way.steps.slice(0, index), ...withEntry(way, entered).steps.slice(way.steps.length)]);
+        if (way.entryUnlisted === true) unlisted = true;
+      }
     }
   }
   // A row at the border is of the case it is drawn under.
@@ -2387,7 +2392,8 @@ function reachOf(
   }));
   return prefixes.length === 0
     ? [{ kind: "feasible" }]
-    : prefixes.map(steps => feasibilityOf({ steps: [...steps, ...inCases] }, scope, placement, combinations));
+    : prefixes.map(steps => feasibilityOf({ steps: [...steps, ...inCases] }, scope, placement, combinations))
+      .map((found): Feasibility => unlisted && found.kind === "feasible" ? { kind: "undecided", reason: "反復に入る道筋が多すぎて、すべては調べきれない" } : found);
 }
 
 function scopeOf(

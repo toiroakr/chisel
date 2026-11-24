@@ -3,6 +3,7 @@ import * as c from "../src/index.js";
 import { Decimal } from "decimal.js";
 import { interpret } from "../src/model.js";
 import { identityOf } from "../src/proof.js";
+import { Rational } from "../src/exact.js";
 import { linearCombination, positionTerm } from "../src/rule.js";
 
 const effects = c.variants("kind", {});
@@ -252,4 +253,10 @@ it("tells an invariant over the key a.b under a quantifier from one over the pat
   const ofKey = c.object({ xs: c.array(c.object({ "a.b": c.int() })) }).refine(v => v.xs.$all(x => x["a.b"].$gte(0))).invariants[0]!;
   const ofPath = c.object({ xs: c.array(c.object({ a: c.object({ b: c.int() }) })) }).refine(v => v.xs.$all(x => x.a.b.$gte(0))).invariants[0]!;
   expect(identityOf(ofKey)).not.toBe(identityOf(ofPath));
+});
+
+it("tells an invariant over an int64 bound from one over a rational of the same rendering", () => {
+  const ofInt64 = c.int64().refine(v => v.$gte(1n)).invariants[0]!;
+  const ofRational = c.rational().refine(v => v.$gte(new Rational(1n))).invariants[0]!;
+  expect(identityOf(ofInt64)).not.toBe(identityOf(ofRational));
 });

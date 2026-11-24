@@ -18,7 +18,7 @@ export interface Way {
   readonly exit: number | "otherwise" | "case";
   // The map or fold whose body one element takes this way through.
   readonly within?: IterationNode;
-  // The steps of each way the choices around that iteration lead into it; one of them must hold. Left off where there are too many to list.
+  // The steps of each way the choices around that iteration lead into it; one of them must hold. Left off where the iteration is entered unconditionally (or where `entryUnlisted` says there are too many to list).
   readonly entered?: readonly (readonly Step[])[];
   // Set where the ways into the iteration were too many to list, so a body way is feasible only as far as the way entering it is unknown.
   readonly entryUnlisted?: true;

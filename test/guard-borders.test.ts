@@ -1728,3 +1728,21 @@ describe("a guard comparing two fields the cases of a sum share", () => {
     expect(paths.some(path => path.includes("@fine"))).toBe(true);
   });
 });
+
+describe("a guard comparing an expression of fields the cases of a sum share", () => {
+  it("draws the border under each case", async () => {
+    const shared = c.variants("t", { coarse: c.object({ a: c.int(), b: c.int() }), fine: c.object({ a: c.int(), b: c.int() }) });
+    const definition = c.behavior("expression", {
+      input: c.variants("kind", { go: c.object({ s: shared }) }), result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}),
+    });
+    const none = { result: { verdict: "none" as const }, effects: [] };
+    const impl = c.implement(definition, { cases: { go: c.action("ordered", {
+      guards: input => [input.s.a.$plus(1).$gte(input.s.b).$else(() => none)], run: () => none,
+    }) } });
+    const rows = c.examples(definition, { one: { given: { kind: "go", s: { t: "coarse", a: 1, b: 1 } }, expect: none } });
+    const report = await c.check(c.spec("expression", { implementation: impl, examples: rows }));
+    const paths = report.borders.filter(border => border.rule.includes(">=")).map(border => border.path);
+    expect(paths.some(path => path.includes("@coarse"))).toBe(true);
+    expect(paths.some(path => path.includes("@fine"))).toBe(true);
+  });
+});

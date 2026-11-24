@@ -530,21 +530,54 @@ function betweenExpression(
   if (rule.operator === "==" || rule.operator === "!=" || typeof form.constant !== "number") {
     return [];
   }
-  const parts = form.parts.map(part => {
+  // Every trail through the cases of the sums each part passes, the parts under one sum read under the same case of it.
+  const options = form.parts.map(part => {
     const term = positionTerm(part.path, part.measure);
     const { frame, keys } = locate(term, frames);
-    const schema = schemaAt(frame.scope, keys);
+    return everyStepsOf(frame.scope, keys).map(steps => ({
+      part, term, frame, keys, steps,
+      cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at], discriminant: item.sum.discriminant, tag: item.tag })),
+    }));
+  });
+  const agree = (a: NonNullable<GuardBorder["cases"]>, b: NonNullable<GuardBorder["cases"]>) =>
+    a.every(one => b.every(other => one.at.join("\u0000") !== other.at.join("\u0000") || one.tag === other.tag));
+  const trails = options.reduce<(typeof options)[number][]>(
+    (all, choices) => all.flatMap(prefix => choices.filter(choice => prefix.every(held => agree(held.cases, choice.cases))).map(choice => [...prefix, choice])),
+    [[]] as never,
+  ) as unknown as (typeof options)[number][];
+  return (trails as unknown as (typeof options)[number][]).flatMap(chosen => betweenExpressionOn(rule, form, chosen as never, frames, at, reading));
+}
+
+function betweenExpressionOn(
+  rule: CompareRule & { readonly name?: string },
+  form: ReturnType<typeof differenceOf>,
+  chosen: readonly {
+    readonly part: ReturnType<typeof differenceOf>["parts"][number];
+    readonly term: Term<unknown>;
+    readonly frame: Frame;
+    readonly keys: readonly string[];
+    readonly steps: readonly string[];
+    readonly cases: NonNullable<GuardBorder["cases"]>;
+  }[],
+  frames: Frames,
+  at: PositionAt,
+  reading: Reading,
+): GuardBorder[] {
+  const parts = chosen.map(({ part, term, frame, keys, steps }) => {
+    const schema = schemaAlong(frame.scope, keys, steps) ?? schemaAt(frame.scope, keys);
     const standsIn = frame === frames.root && keys[0] === DEPS;
     return {
       term,
       coefficient: part.coefficient,
       measure: part.measure,
       standsIn,
-      path: measureLabel(standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys), part.measure),
-      segments: segmentsOf(frame, keys),
+      path: measureLabel(standsIn ? ["deps", ...keys.slice(1)].join(".") : pathOf(frame, keys, steps), part.measure),
+      segments: [...frame.segments, ...steps],
       kind: counts(part.measure) ? "integer" : schema?.kind,
+      onTrail: (scope: unknown) => onTrail(frame.scope, keys, steps, frame === frames.root ? scope : readOperand(positionTerm([positionOf(term).path[0]!], "value"), scope)),
     };
   });
+  const cases = chosen.flatMap(item => item.cases).filter((item, index, all) => all.findIndex(other => other.at.join("\u0000") === item.at.join("\u0000")) === index);
   const carrier = parts.every(part => part.kind === "integer")
     ? integerCarrier
     : parts.every(part => part.kind === "integer" || part.kind === "number")
@@ -553,7 +586,7 @@ function betweenExpression(
   if (carrier === undefined || parts.length === 0) {
     return [];
   }
-  const constant = form.constant;
+  const constant = form.constant as number;
   const difference: Rule = {
     ...(rule.name === undefined ? {} : { name: rule.name }),
     kind: "compare",
@@ -599,7 +632,9 @@ function betweenExpression(
     comparison: rule,
     border,
     ...(weighed === undefined ? {} : { form: weighed }),
+    cases,
     coordinateOf: reached => {
+      if (!parts.every(part => part.onTrail(reached.scope))) return undefined;
       let total = constant;
       for (const part of parts) {
         const value = valueOf(part, reached.scope);
