@@ -225,6 +225,21 @@ describe("a way through a value computed from a dependency", () => {
   });
 });
 
+describe("a way through a product of two integers", () => {
+  it("is not refuted by candidates the input refuses, which were never run", async () => {
+    const flagged = c.behavior("flagged", {
+      input: c.variants("kind", { request: c.object({ a: c.int(), b: c.int(), flags: c.array(c.boolean()).length(1).refine(f => f.$all(x => x.$eq(true))) }) }),
+      result: c.int(), effects,
+    });
+    const product = c.implement(flagged, { cases: { request: c.model("product", input => ({
+      result: c.bind(c.int(), c.arithmetic("multiply", input.a, input.b), total => c.choose(total.$eq(6), 1, 0)), effects: [],
+    })) } });
+    const rows = c.examples(flagged, { one: { given: { kind: "request", a: 1, b: 1, flags: [true] }, expect: { result: 0, effects: [] } } });
+    const rules = (await c.check(c.spec("flagged", { implementation: product, examples: rows }))).measures.rules;
+    expect(rules.status === "complete" ? rules.rules.map(rule => rule.status) : rules).not.toContain("no row owed");
+  });
+});
+
 describe("a border point on a computed product", () => {
   const small = c.object({ a: c.int().min(0).max(9), b: c.int().min(0).max(9) });
   const sized = c.behavior("sized", { input: c.variants("kind", { request: small }), result: c.int(), effects });

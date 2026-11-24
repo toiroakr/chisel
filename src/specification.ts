@@ -2180,16 +2180,21 @@ function factoredWitness(way: Way, implementation: Implementation<AnyBehavior>, 
     const rest = domainOf(object(others) as AnySchema, combinations);
     const placeholder = definition.input.placeholderFor(tag) as Record<string, unknown>;
     let tried = 0;
+    let refused = false;
     for (const [a, b] of pairs) {
       for (const other of rest.values) {
         if (++tried > combinations) return { exhaustive: false };
         const given = { ...placeholder, ...(other as object), [first.path[0]!]: a, [second.path[0]!]: b, [definition.input.discriminant]: tag };
-        if (!definition.input.parse(given).success) continue;
+        if (!definition.input.parse(given).success) {
+          // A pair a factor's own bounds refuse is no input. One they take, in an input refused for what else it holds, may be refused only by the placeholder: the search then proves nothing.
+          if (variant.shape[first.path[0]!]!.parse(a).success && variant.shape[second.path[0]!]!.parse(b).success) refused = true;
+          continue;
+        }
         const traced = traceSync(implementation, given);
         if ([...(traced.way === undefined ? [] : [traced.way]), ...traced.iterations].some(taken => taken.within === way.within && sameSteps(taken.steps, way.steps))) return { given, exhaustive: true };
       }
     }
-    return { exhaustive: rest.exhaustive && separate };
+    return { exhaustive: rest.exhaustive && separate && !refused };
   }
   return undefined;
 }
@@ -2225,7 +2230,7 @@ function besideOf(
   const parts = [...drawn.form!.parts].sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
   );
-  const rows = reachedIt.flatMap(item => {
+  const rows = reachedIt.filter(item => drawn.coordinateOf(item.comparison) !== undefined).flatMap(item => {
     const values = parts.map(part => part.valueOf(item.comparison.scope));
     return values.every(value => value !== undefined)
       ? [{ values, kept: holds(drawn.comparison, item.comparison.scope), given: item.given, deps: item.deps }]
@@ -2262,6 +2267,7 @@ function besideOf(
         comparisonsReached(implementation, given, deps).some(
           item =>
             item.rule === drawn.comparison &&
+            drawn.coordinateOf(item) !== undefined &&
             parts.every((part, index) => part.valueOf(item.scope) === parting.values[index]),
         );
       if (!reaches) {
