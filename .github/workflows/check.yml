@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  test:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     strategy:
@@ -25,3 +25,13 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm ci
       - run: npm run check
+
+  # The ruleset requires a status named `check`, which the matrix jobs above no longer report.
+  check:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULT: ${{ needs.test.result }}
+        run: test "$RESULT" = "success"
