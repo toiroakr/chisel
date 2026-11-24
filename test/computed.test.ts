@@ -240,6 +240,24 @@ describe("a border point on a computed product", () => {
   });
 });
 
+describe("a border point only a fake-assisted run reaches", () => {
+  const scaled = c.behavior("scaled", {
+    input: c.variants("kind", { request: c.object({ n: c.int().min(0) }) }), result: c.int(), effects,
+    dependencies: { factor: c.dependency(c.int(), c.int().min(7).max(7)) },
+  });
+  const product = c.implement(scaled, { cases: { request: c.model("product", (input, deps) => ({
+    result: c.bind(c.int(), c.arithmetic("multiply", input.n, c.call(deps.factor, input.n)), total => c.choose(total.$gte(50), 1, 0)), effects: [],
+  })) } });
+
+  it("is feasible when a run with the fakes reaches it, though the search of contract answers does not", async () => {
+    const fakes = [c.fake(scaled, "factor", [[0, 7], [7, 7]])];
+    const rows = c.examples(scaled, { zero: { given: { kind: "request", n: 0 }, expect: { result: 0, effects: [] } } });
+    const report = await c.check(c.spec("scaled", { implementation: product, examples: rows, fakes }));
+    const off = report.borders.find(border => border.rule.startsWith("guard multiply"))?.points.find(point => point.role === "OFF");
+    expect(off?.status).toBe("gap");
+  });
+});
+
 describe("a way that needs two dependencies asked at once", () => {
   const twice = c.behavior("twice", {
     input: c.variants("kind", { request: c.object({ left: c.string(), right: c.string() }) }), result: c.int(), effects,

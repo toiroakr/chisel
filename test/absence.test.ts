@@ -223,3 +223,25 @@ describe("a guard shared by input cases reading a field only some of them declar
     }) } })).toThrow("guard in shared reads $.n, which may be left out: write its absence as a case of a sum");
   });
 });
+
+describe("a guard shared by several input cases", () => {
+  const shared = c.variants("kind", { a: c.object({ n: c.int(), tag: c.literal("a") }), b: c.object({}) });
+  const sharedBehavior = c.behavior("shared", { input: shared, result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}) });
+  const reject = () => ({ result: { verdict: "none" as const }, effects: [] });
+  const implementation = (guards: (input: any) => readonly unknown[]) => () =>
+    c.implement(sharedBehavior, { cases: { $default: c.action("shared", { guards: guards as never, run: reject }) } as never });
+
+  it("reads a field only some cases declare under the case an earlier guard settled", () => {
+    expect(implementation(input => [input.kind.$eq("a").$else(reject), input.n.$gte(1).$else(reject)])).not.toThrow();
+  });
+
+  it("still refuses the read where no earlier guard settles the case", () => {
+    expect(implementation(input => [input.n.$gte(1).$else(reject)])).toThrow("which may be left out");
+  });
+
+  it("reads the discriminant under every case, though only some declare it themselves", () => {
+    const declaring = c.variants("kind", { a: c.object({ kind: c.literal("a") }), b: c.object({}) });
+    const definition = c.behavior("declaring", { input: declaring, result: c.variants("verdict", { none: c.object({}) }), effects: c.variants("kind", {}) });
+    expect(() => c.implement(definition, { cases: { $default: c.action("shared", { guards: ((input: any) => [input.kind.$eq("a").$else(reject)]) as never, run: reject }) } as never })).not.toThrow();
+  });
+});

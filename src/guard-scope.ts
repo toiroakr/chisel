@@ -335,7 +335,7 @@ export interface Threshold {
   readonly schema: AnySchema;
   readonly inherited: readonly Rule[];
   readonly rule: CompareRule;
-  // The case of each sum the path passes through, named from the frame it stands in (none for an element frame).
+  // The case of each sum the path passes through, named from the root of the facts (an element's name first for an element frame).
   readonly cases: readonly { readonly at: readonly string[]; readonly sum: AnyVariantsSchema; readonly tag: string }[];
 }
 
@@ -367,7 +367,7 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
         schema: schemaAlong(frame.scope, keys, steps) ?? schema,
         inherited: inheritedAt(frame.scope, keys, steps),
         rule,
-        cases: frame === frames.root ? casesOnTrail(frame.scope, keys, steps) : [],
+        cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ ...item, at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at] })),
       }));
 }
 

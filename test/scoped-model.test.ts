@@ -1,8 +1,9 @@
 import { Decimal } from "decimal.js";
 import { expect, it } from "vitest";
 import * as c from "../src/index.js";
-import { interpret, localsOf } from "../src/model.js";
+import { interpret, iterationEntries, localsOf } from "../src/model.js";
 import { eachWayOf } from "../src/ways.js";
+import { choiceFacts } from "../src/absence.js";
 
 const emptyEffects = c.variants("kind", {});
 const request = c.variants("kind", { request: c.object({}) });
@@ -311,4 +312,56 @@ it("holds a dependency's answer bound inside an iteration to the schema it is bo
   const report = await c.check(c.spec("answered body", { implementation: impl, examples: rows }));
   const rules = report.measures.rules;
   expect(rules.status === "complete" ? rules.rules.filter(rule => rule.way.startsWith("each of")).map(rule => rule.status) : rules).toStrictEqual(["gap", "no row owed"]);
+});
+
+it("lists the body ways of an iteration once, however many outcomes of the choice reach it", () => {
+  const definition = c.behavior("reached twice", {
+    input: c.variants("kind", { go: c.object({ a: c.boolean(), b: c.boolean(), xs: c.array(c.int()) }) }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.choose(input.a.$eq(true).$or(input.b.$eq(true)), c.map(c.int(), c.int(), input.xs, x => c.choose(x.$gte(5), 1, 0)), []), effects: [],
+  })) } });
+  expect([...eachWayOf(impl.cases.go as never)].filter(way => way.within !== undefined)).toHaveLength(2);
+});
+
+it("keeps the facts a choose is reached under when one expression is read twice under the same choice", () => {
+  let written: unknown;
+  c.model("shared", (input: any) => {
+    const inner = c.choose(input.m.$eq(2), 1, 0);
+    const outer = c.choose(input.n.$eq(1), inner, 0);
+    written = { p: outer, q: outer };
+    return { result: 0 as never, effects: [] };
+  });
+  expect([...choiceFacts(written).values()].map(facts => facts.length).sort()).toStrictEqual([0, 1]);
+});
+
+it("reads a decimal threshold of an iteration's element under the cases the enclosing choice leaves possible", () => {
+  const payload = c.variants("tier", { coarse: c.object({ amount: c.decimal(1) }), fine: c.object({ amount: c.decimal(2) }) });
+  const element = c.object({ payload });
+  const definition = c.behavior("tiered items", {
+    input: c.variants("kind", { go: c.object({ xs: c.array(element) }) }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const build = (tier: "coarse" | "fine") => () => c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(element, c.int(), input.xs, x => c.choose(x.payload.tier.$eq(tier), c.choose(x.payload.amount.$eq(new Decimal("0.01")), 1, 0), 0)), effects: [],
+  })) } });
+  expect(build("fine")).not.toThrow();
+  expect(build("coarse")).toThrow("which no decimal(1) holds");
+});
+
+it("lists iteration discovery without expanding the choices that hold no iteration", () => {
+  const flags = Array.from({ length: 28 }, (_, index) => `f${index}`);
+  const element = c.object(Object.fromEntries(flags.flatMap(name => [[`${name}a`, c.boolean()], [`${name}b`, c.boolean()]])));
+  const definition = c.behavior("wide condition", {
+    input: c.variants("kind", { go: c.object({ xs: c.array(element) }) }), result: c.array(c.int()), effects: emptyEffects,
+  });
+  const impl = c.implement(definition, { cases: { go: c.model("go", input => ({
+    result: c.map(element, c.int(), input.xs, x => {
+      const row = x as unknown as Record<string, c.TermOf<boolean>>;
+      const condition = flags.map(name => row[`${name}a`]!.$eq(true).$or(row[`${name}b`]!.$eq(true))).reduce((all, one) => all.$and(one));
+      return c.choose(condition, 1, 0);
+    }), effects: [],
+  })) } });
+  const started = Date.now();
+  expect([...iterationEntries((impl.cases.go as never as { expression: unknown }).expression)]).toHaveLength(1);
+  expect(Date.now() - started).toBeLessThan(2000);
 });

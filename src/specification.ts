@@ -2008,18 +2008,19 @@ function askingTogether(input: unknown, calls: readonly { readonly dependency: s
   let level: readonly { readonly value: unknown; readonly after: number }[] = [{ value: input, after: -1 }];
   for (let size = 1; size <= calls.length && found.length < ASKED_TOGETHER_LIMIT; size++) {
     const next: { value: unknown; after: number }[] = [];
-    for (const { value, after } of level) {
+    grow: for (const { value, after } of level) {
       for (let index = after + 1; index < calls.length; index++) {
         for (const asked of askedBy(calls[index]!.dependency)) {
+          if (next.length >= ASKED_TOGETHER_LIMIT) break grow;
           const written = writtenArgument(value, calls[index]!.input, asked);
           if (written !== undefined) next.push({ value: written, after: index });
         }
       }
     }
-    if (size >= 2) found.push(...next.map(item => item.value));
-    level = next.slice(0, ASKED_TOGETHER_LIMIT);
+    if (size >= 2) for (const item of next) if (found.length < ASKED_TOGETHER_LIMIT) found.push(item.value);
+    level = next;
   }
-  return found.slice(0, ASKED_TOGETHER_LIMIT);
+  return found;
 }
 
 // A way through the body of an iteration over a field is taken only by an input
@@ -2329,7 +2330,7 @@ function pointFeasibility(
   const read = localRoots(drawn.comparison).filter(name => opaque.has(name));
   if (read.length === 0) return reachOf(drawn, point, combinations, wayLimit);
   const searched = searchedWays(implementation, origin.tag, origin.decision, combinations, fakes);
-  if (searched.reached.some(item => item.rule === drawn.comparison && point.contains(drawn.coordinateOf(item)))) return [{ kind: "feasible" }];
+  if ([...searched.reached, ...searched.witnessed.map(item => item.comparison)].some(item => item.rule === drawn.comparison && point.contains(drawn.coordinateOf(item)))) return [{ kind: "feasible" }];
   if (searched.exhaustive) return [{ kind: "infeasible", reason: "入力と依存の答えの全値を試し、この点に届く値がない" }];
   return [{ kind: "undecided", reason: `${[...new Set(read.map(localLabel))].join("・")}はモデルが計算する値で、試した入力ではこの点に届かない` }];
 }

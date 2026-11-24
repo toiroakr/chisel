@@ -626,7 +626,8 @@ function checkGuards(
       throw new SpecificationError(`guard in ${decision.id} ${offGrid}`);
     }
     const declared = new Set(Object.values(definition.input.variants).flatMap(variant => Object.keys((variant as { readonly shape: object }).shape)));
-    const roots = { scope: guardScope(definition, tag), declared };
+    declared.delete(definition.input.discriminant);
+    const roots = { scope: guardScope(definition, tag), declared, input: { sum: definition.input, tag } };
     if (decision.expression !== undefined) {
       const found = leftOutReadInModel(decision.runs ?? decision.expression, roots);
       if (found !== undefined) throw new SpecificationError(`model ${decision.id} ${found}`);

@@ -20,6 +20,8 @@ export interface Roots {
   readonly labels?: ElementLabels;
   // Names some case of the input declares, so one the checked case leaves out is a field it lacks rather than a name the scope does not list.
   readonly declared?: ReadonlySet<string>;
+  // The input sum and the case checked: once the facts settle another case, nothing is read under this one.
+  readonly input?: { readonly sum: { readonly discriminant: string; readonly variants: VariantTable }; readonly tag: string };
 }
 
 // What a rule settled with the outcome tells of the comparisons in it.
@@ -108,6 +110,7 @@ function render(path: readonly string[], label: string, roots: Roots): string {
 // How many keys of the path lead to where it may be left out, or undefined
 // where the value it reads is always there.
 function leftOutAt(path: readonly string[], roots: Roots, facts: readonly Fact[]): number | undefined {
+  if (roots.input !== undefined && !casesLeft(roots.input.sum, [], facts).includes(roots.input.tag)) return undefined;
   const local = path.length > 0 ? roots.locals?.get(path[0]!) : undefined;
   // Every case a sum may still hold is walked, so a field one of them leaves
   // out is found whichever case is declared first.
@@ -146,7 +149,8 @@ export function choiceFacts(template: unknown): ReadonlyMap<unknown, readonly Fa
     const node = nodeOf(value);
     if (node?.kind === "choose") {
       const known = found.get(node);
-      found.set(node, found.has(node) && (known === undefined || known.length !== facts.length || known.some((fact, index) => fact !== facts[index])) ? undefined : facts);
+      const same = known !== undefined && known.length === facts.length && known.every((fact, index) => fact.rule === facts[index]!.rule && fact.outcome === facts[index]!.outcome);
+      found.set(node, found.has(node) && !same ? undefined : facts);
       visit(node.yes, [...facts, ...factsOf(node.condition, true)]);
       visit(node.no, [...facts, ...factsOf(node.condition, false)]);
       return;

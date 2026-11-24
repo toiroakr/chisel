@@ -648,6 +648,8 @@ function deepEqualValue(left: unknown, right: unknown): boolean {
 export function* iterationEntries(template: unknown, steps: readonly Step[] = []): Generator<{ readonly node: Extract<Node, { kind: "map" | "fold" }>; readonly steps: readonly Step[] }> {
   const node = nodeOf(template);
   if (node?.kind === "choose") {
+    // A choice whose branches hold no iteration is not expanded: its outcomes may be far more than any iteration needs.
+    if (iterationsOf(node.yes).length === 0 && iterationsOf(node.no).length === 0) return;
     for (const outcome of outcomesOf(node.condition)) yield* iterationEntries(outcome.result ? node.yes : node.no, [...steps, ...outcome.steps]);
     return;
   }

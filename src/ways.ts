@@ -41,7 +41,8 @@ export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): 
   if (decision.expression !== undefined) {
     for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
     const entries = [...iterationEntries(decision.expression)];
-    for (const { node: iteration, steps: entered } of entries) {
+    for (const [index, { node: iteration, steps: entered }] of entries.entries()) {
+      if (entries.findIndex(entry => entry.node === iteration) !== index) continue;
       // A body with no distinction is one path with no steps and owes nothing of its own; read lazily, since a body may have far more paths than a caller will list.
       const paths = modelPaths(iteration.body);
       const first = paths.next();
