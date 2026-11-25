@@ -353,7 +353,12 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
   if (rule.kind !== "compare" || normalized === undefined || normalized.measure !== "value") {
     return [];
   }
-  const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
+  return placesOf(rule, (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>, frames);
+}
+
+// The place a rule reads through `term`, under each trail of cases that
+// declares it, as a comparison's and a relation's thresholds name it.
+function placesOf<R extends CompareRule | RelationRule>(rule: R, term: Term<unknown>, frames: Frames): (Omit<Threshold, "rule"> & { readonly rule: R })[] {
   const { frame, keys } = locate(term, frames);
   const schema = schemaAt(frame.scope, keys);
   return schema === undefined
@@ -384,21 +389,7 @@ export function relationThresholdsIn(rule: Rule, frames: Frames): RelationThresh
   if (rule.kind !== "relation" || isTerm(rule.other)) return [];
   const position = positionData(rule.subject as Term<unknown>);
   if (position === undefined || position.measure !== "value") return [];
-  const term = rule.subject as Term<unknown>;
-  const { frame, keys } = locate(term, frames);
-  const schema = schemaAt(frame.scope, keys);
-  return schema === undefined
-    ? []
-    : everyStepsOf(frame.scope, keys).map(steps => ({
-        path: pathOf(frame, keys, steps),
-        label: keys[0]?.startsWith("#local:") ? [localLabel(keys[0]), ...keys.slice(1)].join(".") : `${frame.label}${keys.map(key => `.${key}`).join("")}`,
-        described: describeRule(rule, frames.root.label, labelsOf(frames)),
-        segments: [...frame.segments, ...steps],
-        schema: schemaAlong(frame.scope, keys, steps) ?? schema,
-        inherited: inheritedAt(frame.scope, keys, steps),
-        rule,
-        cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ ...item, at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at] })),
-      }));
+  return placesOf(rule, rule.subject as Term<unknown>, frames);
 }
 
 export function inheritedAt(scope: AnySchema, keys: readonly string[], steps?: readonly string[]): readonly Rule[] {

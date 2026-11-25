@@ -436,7 +436,7 @@ class Compiler {
 
   condition(value: unknown, names: Names, self: string): string {
     if (value !== null && typeof value === "object" && "kind" in value &&
-      ["compare", "all", "any", "and", "or", "not"].includes(String(value.kind))) return this.rule(value as Rule, names, self);
+      ["compare", "relation", "all", "any", "and", "or", "not"].includes(String(value.kind))) return this.rule(value as Rule, names, self);
     return this.value(value, new Map([...names, ["", self]]));
   }
 

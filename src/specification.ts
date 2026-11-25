@@ -571,6 +571,8 @@ export async function check(
           const open = openDecisionIn(implementation, error);
           if (open !== undefined) {
             incompleteness.push({ kind: "row not run", subject: row.name, reason: `判断が未定（${open}）` });
+          } else if (isOutOfRoom(error)) {
+            incompleteness.push({ kind: "out of room", subject: row.name, reason: (error as Error).message });
           } else {
             const message = error instanceof Error ? error.message : String(error);
             failures.push({ name: row.name, message });

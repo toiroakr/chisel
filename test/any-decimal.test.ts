@@ -16,6 +16,8 @@ describe("a decimal of any scale (ADR-0128)", () => {
   it("decodes one from its JSON string and writes it back", () => {
     const decoded = c.decode(c.decimal(), "3.14159265358979323846264338327950288");
     expect(decoded.success && decoded.value.toString()).toBe("3.14159265358979323846264338327950288");
+    const encoded = decoded.success ? c.encode(c.decimal(), decoded.value) : undefined;
+    expect(encoded?.success && encoded.value).toBe("3.14159265358979323846264338327950288");
   });
 
   it("draws an ON point on a bound but no OFF point, as no value is next to another", async () => {
@@ -95,6 +97,14 @@ describe("a run short of room", () => {
 
   it("fails as OutOfRoom, the platform failing", async () => {
     await expect(c.perform(足す, { kind: "request", v: new Decimal("1e-20000") })).rejects.toThrow(c.OutOfRoom);
+  });
+
+  it("is no failure of the model for a row whose answer is still owed either", async () => {
+    const report = await c.check(c.spec("桁", {
+      examples: c.examples(桁, { 大きい: { given: { kind: "request", v: new Decimal("1e-20000") }, expect: c.todo("まだ決めていない") } }),
+      implementation: 足す,
+    }));
+    expect({ failures: report.failures, incompleteness: report.incompleteness.map(item => item.kind) }).toStrictEqual({ failures: [], incompleteness: ["out of room"] });
   });
 
   it("is no failure of the model in check, and the row is said not to have come back", async () => {
