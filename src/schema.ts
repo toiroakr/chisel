@@ -265,18 +265,25 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         }
         // A decimal of any scale steps exactly, one digit finer than any value the
         // invariants write, so a step past one bound stays short of the next.
-        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => decimalStep(Math.max((value as Decimal).decimalPlaces(), finest + 1))(value, direction) : decimalStep((at as DecimalSchema).scale!))
+        // The field's own invariants count too, so a step an enclosing rule takes
+        // stays short of a finer bound the field writes on itself.
+        const finer = at?.kind === "decimal" ? Math.max(finest, ...placesIn(at.invariants)) : finest;
+        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => decimalStep(Math.max((value as Decimal).decimalPlaces(), finer + 1))(value, direction) : decimalStep((at as DecimalSchema).scale!))
           : at?.kind === "int64" ? (value: unknown, direction: 1 | -1) => (value as bigint) + BigInt(direction)
           : at?.kind === "rational" ? (value: unknown, direction: 1 | -1) => (value as Rational).plus(new Rational(BigInt(direction))) : undefined;
       };
-      const finest = Math.max(0, ...constantsOf(invariants).filter(isDecimal).map(value => value.decimalPlaces()));
+      const placesIn = (rules: readonly Rule[]) => constantsOf(rules).filter(isDecimal).map(value => value.decimalPlaces());
+      const finest = Math.max(0, ...placesIn(invariants));
       // Stepping past one bound may break another written before it, so the
-      // rules are read again until a pass changes nothing.
+      // rules are read again until they hold, a pass changes nothing, or a value
+      // comes round again (rules no value keeps).
       const rules = invariants.flatMap(conjuncts);
       let value = core.placeholder(name);
-      for (let pass = 0; pass < 4; pass++) {
+      const seen: unknown[] = [value];
+      for (let pass = 0; pass <= 2 * rules.length + 2; pass++) {
         const next = rules.reduce<unknown>((current, rule) => satisfy(rule, current, stepAt), value);
-        if (rules.every(rule => holds(rule, next)) || deepEqual(next, value)) return next;
+        if (rules.every(rule => holds(rule, next)) || seen.some(earlier => deepEqual(earlier, next))) return next;
+        seen.push(next);
         value = next;
       }
       return value;

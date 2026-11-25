@@ -160,8 +160,13 @@ describe("two decimals ordered against each other where one has no scale", () =>
 
 describe("the placeholder of a decimal of any scale", () => {
   it("stands inside every bound, however close they are", () => {
-    for (const schema of [c.decimal().gt(new Decimal(0)).lt(new Decimal("0.1")), c.decimal().lt(new Decimal("0.1")).gt(new Decimal(0))]) {
+    for (const schema of [c.decimal().gt(new Decimal(0)).lt(new Decimal("0.1")), c.decimal().lt(new Decimal("0.1")).gt(new Decimal(0)), c.decimal().gt(new Decimal("0.5")).lt(new Decimal("0.5001"))]) {
       expect(schema.parse(schema.placeholder()).success).toBe(true);
     }
+  });
+
+  it("stays short of a finer bound the field writes on itself under a rule of the enclosing object", () => {
+    const schema = c.object({ x: c.decimal().lt(new Decimal("0.1001")) }).refine(v => v.x.$gt(new Decimal("0.1")));
+    expect(schema.parse(schema.placeholder()).success).toBe(true);
   });
 });

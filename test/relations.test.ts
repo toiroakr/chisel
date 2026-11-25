@@ -170,5 +170,8 @@ describe("$includes reads numbers as $eq does", () => {
   it("takes 0 and -0 as one element", () => {
     const schema = c.object({ xs: c.array(c.number()) }).refine(v => v.xs.$includes(-0));
     expect(schema.parse({ xs: [0] }).success).toBe(true);
+    expect(schema.parse({ xs: [1] }).success).toBe(false);
+    const positive = c.object({ xs: c.array(c.number()) }).refine(v => v.xs.$includes(0));
+    expect(positive.parse({ xs: [-0] }).success).toBe(true);
   });
 });

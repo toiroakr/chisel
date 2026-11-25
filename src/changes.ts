@@ -206,7 +206,11 @@ function expressionChange(decision: string, expression: unknown, limit: number):
   const ways = first.total;
   if (ways <= bound) return undefined;
   const own = (id: number) => first.count[id]! + first.within[id]!;
+  // Each node's ancestors, worked out once.
+  const chains = new Map<number, number[]>();
   const ancestors = (id: number): number[] => {
+    const known = chains.get(id);
+    if (known !== undefined) return known;
     const chain: number[] = [];
     for (let at: number | undefined = id; at !== undefined;) {
       const node: TreeNode = nodes[at]!;
@@ -214,9 +218,12 @@ function expressionChange(decision: string, expression: unknown, limit: number):
       if (up !== undefined) chain.push(up);
       at = up;
     }
+    chains.set(id, chain);
     return chain;
   };
   const cut = new Set<number>();
+  // The ancestors of every node cut so far, none of which may be cut too.
+  const holding = new Set<number>();
   // Each round cuts one more node, none inside another, while the rest shrinks.
   for (let round = 0; round < nodes.length; round++) {
     const now = counted(nodes, cut);
@@ -226,7 +233,7 @@ function expressionChange(decision: string, expression: unknown, limit: number):
     let best: { id: number; left: bigint; size: number } | undefined;
     for (let id = 1; id < nodes.length; id++) {
       const node = nodes[id]!;
-      if (isTerm(node.template) || blocked(id) || [...cut].some(other => ancestors(other).includes(id))) continue;
+      if (isTerm(node.template) || blocked(id) || holding.has(id)) continue;
       // A part declared as a behavior is measured under the same limit.
       if (own(id) <= 1n || own(id) > bound) continue;
       // The root's count with this node taken as one way, along the path up to it.
@@ -251,6 +258,7 @@ function expressionChange(decision: string, expression: unknown, limit: number):
     const chosen = alone?.id ?? (best !== undefined && best.left < now.total ? best.id : undefined);
     if (chosen === undefined) break;
     cut.add(chosen);
+    for (const up of ancestors(chosen)) holding.add(up);
   }
   const remaining = counted(nodes, cut).total;
   const factors = factorsOf(expression).filter(item => item.ways > 1n);
