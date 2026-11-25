@@ -109,3 +109,41 @@ describe("a run short of room", () => {
     });
   });
 });
+
+describe("two decimals ordered against each other where one has no scale", () => {
+  const 比べる = c.behavior("比べる", {
+    input: c.variants("kind", { request: c.object({ price: c.decimal(), limit: c.decimal(2) }) }),
+    result: c.variants("結果", { 内: c.object({}), 外: c.object({}) }),
+    effects: emptyEffects,
+  });
+  const 上限まで = c.implement(比べる, {
+    cases: {
+      request: c.action("上限まで", {
+        guards: v => [v.price.$lte(v.limit).$else(() => ({ result: { 結果: "外" as const }, effects: [] }))],
+        run: () => ({ result: { 結果: "内" as const }, effects: [] }),
+      }),
+    },
+  });
+  const row = (price: string, limit: string, answer: "内" | "外") => ({
+    given: { kind: "request" as const, price: new Decimal(price), limit: new Decimal(limit) },
+    expect: { result: { 結果: answer }, effects: [] },
+  });
+
+  it("reads the comparison on their exact difference, with no OFF point", async () => {
+    const report = await c.check(c.spec("比べる", { examples: c.examples(比べる, { 等しい: row("1.05", "1.05", "内") }), implementation: 上限まで }));
+
+    expect(report.measures.comparisons).toStrictEqual({ status: "complete" });
+    expect(report.borders.map(border => [border.path, border.points.map(point => `${point.role} ${point.relation} ${point.status}`)])).toStrictEqual([
+      ["@request.price − @request.limit", ["ON = 0 met", "OFF neighbour not named not named", "IN < 0 gap", "OUT > 0 gap"]],
+    ]);
+  });
+
+  it("composes a row at each point by writing one side as the other plus the difference", () => {
+    const { rows } = c.generate(c.examples(比べる, { 等しい: row("1.05", "1.05", "内") }), 上限まで);
+
+    expect(rows.filter(item => item.name.includes("−")).map(item => [item.name, String((item.given as { price: Decimal }).price), String((item.given as { limit: Decimal }).limit)])).toStrictEqual([
+      ["比べる: @request.price − @request.limit IN (< 0)", "0.05", "1.05"],
+      ["比べる: @request.price − @request.limit OUT (> 0)", "2.05", "1.05"],
+    ]);
+  });
+});

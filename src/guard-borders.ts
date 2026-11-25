@@ -3,7 +3,8 @@ import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
-import { bordersOf, decimalUnitsCarrier, integerCarrier, nanosecondCarrier, normalize, numberCarrier } from "./border.js";
+import { bordersOf, decimalCarrier, decimalUnitsCarrier, integerCarrier, nanosecondCarrier, normalize, numberCarrier } from "./border.js";
+import { decimalOf, fractionOf } from "./exact.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf, writeExactly } from "./partition.js";
@@ -752,8 +753,12 @@ function betweenOn(
   if (carrier === undefined || rule.operator === "==" || rule.operator === "!=") {
     return [];
   }
+  // Two decimals one of which has no scale differ by an exact decimal, on no
+  // grid of units (ADR-0128): the border is drawn on that difference itself.
+  const exact = first.kind === "decimal" && second.kind === "decimal" && (first.scale === undefined || second.scale === undefined);
   const moment =
-    first.kind === "decimal" || second.kind === "decimal"
+    exact ? undefined
+    : first.kind === "decimal" || second.kind === "decimal"
       ? decimalMoment(first, second)
       : first.kind === second.kind
         ? MOMENTS[first.kind ?? ""]
@@ -763,7 +768,7 @@ function betweenOn(
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),
-    right: carrier === nanosecondCarrier || first.kind === "decimal" || second.kind === "decimal" ? 0n : 0,
+    right: exact ? decimalOf(fractionOf(0)) : carrier === nanosecondCarrier || first.kind === "decimal" || second.kind === "decimal" ? 0n : 0,
   };
   const borders = bordersOf([difference], () => carrier, {
     source: reading.source,
@@ -799,6 +804,10 @@ function betweenOn(
     cases: [...options[0].cases, ...options[1].cases.filter(other => !options[0].cases.some(one => one.at.join("\u0000") === other.at.join("\u0000")))],
     coordinateOf: reached => {
       if (!first.onTrail(reached.scope) || !second.onTrail(reached.scope)) return undefined;
+      if (exact) {
+        const [a, b] = [readOperand(first.term, reached.scope), readOperand(second.term, reached.scope)];
+        return a === undefined || b === undefined ? undefined : decimalOf(fractionOf(a as Decimal).minus(fractionOf(b as Decimal)));
+      }
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
@@ -807,8 +816,10 @@ function betweenOn(
       const otherSide = side === 1;
       // Move the side that can take every value of the difference: the finer of
       // a decimal and an integer, and never a stand-in, which a row writes as given.
-      const preferred = first.standsIn || (!second.standsIn && (second.scale ?? 0) > (first.scale ?? 0));
-      const swappable = !first.standsIn && !second.standsIn && first.scale === second.scale;
+      // A decimal of any scale is the finest of all: it takes every difference.
+      const fineness = (side: Side) => (side.kind === "decimal" && side.scale === undefined ? Infinity : side.scale ?? 0);
+      const preferred = first.standsIn || (!second.standsIn && fineness(second) > fineness(first));
+      const swappable = !first.standsIn && !second.standsIn && fineness(first) === fineness(second);
       const moveSecond = otherSide === true && swappable ? !preferred : preferred;
       const [moving, fixed, sign] = moveSecond ? [second, first, -1] : [first, second, 1];
       const moved = moving.standsIn ? undefined : at(moving.segments);
@@ -817,6 +828,10 @@ function betweenOn(
         : at(fixed.segments)?.valuesIn(given)[0];
       if (moved === undefined || other === undefined) {
         return undefined;
+      }
+      if (exact) {
+        const shifted = fractionOf(other as Decimal).plus(fractionOf(coordinate as Decimal).times(fractionOf(sign)));
+        return moved.write(given, moving.measure, decimalOf(shifted));
       }
       if (moment?.write !== undefined) {
         const units = (moment.read(other, fixed) as bigint) + BigInt(sign) * (coordinate as bigint);
@@ -931,7 +946,9 @@ function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: sec
   // Two decimals count their difference in units of the finer scale; a decimal
   // is not ordered against any other kind.
   if (first === "decimal" && second === "decimal") {
-    return firstScale === undefined || secondScale === undefined ? undefined : decimalUnitsCarrier(Math.max(firstScale, secondScale));
+    // A decimal of any scale has no unit to count the difference in: it is
+    // the exact decimal difference, with no value next to another.
+    return firstScale === undefined || secondScale === undefined ? decimalCarrier(undefined) : decimalUnitsCarrier(Math.max(firstScale, secondScale));
   }
   if (first === "decimal" || second === "decimal") {
     return undefined;
