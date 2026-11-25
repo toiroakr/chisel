@@ -352,6 +352,15 @@ describe("chisel check and generate with the limit of the ways listed", () => {
   });
 });
 
+describe("chisel generate with rows suggested from a called behavior", () => {
+  it("counts the suggested rows apart from the rows owed", async () => {
+    const result = await run(["generate", fixture("test/fixtures/suggested.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/^\/\/ 義務のある行 \d+件、提案する行 1件（義務はない）$/m);
+    expect(stdoutOf(result)).toContain("在庫()の記録行「商品-Bは0個」の入力を尋ねる");
+  });
+});
+
 describe("chisel check with an external implementation", () => {
   it("prints each row it could not run and why", async () => {
     const result = await run(["check", fixture("test/fixtures/external.ts")]);

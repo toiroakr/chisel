@@ -869,7 +869,9 @@ function formatGeneratedExamples(
     return `${binding}: 未網羅の入力variantはありません`;
   }
 
-  const rows = generated.map(row => `${formatGeneratedExample(row)},\n`).join("");
+  const suggested = generated.filter(row => row.suggested === true).length;
+  const header = suggested === 0 ? "" : `// 義務のある行 ${generated.length - suggested}件、提案する行 ${suggested}件（義務はない）\n`;
+  const rows = header + generated.map(row => `${formatGeneratedExample(row)},\n`).join("");
   if (!target.synthesized) {
     return target.specification.implementation === undefined
       ? `${rows.trimEnd()}\n\n${formatImplementationScaffold(target)}`

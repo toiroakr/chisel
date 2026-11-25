@@ -326,6 +326,9 @@ export interface GeneratedExample {
   readonly given: unknown;
   readonly with?: unknown;
   readonly reason: string;
+  // A row that owes nothing: an input a called behavior's recorded rows were
+  // written with, tried in its caller (Souther 0.5.0's suggested rows).
+  readonly suggested?: true;
 }
 
 export type ConformanceSubject<B extends AnyBehavior> = (
@@ -1533,8 +1536,50 @@ export function generate(
     const walked = walkRowsFor(definition, implementation, answeredRows, row => tracedWith(withFrom(row.given).with), rows, generated);
     for (const { origin, ...row } of walked.rows) offer({ ...row, ...withFrom(origin) });
     notComposed.push(...walked.notComposed);
+    for (const { origin, ...row } of suggestedRowsFor(definition, implementation, rows, [...rows.map(row => row.given), ...generated.map(row => row.given)])) {
+      generated.push({ ...row, ...withFrom(origin) });
+    }
   }
   return { rows: generated, notComposed };
+}
+
+// The inputs a called behavior's recorded rows were written with, asked in
+// its caller: each call of a dependency declared with its examples
+// (`dependency(checkStockExamples)`) has the argument a recorded row asks
+// written into a row of the case that makes the call. Such a row owes nothing
+// and is marked so; it is offered where no row asks it yet.
+function suggestedRowsFor(
+  definition: AnyBehavior,
+  implementation: AnyImplementation,
+  rows: readonly Example<AnyBehavior>[],
+  taken: readonly unknown[],
+): readonly (GeneratedExample & { readonly origin: unknown })[] {
+  const suggested: (GeneratedExample & { readonly origin: unknown })[] = [];
+  const seen = [...taken];
+  for (const [decision, tags] of decisionsWithCases(implementation)) {
+    const expression = decision.kind === "rules" ? decision.expression : undefined;
+    if (expression === undefined) continue;
+    const origins = rows.filter(row => tags.includes(tagOf(definition.input, row.given) ?? ""));
+    for (const call of callsIn(expression)) {
+      const declared = definition.dependencies[call.dependency] as { readonly injected?: { readonly rows: readonly { readonly name: string; readonly given: unknown }[] } } | undefined;
+      for (const recorded of declared?.injected?.rows ?? []) {
+        for (const origin of origins) {
+          const given = writtenArgument(origin.given, call.input, recorded.given);
+          if (given === undefined || !definition.input.parse(given).success || seen.some(other => deepEqual(other, given))) continue;
+          seen.push(given);
+          suggested.push({
+            name: `${definition.name}: ${call.dependency}()の記録行「${recorded.name}」の入力を尋ねる`,
+            given,
+            reason: "提案する入力（満たしていない義務はない）",
+            suggested: true,
+            origin: origin.given,
+          });
+          break;
+        }
+      }
+    }
+  }
+  return suggested;
 }
 
 // A row of two or more elements for each fold whose rewrites (ADR-0126) no
