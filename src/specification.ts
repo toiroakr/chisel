@@ -23,6 +23,8 @@ import type { ArmTaken, ComparisonReached, RulesDecision, WayTaken } from "./beh
 import type { Step, Way } from "./ways.js";
 import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
 import { changeOf } from "./changes.js";
+import { foldsOf, runWalk, tells, tookSecond, walks as walkRewrites, walksOf } from "./rewrites.js";
+import type { WalkCoverage, WalkRow } from "./rewrites.js";
 import type { ModelChange } from "./changes.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
@@ -184,6 +186,11 @@ export interface AdequacyReport {
   // with what to change in the model so that it is measured (Souther's
   // `toBeChangedFirst`).
   readonly toBeChangedFirst: readonly ModelChange[];
+  // Each fold a model writes put to Souther's two rewrites (ADR-0126): the
+  // walk stopping after its first step, and every step handed the seed. A
+  // rewrite no answered row tells apart is `not told`, which makes the report
+  // not adequate.
+  readonly walks: readonly WalkCoverage[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -403,6 +410,7 @@ export async function check(
   );
   const definition = specification.examples.behavior;
   const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  const walkRows: WalkRow[] = [];
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
   const coveredEffects = new Set<string>();
@@ -643,6 +651,7 @@ export async function check(
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
+          walkRows.push({ name: row.name, given: row.given, deps: standIns(row), expected: row.expect });
           const disregard = await disregardBroken(
             implementation,
             row,
@@ -859,6 +868,7 @@ export async function check(
 
   const plans = plansOf(specification.implementation, combinations, wayLimit);
   const toBeChangedFirst = changesFrom(specification.implementation, plans, wayLimit);
+  const walks = walksOf(specification.implementation, walkRows, (expected, actual) => answers(definition, expected as Expected<AnyBehavior>, actual), given => tagOf(definition.input, given));
   const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans, usableFakes);
   const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans, usableFakes);
   const lines = [
@@ -881,11 +891,12 @@ export async function check(
       : { status: "partial", notRead: unreadComparisons };
   const constructions: ProofReport = specification.implementation === undefined ? { status: "undetermined", decisions: [] } : verify(specification.implementation, { candidates: combinations, ways: wayLimit });
   const verdict: Verdict =
-    !adequate || armGap || constructions.status === "refuted"
+    !adequate || armGap || constructions.status === "refuted" || walks.some(walk => walk.status === "not told")
       ? "not_satisfied"
       : constructions.status !== "verified" || comparisons.status === "partial" ||
           pairAnalysis.measure.status === "partial" ||
           armUndecided ||
+          walks.some(walk => walk.status === "undecided") ||
           externals.length > 0 ||
           incompleteness.some(item => item.kind === "disregards not checked")
         ? "undetermined"
@@ -915,6 +926,7 @@ export async function check(
     fakeIssues: fakeIssues.map(item => item.issue),
     fakeWarnings: fakeWarningsOf(definition.dependencies, specification.fakes),
     toBeChangedFirst,
+    walks,
     evidence: {
       input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,
@@ -1493,7 +1505,90 @@ export function generate(
       reason: "組み合わせの期待結果を人間が決める必要があります", ...withFrom(given) });
   }
   notComposed.push(...pairs.measure.notRead, ...pairs.measure.obligations.filter(pair => pair.status === "undecided").map(pair => `${pair.positions.join(" × ")}: ${pair.classes.join(" × ")} (${pair.reason})`));
+  if (implementation !== undefined) {
+    const walked = walkRowsFor(definition, implementation, answeredRows, row => tracedWith(withFrom(row.given).with), rows, generated);
+    for (const { origin, ...row } of walked.rows) offer({ ...row, ...withFrom(origin) });
+    notComposed.push(...walked.notComposed);
+  }
   return { rows: generated, notComposed };
+}
+
+// A row of two or more elements for each fold whose rewrites (ADR-0126) no
+// answered row tells apart: the list a fold walks, where it is an input field,
+// grown by an element the rows hold, put last and then first, and the row kept
+// that tells the most rewrites apart from what the model answers on it.
+function walkRowsFor(
+  definition: AnyBehavior,
+  implementation: AnyImplementation,
+  answeredRows: readonly Example<AnyBehavior>[],
+  depsOf: (row: Example<AnyBehavior>) => unknown,
+  rows: readonly Example<AnyBehavior>[],
+  generated: readonly GeneratedExample[],
+): { readonly rows: readonly (GeneratedExample & { readonly origin: unknown })[]; readonly notComposed: readonly string[] } {
+  const offered: (GeneratedExample & { readonly origin: unknown })[] = [];
+  const notComposed: string[] = [];
+  const tagOfGiven = (given: unknown) => tagOf(definition.input, given);
+  for (const fold of foldsOf(implementation)) {
+    if (fold.single) continue;
+    const ofCase = answeredRows.filter(row => fold.tags.includes(tagOfGiven(row.given) ?? ""));
+    const open = walkRewrites.filter(walk => !ofCase.some(row => {
+      const deps = depsOf(row);
+      const plain = runWalk(implementation, row.given, deps);
+      if (plain.pending || plain.error !== undefined || !answers(definition, row.expect as Expected<AnyBehavior>, plain.actual) || !tookSecond(plain, fold.node)) return false;
+      return tells(implementation, fold, walk, row.given, deps, actual => answers(definition, row.expect as Expected<AnyBehavior>, actual)) === true;
+    }));
+    if (open.length === 0) continue;
+    const label = `${fold.decision.id}: ${fold.label}`;
+    if (fold.over === undefined) {
+      notComposed.push(`${label}: 歩くリストが入力の欄ではないため、二つ以上の要素を歩く行を組み立てない`);
+      continue;
+    }
+    const path = fold.over;
+    const read = (given: unknown) => path.reduce<unknown>((value, key) => (value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined), given);
+    const origins = [...ofCase, ...rows.filter(row => isTodo(row.expect) && fold.tags.includes(tagOfGiven(row.given) ?? ""))];
+    const pool: unknown[] = [];
+    for (const row of rows) {
+      const list = read(row.given);
+      if (Array.isArray(list)) for (const element of list) if (!pool.some(other => deepEqual(other, element))) pool.push(element);
+    }
+    let best: { given: unknown; origin: Example<AnyBehavior>; told: number } | undefined;
+    search: for (const origin of origins) {
+      const list = read(origin.given);
+      if (!Array.isArray(list)) continue;
+      const grown: unknown[][] = list.length === 0
+        ? pool.flatMap(first => pool.map(second => [first, second]))
+        : pool.flatMap(element => [[...list, element], [element, ...list]]);
+      for (const candidate of grown.slice(0, 64)) {
+        const given = writtenAt(origin.given, path, candidate);
+        if (!definition.input.parse(given).success) continue;
+        const deps = depsOf(origin);
+        const plain = runWalk(implementation, given, deps);
+        if (plain.pending || plain.error !== undefined || !tookSecond(plain, fold.node)) continue;
+        const told = open.filter(walk => tells(implementation, fold, walk, given, deps, actual => answers(definition, plain.actual as Expected<AnyBehavior>, actual)) === true).length;
+        if (told > (best?.told ?? 0)) best = { given, origin, told };
+        if (told === open.length) break search;
+      }
+    }
+    if (best === undefined) {
+      notComposed.push(`${label}: 書き換え（${open.join("・")}）を見分ける二つ以上の要素の行が見つからない`);
+      continue;
+    }
+    if ([...generated, ...offered].some(row => deepEqual(row.given, best!.given))) continue;
+    offered.push({
+      name: `${label} を二つ以上の要素で歩く`,
+      given: best.given,
+      reason: "foldの各段階が前の段階の答えを読むことを確かめる行の期待結果を人間が決める必要があります",
+      origin: best.origin.given,
+    });
+  }
+  return { rows: offered, notComposed };
+}
+
+function writtenAt(given: unknown, path: readonly string[], value: unknown): unknown {
+  if (path.length === 0) return value;
+  const [key, ...rest] = path;
+  const record = (given ?? {}) as Record<string, unknown>;
+  return { ...record, [key!]: writtenAt(record[key!], rest, value) };
 }
 
 export interface TestOutcome {

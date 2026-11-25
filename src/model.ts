@@ -301,6 +301,30 @@ export function model<Input, Result, Effect, Deps = unknown>(
 // value continues at once, so a model whose dependencies answer values (or
 // that calls none) is evaluated synchronously, as the analyses that trace it
 // need. `read` is a generator that yields only a pending call.
+// A rewrite of one fold a run is put to (Souther's ADR-0126): the walk
+// stopping after its first step, or every step handed the seed in place of
+// what the step before it answered. It is set around a run, as Souther's
+// per-thread selector is, rather than threaded through every caller: the runs
+// it is set for are synchronous, so nothing else runs while it is set.
+export type Walk = "after one step" | "from the seed";
+let walkRewrite: { readonly node: unknown; readonly walk: Walk } | undefined;
+let walkObserver: ((node: unknown, elements: number) => void) | undefined;
+export function withWalk<T>(
+  rewrite: { readonly node: unknown; readonly walk: Walk } | undefined,
+  observer: ((node: unknown, elements: number) => void) | undefined,
+  run: () => T,
+): T {
+  const [rewriteBefore, observerBefore] = [walkRewrite, walkObserver];
+  walkRewrite = rewrite;
+  walkObserver = observer;
+  try {
+    return run();
+  } finally {
+    walkRewrite = rewriteBefore;
+    walkObserver = observerBefore;
+  }
+}
+
 export function interpret(template: unknown, scope: unknown, options: {
   readonly steps?: number;
   readonly invoke?: (name: string, input: unknown) => unknown;
@@ -331,8 +355,13 @@ export function interpret(template: unknown, scope: unknown, options: {
       const values = yield* read(node.values, current);
       if (!Array.isArray(values)) throw new Error("Iteration expects an array");
       let accumulator = node.kind === "fold" ? parsed(node.output, yield* read(node.initial, current)) : undefined;
+      const seed = accumulator;
+      const walk = node.kind === "fold" && walkRewrite?.node === node ? walkRewrite.walk : undefined;
+      if (node.kind === "fold") walkObserver?.(node, values.length);
       const result: unknown[] = [];
-      for (const value of values) {
+      for (const [index, value] of values.entries()) {
+        if (walk === "after one step" && index > 0) break;
+        if (walk === "from the seed") accumulator = seed;
         const elementScope = withLocal(current, node.name, parsed(node.element, value));
         const iterationScope = node.kind === "fold" ? withLocal(elementScope, node.accumulator, accumulator) : elementScope;
         const around = distinguishing;

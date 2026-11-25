@@ -24,6 +24,7 @@ import {
   modelChanges,
 } from "./specification.js";
 import type { ModelChange } from "./changes.js";
+import { describeWalk } from "./rewrites.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
 import { isMachine, runMachine } from "./machine.js";
@@ -572,6 +573,7 @@ function formatReport(report: AdequacyReport): string {
     ...formatEnsures(report.ensures),
     `  構築の保証           ${report.measures.constructions.status}`,
     ...report.measures.constructions.decisions.map(proof => `    ${proof.decision}: ${proof.status} — ${proof.reason}`),
+    ...formatWalks(report.walks),
   ];
 
   for (const row of report.unanswered) {
@@ -807,6 +809,16 @@ function formatMeasure(measure: Measure | RulesMeasure, changes: readonly ModelC
         ? `計測しない (not measured, to be changed first): ${named(measure.notRead)}`
         : `計測不能 (not measured); 読めないdecision: ${named(measure.notRead)}`;
   }
+}
+
+function formatWalks(walks: AdequacyReport["walks"]): string[] {
+  if (walks.length === 0) return [];
+  const told = walks.filter(walk => walk.status === "told" || walk.status === "no row owed").length;
+  return [
+    `  foldの書き換え       ${told}/${walks.length}`,
+    ...walks.filter(walk => walk.status === "not told" || walk.status === "undecided").map(walk =>
+      `    ${walk.status === "not told" ? "!" : "?"} ${describeWalk(walk)}${walk.reason === undefined ? "" : ` — ${walk.reason}`}`),
+  ];
 }
 
 // What to change in the model, printed before the measurement starts.

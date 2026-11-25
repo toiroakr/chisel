@@ -561,6 +561,12 @@
             "$ref": "#/$defs/modelChange"
           }
         },
+        "walks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/walk"
+          }
+        },
         "evidence": {
           "type": "object",
           "properties": {
@@ -1058,6 +1064,7 @@
         "fakeIssues",
         "fakeWarnings",
         "toBeChangedFirst",
+        "walks",
         "evidence",
         "measures",
         "adequate",
@@ -1135,6 +1142,45 @@
         "kind",
         "parts",
         "message"
+      ],
+      "additionalProperties": false
+    },
+    "walk": {
+      "type": "object",
+      "description": "A fold put to one of Souther's rewrites (ADR-0126).",
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "walk": {
+          "type": "string"
+        },
+        "rewrite": {
+          "enum": [
+            "after one step",
+            "from the seed"
+          ]
+        },
+        "status": {
+          "enum": [
+            "told",
+            "not told",
+            "no row owed",
+            "undecided"
+          ]
+        },
+        "row": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "walk",
+        "rewrite",
+        "status"
       ],
       "additionalProperties": false
     }
