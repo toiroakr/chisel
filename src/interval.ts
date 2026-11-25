@@ -108,12 +108,14 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     const term = termData(value);
     if (term.kind === "linear") {
       let total = interval(term.constant, scope, steps);
+      // A decimal part of no declared scale leaves the sum's scale unknown,
+      // whatever the parts after it declare.
       for (const part of term.parts) {
         const found = interval(positionTerm(part.path, part.measure), scope, steps);
         if (!total || !found || onTimeline(found.kind) || total.kind !== found.kind && total.kind !== "number") return undefined;
         const coefficient = fractionOf(part.coefficient);
         const a = found.low.times(coefficient), b = found.high.times(coefficient);
-        total = { kind: found.kind, scale: found.scale === undefined ? undefined : Math.max(total.scale ?? 0, found.scale), integral: total.integral && found.integral && Number.isInteger(part.coefficient), low: total.low.plus(min(a, b)), high: total.high.plus(max(a, b)) };
+        total = { kind: found.kind, scale: found.scale === undefined || (total.kind === "decimal" && total.scale === undefined) ? undefined : Math.max(total.scale ?? 0, found.scale), integral: total.integral && found.integral && Number.isInteger(part.coefficient), low: total.low.plus(min(a, b)), high: total.high.plus(max(a, b)) };
       }
       return exactNumber(total);
     }
