@@ -17,6 +17,7 @@ export function constantsOf(rules: readonly Rule[]): unknown[] {
     if (rule.kind === "and" || rule.kind === "or") return constantsOf(rule.rules);
     if (rule.kind === "not") return constantsOf([rule.rule]);
     if (rule.kind === "all" || rule.kind === "any") return constantsOf([rule.each]);
+    if (rule.kind === "relation") return isTerm(rule.other) ? [] : [rule.other];
     return [rule.left, rule.right].flatMap(value => !isTerm(value) ? [value] : termData(value).kind === "linear" ? [(termData(value) as { constant: unknown }).constant] : []);
   });
 }

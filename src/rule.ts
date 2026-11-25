@@ -111,6 +111,22 @@ interface Transformable {
 interface Quantified<E> {
   $all(each: (element: TermOf<E>) => Rule): Rule & Condition;
   $any(each: (element: TermOf<E>) => Rule): Rule & Condition;
+  // Whether some element is the value (Souther's List.contains): a value the
+  // source writes or one a position holds.
+  $includes(value: Operand<E>): Rule & Condition;
+}
+
+// How a string stands to another (Souther's String.startsWith and the rest),
+// read over strings of any length (ADR-0130).
+interface Related {
+  $startsWith(other: Operand<string>): Rule & Condition;
+  $endsWith(other: Operand<string>): Rule & Condition;
+  $contains(other: Operand<string>): Rule & Condition;
+}
+
+// Whether a record holds an entry under the key (Souther's Map.containsKey).
+interface Keyed {
+  $hasKey(key: Operand<string>): Rule & Condition;
 }
 
 // Operators carry the `$` prefix rather than fields, so a field reads as it does
@@ -128,6 +144,11 @@ type TermOperator =
   | "$uppercase"
   | "$all"
   | "$any"
+  | "$includes"
+  | "$startsWith"
+  | "$endsWith"
+  | "$contains"
+  | "$hasKey"
   | "$plus"
   | "$minus";
 
@@ -151,14 +172,14 @@ export type TermOf<T> = Term<T> &
       : [T] extends [Moment]
       ? Ordered<T>
       : [T] extends [string]
-        ? Ordered<T> & Measured & Transformable
+        ? Ordered<T> & Measured & Transformable & Related
         : [T] extends [readonly (infer E)[]]
           ? Measured & Quantified<E>
           : [T] extends [object]
             ? string extends keyof T
               ? unknown extends T[string & keyof T]
                 ? { readonly [key: string]: any }
-                : Measured & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
+                : Measured & Keyed & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
               : Fields<T>
             : unknown);
 
@@ -187,6 +208,18 @@ export interface AnyRule {
   readonly each: Rule;
 }
 
+// A relation of a string to another, of a record to a key, or of an array to
+// an element: the other side is a value the source writes or one at a place
+// (ADR-0129), and the subject is always a place.
+export type Relation = "startsWith" | "endsWith" | "contains" | "hasKey" | "includes";
+
+export interface RelationRule {
+  readonly kind: "relation";
+  readonly relation: Relation;
+  readonly subject: Term<unknown>;
+  readonly other: Operand<unknown>;
+}
+
 export interface AndRule {
   readonly kind: "and";
   readonly rules: readonly Rule[];
@@ -203,9 +236,9 @@ export interface NotRule {
 }
 
 // An invariant may carry the name refine() was given for it.
-export type Rule = (CompareRule | AllRule | AnyRule | AndRule | OrRule | NotRule) & { readonly name?: string };
+export type Rule = (CompareRule | AllRule | AnyRule | RelationRule | AndRule | OrRule | NotRule) & { readonly name?: string };
 
-export type Distinction = CompareRule | AllRule | AnyRule;
+export type Distinction = CompareRule | AllRule | AnyRule | RelationRule;
 
 // Each part of a named invariant keeps its name.
 export function conjuncts(rule: Rule): readonly Rule[] {
@@ -287,6 +320,8 @@ export function termPaths(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
     case "compare":
       return [rule.left, rule.right].filter(isTerm).flatMap(term => pathsOf(termData(term)));
+    case "relation":
+      return [rule.subject, rule.other].filter(isTerm).flatMap(term => pathsOf(termData(term)));
     case "all":
     case "any":
       return [positionOf(rule.of).path];
@@ -303,6 +338,7 @@ export function termPaths(rule: Rule): readonly (readonly string[])[] {
 export function pathsRead(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
     case "compare":
+    case "relation":
       return termPaths(rule);
     case "all":
     case "any":
@@ -406,6 +442,37 @@ export function holds(
       decide?.(rule, outcome);
       return outcome;
     }
+    case "relation": {
+      const outcome = relates(rule, value);
+      decide?.(rule, outcome);
+      return outcome;
+    }
+  }
+}
+
+// Read as a comparison is: where either side is absent it holds, since the
+// analyses read rules over partial values and no declared rule reaches one.
+export function relates(rule: RelationRule, value: unknown): boolean {
+  const subject = read(rule.subject, value);
+  const other = read(rule.other, value);
+  if (subject === undefined || other === undefined) {
+    return true;
+  }
+  return relationHolds(rule.relation, subject, other);
+}
+
+export function relationHolds(relation: Relation, subject: unknown, other: unknown): boolean {
+  switch (relation) {
+    case "startsWith":
+      return typeof subject === "string" && typeof other === "string" && subject.startsWith(other);
+    case "endsWith":
+      return typeof subject === "string" && typeof other === "string" && subject.endsWith(other);
+    case "contains":
+      return typeof subject === "string" && typeof other === "string" && subject.includes(other);
+    case "hasKey":
+      return typeof subject === "object" && subject !== null && !Array.isArray(subject) && typeof other === "string" && Object.hasOwn(subject, other);
+    case "includes":
+      return Array.isArray(subject) && subject.some(element => deepEqual(element, other));
   }
 }
 
@@ -522,6 +589,8 @@ export function describeRule(rule: Rule, path = "$", elements: ElementLabels = {
       return `${rule.kind}(${rule.rules.map(part => describeRule(part, path, elements)).join(", ")})`;
     case "not":
       return `not(${describeRule(rule.rule, path, elements)})`;
+    case "relation":
+      return `${rule.relation}(${describeOperand(rule.subject, path, elements)}, ${describeOperand(rule.other, path, elements)})`;
     case "compare":
       break;
   }
@@ -741,6 +810,12 @@ function termAt(path: readonly string[], measure: Measure): Term<unknown> {
         case "all":
         case "any":
           return (each: (element: TermOf<unknown>) => Rule) => quantified(name, self, each);
+        case "includes":
+        case "startsWith":
+        case "endsWith":
+        case "contains":
+        case "hasKey":
+          return (other: unknown) => condition({ kind: "relation", relation: name, subject: self, other });
         default:
           return termAt([...path, key], "value");
       }
@@ -1008,6 +1083,8 @@ export function rebaseRule(rule: Rule, move: (path: readonly string[]) => readon
   switch (rule.kind) {
     case "compare":
       return named({ kind: "compare", operator: rule.operator, left: term(rule.left), right: term(rule.right) });
+    case "relation":
+      return named({ kind: "relation", relation: rule.relation, subject: term(rule.subject) as Term<unknown>, other: term(rule.other) });
     case "all":
     case "any":
       return named({ ...rule, of: term(rule.of) as Term<readonly unknown[]>, each: rebaseRule(rule.each, path => (path[0] === rule.element ? path : move(path))) });
@@ -1115,6 +1192,11 @@ export function substitutedRule(rule: Rule, replace: (path: readonly string[]) =
       return left.over !== undefined
         ? named({ kind: "compare", operator, left: left.with, right: multiplied })
         : named({ kind: "compare", operator, left: multiplied, right: right.with });
+    }
+    case "relation": {
+      const subject = operand(rule.subject), other = operand(rule.other);
+      if (subject === undefined || other === undefined || subject.over !== undefined || other.over !== undefined || !isTerm(subject.with)) return undefined;
+      return named({ kind: "relation", relation: rule.relation, subject: subject.with as Term<unknown>, other: other.with });
     }
     case "all":
     case "any": {

@@ -506,6 +506,13 @@ class Compiler {
       const operator = rule.operator === "==" ? "=" : rule.operator === "!=" ? "#" : rule.operator;
       return `(${this.value(rule.left, operands)} ${operator} ${this.value(rule.right, operands)})`;
     }
+    if (rule.kind === "relation") {
+      const operands = new Map([...names, ["", self]]);
+      const subject = this.value(rule.subject, operands), other = this.value(rule.other, operands);
+      if (rule.relation === "hasKey") return `(${other} \\in DOMAIN ${subject})`;
+      if (rule.relation === "includes") return `(\\E i \\in 1..Len(${subject}): ${subject}[i] = ${other})`;
+      throw new SpecificationError(`TLA+ translation does not read ${rule.relation}: strings are no sequences there`);
+    }
     if (rule.kind === "not") return `~(${this.rule(rule.rule, names, self)})`;
     if (rule.kind === "and" || rule.kind === "or") return `(${rule.rules.map(child => this.rule(child, names, self)).join(rule.kind === "and" ? " /\\ " : " \\/ ")})`;
     const variable = `element${this.next++}`;

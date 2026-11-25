@@ -1198,7 +1198,7 @@ export function generate(
   }
 
   const positionsByPath = new Map(
-    positionsOf(definition.input).map(position => [trailKey(position.segments), position] as const),
+    positionsOf(definition.input, { containers: true }).map(position => [trailKey(position.segments), position] as const),
   );
   for (const drawn of implementation === undefined ? [] : guardPartitionsOf(implementation)) {
     const position = positionsByPath.get(trailKey(drawn.segments));
@@ -1209,7 +1209,10 @@ export function generate(
       const standsIn = [...rows, ...generated].some(row =>
         position.valuesIn(row.given).some(value => value !== undefined && item.contains(value)),
       );
-      if (!standsIn) {
+      if (!standsIn && item.witness === undefined) {
+        // Owed all the same: no law refutes it, though no value was found (ADR-0130).
+        notComposed.push(`${drawn.path} = ${item.name}: スキーマが受け付ける値が見つからない`);
+      } else if (!standsIn) {
         const origin = originFor(position);
         offer({
           name: `${definition.name}: ${drawn.path} = ${item.name}`,
@@ -2799,6 +2802,8 @@ function segmentsRead(
   switch (rule.kind) {
     case "compare":
       return [rule.left, rule.right].flatMap(trailsOf);
+    case "relation":
+      return [rule.subject, rule.other].flatMap(trailsOf);
     case "all":
     case "any": {
       const of = trailOf(rule.of);
@@ -2847,7 +2852,7 @@ function measuredPositionsOf(
   guardRead: readonly (readonly string[])[] = [],
   combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): readonly Position[] {
-  return positionsOf(definition.input).map(position => withJointExclusions(definition, position, combinations)).flatMap((position): Position[] => {
+  return withDividedContainers(definition.input, guardDivided).map(position => withJointExclusions(definition, position, combinations)).flatMap((position): Position[] => {
     if (!isDisregarded(definition, position)) {
       return [position];
     }
@@ -2864,6 +2869,15 @@ function measuredPositionsOf(
         : { ...position, borders: [] },
     ];
   });
+}
+
+// The positions of an input, with a record or an array a guard's relation
+// divides as a container (ADR-0129), which is no position otherwise.
+function withDividedContainers(input: AnyVariantsSchema, guardDivided: ReadonlySet<string>): readonly Position[] {
+  const plain = positionsOf(input);
+  const known = new Set(plain.map(position => trailKey(position.segments)));
+  const containers = positionsOf(input, { containers: true }).filter(position => !known.has(trailKey(position.segments)) && guardDivided.has(trailKey(position.segments)));
+  return [...plain, ...containers];
 }
 
 const DISREGARD_COMBINATION_LIMIT = 255;

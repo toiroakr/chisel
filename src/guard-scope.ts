@@ -4,7 +4,7 @@ import { answersOf, choicesOf, iterationsOf, localsOf } from "./model.js";
 import { casesLeft, choiceFacts, factsOf } from "./absence.js";
 import type { Fact } from "./absence.js";
 import type { AnyBehavior, RulesDecision } from "./behavior.js";
-import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
+import type { CompareRule, ElementLabels, RelationRule, Rule, Term } from "./rule.js";
 import { DEPS, conjuncts, describeRule, holds, isTerm, normalize, stepInto, pathsRead, positionData, positionOf, positionTerm, localLabel, rebaseRule } from "./rule.js";
 import { enumOf, holdsNoDecimal, isVariantsSchema, object, offGridEquality, schemaAtPath, tagOf, variants } from "./schema.js";
 import type { AnySchema, ArraySchema, DecimalSchema, AnyVariantsSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
@@ -355,6 +355,37 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
     return [];
   }
   const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
+  const { frame, keys } = locate(term, frames);
+  const schema = schemaAt(frame.scope, keys);
+  return schema === undefined
+    ? []
+    : everyStepsOf(frame.scope, keys).map(steps => ({
+        path: pathOf(frame, keys, steps),
+        label: keys[0]?.startsWith("#local:") ? [localLabel(keys[0]), ...keys.slice(1)].join(".") : `${frame.label}${keys.map(key => `.${key}`).join("")}`,
+        described: describeRule(rule, frames.root.label, labelsOf(frames)),
+        segments: [...frame.segments, ...steps],
+        schema: schemaAlong(frame.scope, keys, steps) ?? schema,
+        inherited: inheritedAt(frame.scope, keys, steps),
+        rule,
+        cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ ...item, at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at] })),
+      }));
+}
+
+// The places a relation with a value the source writes divides: a string, or
+// a record or array as the container it is (ADR-0129). Located as a
+// comparison's place is.
+export type RelationThreshold = Omit<Threshold, "rule"> & { readonly rule: RelationRule };
+export function relationThresholdsIn(rule: Rule, frames: Frames): RelationThreshold[] {
+  if (rule.kind === "and" || rule.kind === "or") return rule.rules.flatMap(part => relationThresholdsIn(part, frames));
+  if (rule.kind === "not") return relationThresholdsIn(rule.rule, frames);
+  if (rule.kind === "all" || rule.kind === "any") {
+    const inner = enter(rule, frames);
+    return inner === undefined ? [] : relationThresholdsIn(rule.each, inner);
+  }
+  if (rule.kind !== "relation" || isTerm(rule.other)) return [];
+  const position = positionData(rule.subject as Term<unknown>);
+  if (position === undefined || position.measure !== "value") return [];
+  const term = rule.subject as Term<unknown>;
   const { frame, keys } = locate(term, frames);
   const schema = schemaAt(frame.scope, keys);
   return schema === undefined

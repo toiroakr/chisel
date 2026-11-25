@@ -11,7 +11,8 @@ import type { CompareRule, Rule, Term } from "./rule.js";
 import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
 import { enumOf, int, isVariantsSchema, object, variants } from "./schema.js";
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
-import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
+import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, relationThresholdsIn, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
+import { relationClasses } from "./relations.js";
 import type { Frame, Frames, Threshold } from "./guard-scope.js";
 export interface GuardBorder {
   readonly path: string;
@@ -322,17 +323,27 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
           ),
         ),
   );
-  const trails = [...new Set(thresholds.map(threshold => JSON.stringify(threshold.segments)))];
+  const relations = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+    decision.kind !== "rules"
+      ? []
+      : decision.guards.flatMap(candidate => relationThresholdsIn(candidate.condition, framesFor(implementation.behavior, tag, decision))),
+  );
+  const trails = [...new Set([...thresholds, ...relations].map(threshold => JSON.stringify(threshold.segments)))];
   return trails.flatMap(trail => {
     const atPath = thresholds.filter(threshold => JSON.stringify(threshold.segments) === trail);
-    const partition = partitionAt(
-      atPath[0]!.path,
-      atPath[0]!.segments,
-      atPath[0]!.schema,
-      atPath[0]!.inherited,
+    const related = relations.filter(threshold => JSON.stringify(threshold.segments) === trail);
+    const first = atPath[0] ?? related[0]!;
+    const partition = atPath.length === 0 ? undefined : partitionAt(
+      first.path,
+      first.segments,
+      first.schema,
+      first.inherited,
       atPath.map(threshold => threshold.rule),
     );
-    return partition === undefined ? [] : [partition];
+    if (related.length === 0) return partition === undefined ? [] : [partition];
+    // The relations divide the place within each class the comparisons divide it into.
+    const { classes, excluded } = relationClasses(related.map(threshold => threshold.rule), first.schema, partition?.classes ?? []);
+    return [{ path: first.path, segments: first.segments, classes, excluded: [...(partition?.excluded ?? []), ...excluded] }];
   });
 }
 
@@ -475,6 +486,11 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
   if (rule.kind === "all" || rule.kind === "any") {
     const inner = enter(rule, frames);
     return inner === undefined ? [] : walk(rule.each, inner, at, reading);
+  }
+  // A relation draws no line: its classes divide the place it reads, and its
+  // arms ask a row on each side of it.
+  if (rule.kind === "relation") {
+    return [];
   }
   if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
     return betweenExpression(rule, frames, at, reading);
@@ -953,6 +969,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
         ? [describeRule(rule, frames.root.label, labelsOf(frames))]
         : unreadIn(rule.each, inner);
     }
+    // Read by the classes it divides the place into and the arms on each side.
+    case "relation":
+      return [];
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       // Two constants settle without reading anything.

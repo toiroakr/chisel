@@ -305,6 +305,7 @@ export function identityOf(rule: Rule): string {
 function constantsWithin(rule: Rule): readonly string[] {
   switch (rule.kind) {
     case "compare": return [rule.left, rule.right].filter(operand => !isTerm(operand)).map(value => `${typeof value}:${(value as { constructor?: { name?: string } } | null)?.constructor?.name ?? ""}:${String(value)}`);
+    case "relation": return isTerm(rule.other) ? [] : [`${typeof rule.other}:${JSON.stringify(rule.other, (_key, value) => typeof value === "bigint" ? `${value}n` : value)}`];
     case "all":
     case "any": return constantsWithin(rule.each);
     case "and":
@@ -315,7 +316,8 @@ function constantsWithin(rule: Rule): readonly string[] {
 // Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
 function pathsWithin(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
-    case "compare": return termPaths(rule);
+    case "compare":
+    case "relation": return termPaths(rule);
     case "all":
     case "any": return [positionOf(rule.of).path, ...pathsWithin(rule.each)];
     case "and":

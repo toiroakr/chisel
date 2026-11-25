@@ -755,6 +755,9 @@ export function offGridEquality(
         path[0] === rule.element ? (element === undefined ? undefined : schemaAtPath(element, path.slice(1))) : resolve(path);
       return offGridEquality(rule.each, inner, label, { ...labels, [rule.element]: `${nameOf(of, label, labels)}[]` });
     }
+    // A relation holds no decimal against a value off its grid.
+    case "relation":
+      return undefined;
     case "compare": {
       const [term, bound] = isTerm(rule.left) ? [rule.left, rule.right] : [rule.right, rule.left];
       if (isTerm(term) && !isTerm(bound) && positionData(term as Term<unknown>) === undefined) {
