@@ -90,7 +90,9 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
         // The keys the rules write ($hasKey) are tried as keys, as `key` is.
         const keys = [...new Set(["key", ...[...constants, ...constantsOf(current.invariants)].filter((value): value is string => typeof value === "string")])];
         const first = child.values[0];
-        return finish([{}, ...keys.flatMap(key => child.values.map(value => ({ [key]: value }))), ...(first === undefined ? [] : [Object.fromEntries(keys.map(key => [key, first]))])], integralBounds(current, "length").upper === 0);
+        // A record held to no entry is the empty record alone, however many keys were written.
+        if (integralBounds(current, "length").upper === 0) return finish([{}], true);
+        return finish([{}, ...keys.flatMap(key => child.values.map(value => ({ [key]: value }))), ...(first === undefined ? [] : [Object.fromEntries(keys.map(key => [key, first]))])], false);
       }
     }
     const local = [...constants, ...constantsOf(current.invariants)];
@@ -134,7 +136,7 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
       const { scale } = current as DecimalSchema;
       values.push(new Decimal(0), new Decimal(1), new Decimal(-1));
       // Neighbours worked out exactly, as decimal.js rounds a sum to 20 digits.
-      for (const value of local) if (Decimal.isDecimal(value) || (typeof value === "number" && Number.isFinite(value))) {
+      for (const value of local) if ((Decimal.isDecimal(value) && value.isFinite()) || (typeof value === "number" && Number.isFinite(value))) {
         const exact = fractionOf(new Decimal(value));
         const step = scale === undefined ? new Rational(1n, 10n ** BigInt(Math.max(1, new Decimal(value).decimalPlaces() + 1))) : new Rational(1n, 10n ** BigInt(scale));
         values.push(new Decimal(value), decimalOf(exact.plus(step)), decimalOf(exact.minus(step)));

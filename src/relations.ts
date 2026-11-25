@@ -5,9 +5,8 @@
 // for by a value the place's own schema takes, and anything else is said to be
 // neither. Strings are read as having no greatest length: the only length a
 // witness is held to is one the place's schema declares.
-import { deepEqual } from "./equal.js";
 import type { Relation, RelationRule, Term } from "./rule.js";
-import { holds, isTerm, positionData, relationHolds } from "./rule.js";
+import { holds, isTerm, positionData, relationHolds, sameElement } from "./rule.js";
 import type { Rule } from "./rule.js";
 import type { AnySchema } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
@@ -90,7 +89,7 @@ function refuted(kind: string, group: readonly RelationStep[]): boolean {
   }
   if (kind === "array") {
     const held = written(group, "includes", true), lacked = written(group, "includes", false);
-    return held.some(value => lacked.some(other => deepEqual(value, other)));
+    return held.some(value => lacked.some(other => sameElement(value, other)));
   }
   const strings = (relation: Relation, outcome: boolean) => written(group, relation, outcome).filter((value): value is string => typeof value === "string");
   const prefixes = strings("startsWith", true), suffixes = strings("endsWith", true), pieces = strings("contains", true);
@@ -126,7 +125,12 @@ function witnessesOf(kind: string, group: readonly RelationStep[], schema: AnySc
     const base = Object.fromEntries(held.map(key => [key, value]));
     const padded = lengths.map(size => {
       const entries: Record<string, unknown> = { ...base };
-      for (let index = 1; Object.keys(entries).length < size; index++) if (!lacked.has(`_${index}`)) entries[`_${index}`] = value;
+      for (let index = 1, count = Object.keys(entries).length; count < size; index++) {
+        const key = `_${index}`;
+        if (lacked.has(key) || key in entries) continue;
+        entries[key] = value;
+        count++;
+      }
       return entries;
     });
     return [base, ...padded];
@@ -183,7 +187,7 @@ function show(value: unknown): string {
 
 // The classes the relations written against one place divide it into: each
 // way the relations can come out together, within each class `base` already
-// divides it into. A combination the laws refute is excluded; past four
+// divides it into. A combination the laws refute is excluded; past RELATION_LIMIT
 // relations each is a class of its own, holding and failing.
 export function relationClasses(
   rules: readonly RelationRule[],
@@ -191,7 +195,7 @@ export function relationClasses(
   base: readonly RelationClass[] = [],
   inherited: readonly Rule[] = [],
 ): { readonly classes: readonly RelationClass[]; readonly excluded: readonly string[] } {
-  const distinct = rules.filter((rule, index) => rules.findIndex(other => other.relation === rule.relation && deepEqual(other.other, rule.other)) === index);
+  const distinct = rules.filter((rule, index) => rules.findIndex(other => other.relation === rule.relation && sameElement(other.other, rule.other)) === index);
   const kind = distinct.every(rule => rule.relation === "hasKey") ? "record" : distinct.every(rule => rule.relation === "includes") ? "array" : "string";
   const label = (rule: RelationRule, outcome: boolean) => `${outcome ? "" : "¬"}${symbols[rule.relation]}(${show(rule.other)})`;
   const combos: { readonly rule: RelationRule; readonly outcome: boolean }[][] = [];

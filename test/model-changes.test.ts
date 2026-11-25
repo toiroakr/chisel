@@ -170,6 +170,7 @@ describe("counting the ways without listing them", () => {
       },
     });
     const [change] = c.modelChanges(c.spec("部分", { examples: c.examples(部分, {}), implementation }), { feasibility: { ways: 4 } });
+    expect(change?.parts.length).toBeGreaterThan(0);
     expect(change?.parts.every(part => BigInt(part.ways) <= 4n)).toBe(true);
   });
 

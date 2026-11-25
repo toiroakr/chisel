@@ -1,6 +1,6 @@
 import { requireTemporal } from "./temporal-global.js";
 import { temporalNeighbor } from "./temporal.js";
-import { Rational, INT64_MIN, INT64_MAX, decimalOf, fractionOf } from "./exact.js";
+import { Rational, INT64_MIN, INT64_MAX, decimalOf, fractionOf, isOutOfRoom } from "./exact.js";
 import { compareText } from "./text.js";
 import type { Measure, Operator, Rule, Term } from "./rule.js";
 import { Decimal } from "decimal.js";
@@ -77,7 +77,15 @@ export function decimalCarrier(scale: number | undefined): Carrier {
   if (scale === undefined) {
     return {
       compare: (left, right) => asDecimal(left).comparedTo(asDecimal(right)),
-      past: (value, direction) => decimalOf(fractionOf(asDecimal(value)).plus(fractionOf(direction))),
+      // A bound past the digits exact arithmetic has room for names no run past it.
+      past: (value, direction) => {
+        try {
+          return decimalOf(fractionOf(asDecimal(value)).plus(fractionOf(direction)));
+        } catch (error) {
+          if (isOutOfRoom(error)) return undefined;
+          throw error;
+        }
+      },
       format: String,
     };
   }

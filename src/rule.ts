@@ -467,6 +467,12 @@ export function relates(rule: RelationRule, value: unknown): boolean {
   return relationHolds(rule.relation, subject, other);
 }
 
+// One element as $includes reads it: decimals by their value, however written,
+// as $eq reads them, anything else as deepEqual does.
+export function sameElement(left: unknown, right: unknown): boolean {
+  return isDecimal(left) && isDecimal(right) ? left.equals(right) : deepEqual(left, right);
+}
+
 export function relationHolds(relation: Relation, subject: unknown, other: unknown): boolean {
   switch (relation) {
     case "startsWith":
@@ -478,8 +484,7 @@ export function relationHolds(relation: Relation, subject: unknown, other: unkno
     case "hasKey":
       return typeof subject === "object" && subject !== null && !Array.isArray(subject) && typeof other === "string" && Object.hasOwn(subject, other);
     case "includes":
-      // Decimals are one value however written, as $eq reads them.
-      return Array.isArray(subject) && subject.some(element => (isDecimal(element) && isDecimal(other) ? element.equals(other) : deepEqual(element, other)));
+      return Array.isArray(subject) && subject.some(element => sameElement(element, other));
   }
 }
 

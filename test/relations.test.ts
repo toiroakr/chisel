@@ -129,6 +129,7 @@ describe("the values that stand for a class of relations", () => {
     const definition = 値({ s: c.string() }, ((v: c.TermOf<{ s: string }>) => v.s.$startsWith("A")) as never);
     const implementation = guarded(definition, ((v: c.TermOf<{ s: string }>) => v.s.$startsWith("B")) as never);
     const report = await c.check(c.spec("値", { examples: c.examples(definition as never, {}), implementation: implementation as never }));
+    expect(report.measures.rules.status).toBe("complete");
     const rules = report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => `${rule.way}: ${rule.status}`) : [];
     expect(rules.some(rule => rule.startsWith('startsWith($.s, "B") holds') && rule.endsWith("gap"))).toBe(false);
   });
@@ -138,6 +139,7 @@ describe("the values that stand for a class of relations", () => {
     const implementation = guarded(definition, ((v: c.TermOf<{ tags: string[] }>) => v.tags.$includes("é")) as never);
     const { rows } = c.generate(c.examples(definition as never, {}), implementation as never);
     const held = rows.filter(row => row.name.includes("includes")).map(row => (row.given as { tags: string[] }).tags);
+    expect(held.length).toBeGreaterThan(0);
     expect(held.every(tags => tags.every(tag => tag === tag.normalize("NFC")))).toBe(true);
   });
 
@@ -146,7 +148,9 @@ describe("the values that stand for a class of relations", () => {
     const implementation = guarded(definition, ((v: c.TermOf<{ code: string }>) => v.code.$startsWith("AB")) as never);
     const { rows, notComposed } = c.generate(c.examples(definition as never, {}), implementation as never);
     expect(notComposed.filter(item => item.includes("startsWith"))).toStrictEqual([]);
-    expect(rows.filter(row => row.name.includes("startsWith")).every(row => (row.given as { code: string }).code.length >= 12)).toBe(true);
+    const padded = rows.filter(row => row.name.includes("startsWith"));
+    expect(padded.length).toBeGreaterThan(0);
+    expect(padded.every(row => (row.given as { code: string }).code.length >= 12)).toBe(true);
   });
 });
 

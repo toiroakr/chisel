@@ -71,7 +71,7 @@ describe("a stop is said of the step the run stops at", () => {
 });
 
 describe("what keeps a division from stopping", () => {
-  it("offers no invariant for a divide, which stops on an inexact answer as well as on nought", async () => {
+  it("offers no invariant for a divide, which may stop on more than nought", async () => {
     const 割る = c.behavior("割る", {
       input: c.variants("kind", { request: c.object({ a: c.int64().min(0n).max(9n), b: c.int64().min(0n).max(3n) }) }),
       result: c.int64(),
