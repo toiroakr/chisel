@@ -63,7 +63,7 @@ import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js"
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Beside } from "./beside.js";
 import type { Parting } from "./beside.js";
-import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
+import { allOnOneSide, computationOf, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf, writeExactly } from "./partition.js";
 import { isVariantsSchema, object, schemaAtPath, tagOf } from "./schema.js";
@@ -803,9 +803,8 @@ export async function check(
       };
     }),
   );
-  const guardBorders = (
-    specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
-  ).map((drawn): BorderCoverage => {
+  const guardDrawn = specification.implementation === undefined ? [] : guardBordersOf(specification.implementation);
+  const guardBorders = guardDrawn.map((drawn): BorderCoverage => {
     const reachedIt = reached.filter(
       item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag,
     );
@@ -833,7 +832,7 @@ export async function check(
       ...(beside === undefined ? {} : { beside }),
     };
   });
-  borders.push(...guardBorders);
+  borders.push(...toldOnce(guardBorders, guardDrawn));
   // Not met by reaching a comparison, as a guard border is: what an ensures
   // clause or an input invariant states holds of every input of the case.
   const writtenCoverage = (drawn: GuardBorder): BorderCoverage => {
@@ -1221,6 +1220,8 @@ export function generate(
     }
   }
 
+  const toldComputations = new Set<string>();
+  const untold: { readonly computation: string; readonly drawn: GuardBorder; readonly found: { readonly beside: { readonly status: "not told"; readonly another: string }; readonly given?: unknown; readonly deps?: unknown } }[] = [];
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
       tagOf(definition.input, given) === drawn.origin?.tag
@@ -1290,9 +1291,17 @@ export function generate(
           standsAt(point) || unmetStatus(pointFeasibility(drawn, point, implementation!, combinations, wayLimit, usableFakes)).status === "no row owed",
       );
     const found = due ? besideOf(definition, implementation!, drawn, items) : undefined;
+    const computation = computationOf(drawn.origin?.tag, drawn.form.parts);
+    if (found?.beside.status === "told") toldComputations.add(computation);
     if (found?.beside.status !== "not told") {
       continue;
     }
+    untold.push({ computation, drawn, found: found as typeof found & { readonly beside: { readonly status: "not told"; readonly another: string } } });
+  }
+  // A computation cut at several places owes its weights once (ADR-0124): no
+  // row is offered beside a border whose computation another border tells.
+  for (const { computation, drawn, found } of untold) {
+    if (toldComputations.has(computation)) continue;
     const label = `${drawn.path} 隣の線 (${found.beside.another})`;
     if (found.given === undefined) {
       notComposed.push(label);
@@ -2415,6 +2424,26 @@ function unmetStatus(
     return { status: "undecided", reason: undecided.reason };
   }
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
+}
+
+// A computation cut at several places owes its weights once (ADR-0124): a
+// border of it the rows tell from the lines beside it tells the computation's
+// weights, so another border of the same computation is told through it.
+function toldOnce(borders: readonly BorderCoverage[], drawn: readonly GuardBorder[]): readonly BorderCoverage[] {
+  const keyOf = (index: number) => {
+    const form = drawn[index]!.form;
+    return form === undefined ? undefined : computationOf(drawn[index]!.origin?.tag, form.parts);
+  };
+  const told = new Map<string, string>();
+  borders.forEach((border, index) => {
+    const key = keyOf(index);
+    if (key !== undefined && border.beside?.status === "told" && border.beside.through === undefined && !told.has(key)) told.set(key, border.rule);
+  });
+  return borders.map((border, index) => {
+    const key = keyOf(index);
+    const through = key === undefined ? undefined : told.get(key);
+    return through !== undefined && border.beside?.status === "not told" ? { ...border, beside: { status: "told", through } } : border;
+  });
 }
 
 function besideOf(

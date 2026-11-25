@@ -167,3 +167,38 @@ describe("telling a border from the lines beside it", () => {
     ]);
   });
 });
+
+describe("a computation cut at several places owes its weights once", () => {
+  const 二つの閾値 = implement(判定する, {
+    cases: {
+      入力済み: action("二つの閾値", {
+        guards: v => [
+          v.x.$plus(v.y).$plus(v.y).$lt(60).$else(偽),
+          v.x.$plus(v.y).$plus(v.y).$gte(-10).$else(偽),
+        ],
+        run: () => ({ result: { 結果: "真" }, effects: [] }),
+      }),
+    },
+  });
+  // Rows at the upper threshold split x + 2y three ways; those at the lower one only one way.
+  const rows: Record<string, ReturnType<typeof row>> = {};
+  const points: [number, number][] = [];
+  for (const v of [57, 58, 59, 60, 61, 62]) for (const y of [0, 5, -3]) points.push([v - 2 * y, y]);
+  for (const v of [-12, -11, -10, -9, -8]) points.push([v, 0]);
+  for (const [x, y] of points) rows[`(${x}, ${y})`] = row(x, y, x + 2 * y < 60 && x + 2 * y >= -10 ? "真" : "偽");
+
+  it("tells a border through another border of the same computation the rows tell", async () => {
+    const report = await check(spec("二つの閾値", { examples: examples(判定する, rows), implementation: 二つの閾値 }));
+
+    expect(report.borders.map(border => [border.rule, border.beside])).toStrictEqual([
+      ["guard $.x + 2 * $.y < 60", { status: "told" }],
+      ["guard $.x + 2 * $.y >= -10", { status: "told", through: "guard $.x + 2 * $.y < 60" }],
+    ]);
+  });
+
+  it("offers no row beside a border whose computation is told at another", () => {
+    const { rows: generated } = generate(examples(判定する, rows), 二つの閾値);
+
+    expect(generated.filter(row => row.name.includes("隣の線"))).toStrictEqual([]);
+  });
+});

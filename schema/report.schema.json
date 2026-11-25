@@ -227,6 +227,10 @@
         },
         "reason": {
           "type": "string"
+        },
+        "through": {
+          "type": "string",
+          "description": "The border of the same computation whose rows told its weights (ADR-0124)."
         }
       },
       "required": [
