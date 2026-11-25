@@ -5,7 +5,7 @@ import type { Rounding } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Replacement, Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
 import { DEPS, depsTerm, describeTerm, holds, rebaseRule, rebaseTerm, pathsRead as pathsReadOfRule, isDecimal, isTerm, linearCombination, positionData, readOperand, selfTerm, substitutedOperand, substitutedRule, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
-import { isVariantsSchema } from "./schema.js";
+import { array, isVariantsSchema } from "./schema.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./outcomes.js";
@@ -79,11 +79,48 @@ export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value
   for (let index = tags.length - 2; index >= 0; index--) body = expression({ kind: "choose", condition: { kind: "compare", left: positionTerm([name, schema.discriminant], "value"), operator: "==", right: tags[index] }, yes: bodies[index], no: body });
   return expression({ kind: "bind", name, schema, value, body });
 }
-export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: (value: TermOf<Element>) => NoInfer<Template<Result>>): Expression<readonly Result[]> {
+// A step handed over as a value (ADR-0127): made with `step`, chosen among
+// with `choose`, and handed to `map` or `fold` in place of a step written
+// there. It is worked out once, before the walk and after the list and the
+// seed, in the order the call writes them, and applied at each element: a
+// fold handed one is read as binding the list and the seed, then choosing
+// among folds each of whose step is written in place, so the choice is one
+// outside the walk, as the step is chosen once, and each fold is a walk of its
+// own to the measures, the proofs and the rewrites.
+declare const STEP: unique symbol;
+export interface StepValue<Args extends readonly unknown[], Result> {
+  readonly [STEP]?: (...args: Args) => Result;
+}
+const STEPS = new WeakMap<object, (...args: never[]) => unknown>();
+// A step's arguments are named by a tuple: `[Element]` for a map's, and
+// `[Accumulator, Element]` for a fold's, the accumulator first.
+export function step<Args extends readonly unknown[], Result>(build: (...args: { readonly [K in keyof Args]: TermOf<Args[K]> }) => Template<Result>): StepValue<Args, Result> {
+  if (typeof build !== "function") throw new Error("step takes the step's body as a function of its arguments");
+  const value = Object.freeze({ description: "a step handed over as a value" });
+  STEPS.set(value, build as unknown as (...args: never[]) => unknown);
+  return value as StepValue<Args, Result>;
+}
+// The step values a choose tree holds, with each leaf made into what `leaf`
+// builds of its body.
+function steppedBy(tree: unknown, leaf: (build: (...args: never[]) => unknown) => unknown): unknown {
+  const build = typeof tree === "object" && tree !== null ? STEPS.get(tree) : undefined;
+  if (build !== undefined) return leaf(build);
+  const node = nodeOf(tree);
+  if (node?.kind === "choose") return expression({ kind: "choose", condition: node.condition, yes: steppedBy(node.yes, leaf), no: steppedBy(node.no, leaf) });
+  throw new Error("A walk takes a step written in place, one made with step(), or a choice among such steps");
+}
+export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: ((value: TermOf<Element>) => NoInfer<Template<Result>>) | Template<StepValue<[NoInfer<Element>], NoInfer<Result>>>): Expression<readonly Result[]> {
+  if (typeof build !== "function") {
+    return bind(array(element), values as never, list => steppedBy(build, body => map(element, output, list as never, body as never)) as Template<readonly Result[]>);
+  }
   const name = localName(values, "element");
   return expression({ kind: "map", name, element: element as Schema<unknown>, output: output as Schema<unknown>, values, body: build(rootTerm<Element>(name)) });
 }
-export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: NoInfer<Template<Accumulator>>, build: (accumulator: TermOf<Accumulator>, value: TermOf<Element>) => NoInfer<Template<Accumulator>>): Expression<Accumulator> {
+export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: NoInfer<Template<Accumulator>>, build: ((accumulator: TermOf<Accumulator>, value: TermOf<Element>) => NoInfer<Template<Accumulator>>) | Template<StepValue<[NoInfer<Accumulator>, NoInfer<Element>], NoInfer<Accumulator>>>): Expression<Accumulator> {
+  if (typeof build !== "function") {
+    return bind(array(element), values as never, list =>
+      bind(output, initial as never, seed => steppedBy(build, body => fold(element, output, list as never, seed as never, body as never)) as Template<Accumulator>));
+  }
   const name = localName(values, "element"), accumulator = localName(undefined, "accumulator");
   return expression({ kind: "fold", name, accumulator, element: element as Schema<unknown>, output: output as Schema<unknown>, values, initial, body: build(rootTerm<Accumulator>(accumulator), rootTerm<Element>(name)) });
 }
