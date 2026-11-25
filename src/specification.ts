@@ -52,6 +52,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
+import { isDecimal } from "./rule.js";
 import { DEPS, localLabel, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, positionTerm, termData, termPaths, pathsRead } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
@@ -1227,6 +1228,7 @@ export function generate(
       tagOf(definition.input, given) === drawn.origin?.tag
         ? comparisonsReached(implementation!, given, tracedWith(deps)).filter(item => item.rule === drawn.comparison)
         : [];
+    const searchNotes = new Map<BorderPoint, string>();
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
         continue;
@@ -1252,9 +1254,22 @@ export function generate(
         if (drawn.origin === undefined || (drawn.origin.decision as { readonly expression?: unknown }).expression === undefined) return undefined;
         const hit = searchedWays(implementation!, drawn.origin.tag, drawn.origin.decision, combinations, usableFakes).witnessed
           .find(item => item.comparison.rule === drawn.comparison && point.contains(drawn.coordinateOf(item.comparison)) && definition.input.parse(item.given).success);
-        if (hit === undefined) return undefined;
-        if (hit.with !== undefined) searchedStandIns.set(hit.given, hit.with);
-        return hit.given;
+        if (hit !== undefined) {
+          if (hit.with !== undefined) searchedStandIns.set(hit.given, hit.with);
+          return hit.given;
+        }
+        // None reached the point: step from the runs nearest to it, one
+        // numeric field at a time, toward it (Souther 0.5.0's rows beside the
+        // nearest ones), and say what was tried where that reaches it neither.
+        const tried = searchedWays(implementation!, drawn.origin.tag, drawn.origin.decision, combinations, usableFakes).witnessed
+          .filter(item => item.comparison.rule === drawn.comparison && definition.input.parse(item.given).success);
+        const stepped = besideTheNearest(definition, drawn, point, tried, (given, deps) => reachedBy(given, deps).map(item => drawn.coordinateOf(item)));
+        if (stepped.given !== undefined) {
+          if (stepped.with !== undefined) searchedStandIns.set(stepped.given, stepped.with);
+          return stepped.given;
+        }
+        searchNotes.set(point, stepped.tried);
+        return undefined;
       };
       const given =
         candidates.find(candidate => definition.input.parse(candidate).success && reaches(candidate)) ??
@@ -1266,7 +1281,8 @@ export function generate(
         candidates.find(candidate => !definition.input.parse(candidate).success) ??
         candidates.find(candidate => definition.input.parse(candidate).success);
       if (given === undefined) {
-        notComposed.push(`${drawn.path} ${point.role} (${point.relation})${askedOf(drawn.segments.flatMap(segment => segment.startsWith(".#local:") ? [segment.slice(1)] : []))}`);
+        const note = searchNotes.get(point);
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})${askedOf(drawn.segments.flatMap(segment => segment.startsWith(".#local:") ? [segment.slice(1)] : []))}${note === undefined ? "" : ` — ${note}`}`);
       } else {
         offer({
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
@@ -2424,6 +2440,69 @@ function unmetStatus(
     return { status: "undecided", reason: undecided.reason };
   }
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
+}
+
+// The rows beside the runs nearest to a point on a computed value: from each
+// of the three runs whose value came nearest, one numeric field of the input
+// is moved by one, two, ten or a hundred either way, and the move that brings
+// the value nearest is kept, until the point is reached or no move brings it
+// nearer. Where none reaches it, what was tried is said: that is no proof the
+// point is unreachable.
+function besideTheNearest(
+  definition: AnyBehavior,
+  drawn: GuardBorder,
+  point: BorderPoint,
+  runs: readonly { readonly given: unknown; readonly with?: unknown }[],
+  coordinates: (given: unknown, deps: unknown) => readonly unknown[],
+): { readonly given?: unknown; readonly with?: unknown; readonly tried: string } {
+  const target = numeric(point.witness);
+  if (target === undefined || runs.length === 0) return { tried: `${runs.length}件の実行を試したが、点に届く行は見つからない` };
+  const distance = (given: unknown, deps: unknown): number | undefined => {
+    const values = coordinates(given, deps).map(numeric).filter((value): value is number => value !== undefined);
+    return values.length === 0 ? undefined : Math.min(...values.map(value => Math.abs(value - target)));
+  };
+  const variant = definition.input.variants[drawn.origin?.tag ?? ""] as { readonly shape?: Readonly<Record<string, AnySchema>> } | undefined;
+  const fields = Object.entries(variant?.shape ?? {}).filter(([, schema]) => schema.kind === "integer" || schema.kind === "number").map(([key]) => key);
+  const scored = runs
+    .map(run => ({ ...run, distance: distance(run.given, run.with) }))
+    .filter((run): run is typeof run & { distance: number } => run.distance !== undefined)
+    .sort((a, b) => a.distance - b.distance);
+  let nearest = scored[0]?.distance;
+  let steps = 0;
+  for (const start of scored.slice(0, 3)) {
+    let current = start;
+    for (let round = 0; round < 64 && current.distance > 0; round++) {
+      let best: typeof current | undefined;
+      for (const field of fields) {
+        for (const by of [1, -1, 2, -2, 10, -10, 100, -100]) {
+          const value = (current.given as Record<string, unknown>)[field];
+          if (typeof value !== "number") continue;
+          const given = { ...(current.given as object), [field]: value + by };
+          if (!definition.input.parse(given).success) continue;
+          steps++;
+          if (coordinates(given, current.with).some(reached => point.contains(reached))) {
+            return { given, ...(current.with === undefined ? {} : { with: current.with }), tried: "" };
+          }
+          const moved = distance(given, current.with);
+          if (moved !== undefined && moved < (best?.distance ?? current.distance)) best = { ...current, given, distance: moved };
+        }
+      }
+      if (best === undefined) break;
+      current = best;
+      nearest = Math.min(nearest ?? current.distance, current.distance);
+    }
+    if (current.distance === 0 && coordinates(current.given, current.with).some(value => point.contains(value))) {
+      return { given: current.given, ...(current.with === undefined ? {} : { with: current.with }), tried: "" };
+    }
+  }
+  return { tried: `${runs.length}件の実行と、近いものから${steps}件の隣の行を試したが、点に届く行は見つからない${nearest === undefined ? "" : `（最も近い差は${nearest}）`}` };
+}
+
+function numeric(value: unknown): number | undefined {
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  if (isDecimal(value)) return value.toNumber();
+  return undefined;
 }
 
 // A computation cut at several places owes its weights once (ADR-0124): a
