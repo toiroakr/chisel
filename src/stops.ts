@@ -17,7 +17,7 @@ import type { ProofReport } from "./proof.js";
 import { DEPS, describeTerm, isTerm, localLabel, positionData, termData } from "./rule.js";
 import type { Term } from "./rule.js";
 import { object, tagOf } from "./schema.js";
-import { EvaluationLimit } from "./exact.js";
+import { isEvaluationLimit } from "./exact.js";
 
 export interface StopCoverage {
   readonly decision: string;
@@ -135,10 +135,10 @@ export function stopsOf(
       if (stopped.size === steps.length) break;
       try {
         withStops((step, error) => {
-          if (own.has(step) && !isLimit(error) && !stopped.has(step)) stopped.set(step, row);
+          if (own.has(step) && !isEvaluationLimit(error) && !stopped.has(step)) stopped.set(step, row);
         }, () => performSync(implementation as never, row.given as never, row.deps as never));
       } catch (error) {
-        if (isLimit(error)) incomplete = true;
+        if (isEvaluationLimit(error)) incomplete = true;
         // A run that stops is what is looked for; one that fails elsewhere says nothing of the steps.
       }
     }
@@ -181,10 +181,6 @@ function keepingFor(step: Step): { readonly keeping?: string } {
   const position = positionData(node.right as Term<unknown>);
   if (position === undefined || position.measure !== "value" || position.path.some(key => key.startsWith("#"))) return {};
   return { keeping: `${describeTerm(node.right as Term<unknown>)}に .refine(v => v.$ne(0)) を宣言すれば、${describeStep(step.template)}で止まる実行はなくなる` };
-}
-
-function isLimit(error: unknown): boolean {
-  return error instanceof EvaluationLimit || (error instanceof Error && (error.name === "EvaluationLimit" || error.name === "OutOfRoom"));
 }
 
 const EDGES: readonly unknown[] = [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 0, 1, -1];

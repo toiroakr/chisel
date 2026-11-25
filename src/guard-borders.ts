@@ -8,8 +8,8 @@ import { decimalOf, fractionOf } from "./exact.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf, writeExactly } from "./partition.js";
-import type { CompareRule, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
+import type { CompareRule, RelationRule, Rule, Term } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, sameElement, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
 import { enumOf, int, isVariantsSchema, object, variants } from "./schema.js";
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, relationThresholdsIn, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
@@ -836,7 +836,12 @@ function betweenOn(
       }
       if (exact) {
         const shifted = fractionOf(other as Decimal).plus(fractionOf(coordinate as Decimal).times(fractionOf(sign)));
-        return moved.write(given, moving.measure, decimalOf(shifted));
+        const written = moved.write(given, moving.measure, decimalOf(shifted));
+        if (written === undefined || fixed.standsIn || !deepEqual(fixed.segments, moving.segments)) return written;
+        // Both sides read the one place moved, so the row is kept only where it
+        // stands at the point.
+        const [a, b] = [first, second].map(side => at(side.segments)?.valuesIn(written)[0]);
+        return isDecimal(a) && isDecimal(b) && fractionOf(a).minus(fractionOf(b)).comparedTo(fractionOf(coordinate as Decimal)) === 0 ? written : undefined;
       }
       if (moment?.write !== undefined) {
         const units = (moment.read(other, fixed) as bigint) + BigInt(sign) * (coordinate as bigint);
@@ -982,16 +987,18 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
   const relations = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules" ? [] : decision.guards.flatMap(candidate => relationThresholdsIn(candidate.condition, framesFor(implementation.behavior, tag, decision))),
   );
-  const places = new Map<string, { path: string; rules: Set<string> }>();
+  // Relations counted as relationClasses counts them: one per relation and
+  // operand, operands compared by value rather than by how they render.
+  const places = new Map<string, { path: string; rules: RelationRule[] }>();
   for (const threshold of relations) {
     const key = JSON.stringify(threshold.segments);
-    const place = places.get(key) ?? { path: threshold.path, rules: new Set<string>() };
-    place.rules.add(threshold.described);
+    const place = places.get(key) ?? { path: threshold.path, rules: [] };
+    if (!place.rules.some(other => other.relation === threshold.rule.relation && sameElement(other.other, threshold.rule.other))) place.rules.push(threshold.rule);
     places.set(key, place);
   }
   const crowded = [...places.values()]
-    .filter(place => place.rules.size > RELATION_LIMIT)
-    .map(place => `${place.path}: 関係が${place.rules.size}個あり、上限の${RELATION_LIMIT}個を超えるため組み合わせを引かない`);
+    .filter(place => place.rules.length > RELATION_LIMIT)
+    .map(place => `${place.path}: 関係が${place.rules.length}個あり、上限の${RELATION_LIMIT}個を超えるため組み合わせを引かない`);
   return [...unread, ...crowded];
 }
 

@@ -47,6 +47,20 @@ const 多い = c.implement(数える, {
 });
 
 describe("what to change in a model before measuring it", () => {
+  it("keeps cutting while the rest shrinks, however many parts that takes", () => {
+    const keys = Array.from({ length: 13 }, (_, index) => `f${index}`);
+    const 多数 = c.behavior("多数", {
+      input: c.variants("kind", { request: c.object(Object.fromEntries(keys.map(key => [key, c.int()]))) }),
+      result: c.object(Object.fromEntries(keys.map(key => [key, c.int()]))),
+      effects: emptyEffects,
+    });
+    const implementation = c.implement(多数 as never, {
+      cases: { request: c.model("多数", ((input: unknown) => ({ result: Object.fromEntries(keys.map(key => [key, c.choose((input as Record<string, c.TermOf<number>>)[key]!.$gt(0), 1, 0)])), effects: [] })) as never) },
+    } as never);
+    const [change] = c.modelChanges(c.spec("多数", { examples: c.examples(多数 as never, {}), implementation } as never), { feasibility: { ways: 16 } });
+    expect({ kind: change?.kind, ways: change?.ways, parts: change?.parts.length, remaining: change?.remaining }).toStrictEqual({ kind: "behavior", ways: "8192", parts: 9, remaining: "16" });
+  });
+
   it("names the part of a model that, declared as a behavior, leaves the rest within the limit", async () => {
     const specification = c.spec("見積", { examples: c.examples(見積, {}), implementation: 見積る });
     const report = await c.check(specification, { feasibility: { ways: 4 } });

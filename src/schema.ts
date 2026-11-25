@@ -2,10 +2,12 @@ import { TEMPORAL_UNAVAILABLE, temporalGlobal } from "./temporal-global.js";
 import { leftOutReadIn } from "./absence.js";
 import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
 import { Decimal } from "decimal.js";
+import { deepEqual } from "./equal.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { ElementLabels, InvariantRule, Operator, Rule, Term, TermOf } from "./rule.js";
 import {
   conjuncts,
+  constantsOf,
   decimalStep,
   describeRule,
   holds,
@@ -261,14 +263,23 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         if (at?.kind === "enum") {
           return { among: (at as EnumSchema<string>).values.filter(value => at.invariants.every(rule => holds(rule, value))) };
         }
-        // A decimal of any scale steps exactly by the unit of the bound's last digit.
-        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => decimalStep((value as Decimal).decimalPlaces())(value, direction) : decimalStep((at as DecimalSchema).scale!))
+        // A decimal of any scale steps exactly, one digit finer than any value the
+        // invariants write, so a step past one bound stays short of the next.
+        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => decimalStep(Math.max((value as Decimal).decimalPlaces(), finest + 1))(value, direction) : decimalStep((at as DecimalSchema).scale!))
           : at?.kind === "int64" ? (value: unknown, direction: 1 | -1) => (value as bigint) + BigInt(direction)
           : at?.kind === "rational" ? (value: unknown, direction: 1 | -1) => (value as Rational).plus(new Rational(BigInt(direction))) : undefined;
       };
-      return invariants
-        .flatMap(conjuncts)
-        .reduce<unknown>((value, rule) => satisfy(rule, value, stepAt), core.placeholder(name));
+      const finest = Math.max(0, ...constantsOf(invariants).filter(isDecimal).map(value => value.decimalPlaces()));
+      // Stepping past one bound may break another written before it, so the
+      // rules are read again until a pass changes nothing.
+      const rules = invariants.flatMap(conjuncts);
+      let value = core.placeholder(name);
+      for (let pass = 0; pass < 4; pass++) {
+        const next = rules.reduce<unknown>((current, rule) => satisfy(rule, current, stepAt), value);
+        if (rules.every(rule => holds(rule, next)) || deepEqual(next, value)) return next;
+        value = next;
+      }
+      return value;
     },
     refine(...args: readonly [(self: TermOf<unknown>) => Rule] | readonly [string, (self: TermOf<unknown>) => Rule]) {
       const [name, rule] = args.length === 2 ? args : [undefined, args[0]];

@@ -104,3 +104,9 @@ export function decimalOf(value: Rational): Decimal {
   const text = (units < 0n ? -units : units).toString().padStart(scale + 1, "0");
   return new Decimal(`${units < 0n ? "-" : ""}${scale ? `${text.slice(0, -scale)}.${text.slice(-scale)}` : text}`);
 }
+
+// A run cut short by a limit of evaluation, OutOfRoom included, told apart by
+// name too since a model may run in another module graph.
+export function isEvaluationLimit(error: unknown): boolean {
+  return error instanceof EvaluationLimit || (error instanceof Error && (error.name === "EvaluationLimit" || error.name === "OutOfRoom"));
+}

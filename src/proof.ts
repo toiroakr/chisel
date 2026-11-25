@@ -323,8 +323,11 @@ function structuralOf(value: unknown): string {
   if (isDecimal(value)) return `decimal:${value.toString()}`;
   if (Array.isArray(value)) return `[${value.map(structuralOf).join(",")}]`;
   const named = (value as { constructor?: { name?: string } }).constructor?.name;
-  if (named !== undefined && named !== "Object") return `${named}:${String(value)}`;
-  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${structuralOf((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  const fields = `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${structuralOf((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  // A named object reads as its constructor and text, and its own fields too,
+  // so two that render alike but hold other fields are told apart.
+  if (named !== undefined && named !== "Object") return `${named}:${String(value)}${fields}`;
+  return fields;
 }
 // Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
 function pathsWithin(rule: Rule): readonly (readonly string[])[] {

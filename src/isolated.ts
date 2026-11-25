@@ -53,9 +53,12 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
     const finish = async (ended: IsolatedResult) => {
       if (done) return;
       done = true;
-      const result = early.length === 0 || ended.logs.length === 0 && ended.error === "Execution output exceeded 1 MiB"
+      const merged = early.length === 0 || ended.logs.length === 0 && ended.error === "Execution output exceeded 1 MiB"
         ? ended
         : { ...ended, logs: [...early.map(line => ({ stream: "stdout" as const, message: line })), ...ended.logs] };
+      // The limit holds of what is handed back, the kept lines included.
+      const size = merged.logs.reduce((sum, entry) => sum + Buffer.byteLength(entry.message), 0);
+      const result: IsolatedResult = size > 1024 * 1024 ? { exitCode: 1, logs: [], error: "Execution output exceeded 1 MiB" } : merged;
       clearTimeout(timer);
       clearTimeout(starter);
       if (ticker !== undefined) clearInterval(ticker);
@@ -80,9 +83,7 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
         else early.push(message.message);
         return;
       }
-      const result = message as IsolatedResult;
-      const size = [...early, ...result.logs.map(entry => entry.message)].reduce((sum, line) => sum + Buffer.byteLength(line), 0);
-      void finish(size > 1024 * 1024 ? { exitCode: 1, logs: [], error: "Execution output exceeded 1 MiB" } : result);
+      void finish(message as IsolatedResult);
     });
     worker.once("error", error => void finish({ exitCode: 1, logs: output, error: error instanceof Error ? error.message : String(error) }));
     worker.once("exit", code => { if (!done) void finish({ exitCode: 1, logs: output, error: `Worker exited without a result (${code})` }); });

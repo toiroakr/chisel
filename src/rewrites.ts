@@ -15,6 +15,7 @@ import { describeTerm, isTerm, localLabel, pathsRead, termData } from "./rule.js
 import { schemaAtPath } from "./schema.js";
 import type { AnySchema } from "./schema.js";
 import { integralBounds } from "./domain.js";
+import { isEvaluationLimit } from "./exact.js";
 import type { Rule, Term } from "./rule.js";
 
 export type { Walk } from "./model.js";
@@ -160,7 +161,9 @@ export function tookSecond(run: WalkRun, node: unknown): boolean {
 // `answers` says whether what the rewritten run answered is the answer.
 export function tells(implementation: AnyImplementation, fold: Fold, walk: Walk, given: unknown, deps: unknown, answers: (actual: unknown) => boolean): boolean | "pending" {
   const rewritten = runWalk(implementation, given, deps, { node: fold.node, walk });
-  if (rewritten.pending) return "pending";
+  // A rewritten run cut short by a limit of evaluation says nothing of how it
+  // would have come out.
+  if (rewritten.pending || isEvaluationLimit(rewritten.error)) return "pending";
   return rewritten.error !== undefined || !answers(rewritten.actual);
 }
 
@@ -177,9 +180,9 @@ export function walksOf(
     const plain = ofCase.map(row => ({ row, run: runWalk(implementation, row.given, row.deps) }));
     const entered = plain.filter(({ run }) => run.elements.has(fold.node));
     const second = plain.filter(({ run }) => tookSecond(run, fold.node));
-    // A run that could not be made synchronously might still reach the fold
-    // and take a second element, unless it is seen to have entered it with fewer.
-    const pendingPlain = plain.some(({ run }) => run.pending && !(run.elements.has(fold.node) && !tookSecond(run, fold.node)));
+    // A run that could not be made synchronously might still reach the fold,
+    // again if it has been entered already, and take a second element there.
+    const pendingPlain = plain.some(({ run }) => run.pending);
     for (const walk of walks) {
       const base = { decision: fold.decision.id, walk: fold.label, rewrite: walk };
       if (fold.single) {

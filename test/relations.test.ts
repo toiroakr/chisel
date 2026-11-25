@@ -165,3 +165,10 @@ describe("a relation that never holds as written", () => {
     expect(() => c.object({ s: c.string() }).refine(v => v.s.$startsWith(undefined as never))).toThrow("$startsWith with undefined");
   });
 });
+
+describe("$includes reads numbers as $eq does", () => {
+  it("takes 0 and -0 as one element", () => {
+    const schema = c.object({ xs: c.array(c.number()) }).refine(v => v.xs.$includes(-0));
+    expect(schema.parse({ xs: [0] }).success).toBe(true);
+  });
+});

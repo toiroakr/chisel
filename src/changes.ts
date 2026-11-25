@@ -109,7 +109,9 @@ function labelled(template: unknown, at: string): { readonly paths: readonly (re
   switch (node.kind) {
     case "choose": {
       const condition = describeRule(node.condition as Rule);
-      return { paths: [[node.yes, `「${condition}」が成り立つ側`], [node.no, `「${condition}」が成り立たない側`]] };
+      // The field the choice stands in, so two choices on one condition are told apart.
+      const where = at === "答え" ? "" : `${at}の`;
+      return { paths: [[node.yes, `${where}「${condition}」が成り立つ側`], [node.no, `${where}「${condition}」が成り立たない側`]] };
     }
     case "bind":
       return { paths: [[node.value, `${at}で束ねる値`], [node.body, at]] };
@@ -215,7 +217,8 @@ function expressionChange(decision: string, expression: unknown, limit: number):
     return chain;
   };
   const cut = new Set<number>();
-  for (let round = 0; round < 8; round++) {
+  // Each round cuts one more node, none inside another, while the rest shrinks.
+  for (let round = 0; round < nodes.length; round++) {
     const now = counted(nodes, cut);
     if (now.total <= bound) break;
     const blocked = (id: number) => cut.has(id) || ancestors(id).some(up => cut.has(up));

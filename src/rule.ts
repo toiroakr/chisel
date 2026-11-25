@@ -468,9 +468,12 @@ export function relates(rule: RelationRule, value: unknown): boolean {
 }
 
 // One element as $includes reads it: decimals by their value, however written,
-// as $eq reads them, anything else as deepEqual does.
+// and numbers as $eq and Array.prototype.includes read them (0 and -0 one value),
+// anything else as deepEqual does.
 export function sameElement(left: unknown, right: unknown): boolean {
-  return isDecimal(left) && isDecimal(right) ? left.equals(right) : deepEqual(left, right);
+  if (isDecimal(left) && isDecimal(right)) return left.equals(right);
+  if (typeof left === "number" && typeof right === "number") return left === right || (Number.isNaN(left) && Number.isNaN(right));
+  return deepEqual(left, right);
 }
 
 export function relationHolds(relation: Relation, subject: unknown, other: unknown): boolean {
@@ -1254,4 +1257,15 @@ export function normalize(
     return { operator: mirrored[rule.operator], bound: rule.left, measure: right.measure };
   }
   return undefined;
+}
+
+// The values rules write, constants of comparisons, relations and expressions.
+export function constantsOf(rules: readonly Rule[]): unknown[] {
+  return rules.flatMap((rule): unknown[] => {
+    if (rule.kind === "and" || rule.kind === "or") return constantsOf(rule.rules);
+    if (rule.kind === "not") return constantsOf([rule.rule]);
+    if (rule.kind === "all" || rule.kind === "any") return constantsOf([rule.each]);
+    if (rule.kind === "relation") return isTerm(rule.other) ? [] : [rule.other];
+    return [rule.left, rule.right].flatMap(value => !isTerm(value) ? [value] : termData(value).kind === "linear" ? [(termData(value) as { constant: unknown }).constant] : []);
+  });
 }

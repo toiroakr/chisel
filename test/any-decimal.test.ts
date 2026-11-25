@@ -157,3 +157,11 @@ describe("two decimals ordered against each other where one has no scale", () =>
     ]);
   });
 });
+
+describe("the placeholder of a decimal of any scale", () => {
+  it("stands inside every bound, however close they are", () => {
+    for (const schema of [c.decimal().gt(new Decimal(0)).lt(new Decimal("0.1")), c.decimal().lt(new Decimal("0.1")).gt(new Decimal(0))]) {
+      expect(schema.parse(schema.placeholder()).success).toBe(true);
+    }
+  });
+});
