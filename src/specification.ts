@@ -25,6 +25,8 @@ import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
 import { changeOf } from "./changes.js";
 import { foldsOf, runWalk, tells, tookSecond, walks as walkRewrites, walksOf } from "./rewrites.js";
 import type { WalkCoverage, WalkRow } from "./rewrites.js";
+import { stopsOf } from "./stops.js";
+import type { StopCoverage, StopRow } from "./stops.js";
 import type { ModelChange } from "./changes.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
@@ -191,6 +193,11 @@ export interface AdequacyReport {
   // rewrite no answered row tells apart is `not told`, which makes the report
   // not adequate.
   readonly walks: readonly WalkCoverage[];
+  // Each step of a model a run may stop at, judged once (Souther 0.5.0's
+  // `stops`): `may stop` with an input that stops there, which makes the
+  // report not adequate, `never stops` where that is shown, and `not
+  // resolved` otherwise, which is read as neither.
+  readonly stops: readonly StopCoverage[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -411,6 +418,7 @@ export async function check(
   const definition = specification.examples.behavior;
   const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
   const walkRows: WalkRow[] = [];
+  const stopRows: StopRow[] = [];
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
   const coveredEffects = new Set<string>();
@@ -615,6 +623,7 @@ export async function check(
       failures.push({ name: row.name, message: unstood });
       incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
     } else if (implementation !== undefined) {
+      stopRows.push({ given: row.given, deps: standIns(row) });
       const { actual, failure, error } = await runAndCompare(
         definition,
         row.name,
@@ -890,13 +899,15 @@ export async function check(
       ? { status: "complete" }
       : { status: "partial", notRead: unreadComparisons };
   const constructions: ProofReport = specification.implementation === undefined ? { status: "undetermined", decisions: [] } : verify(specification.implementation, { candidates: combinations, ways: wayLimit });
+  const stops = stopsOf(specification.implementation, stopRows, { candidates: combinations, proof: constructions });
   const verdict: Verdict =
-    !adequate || armGap || constructions.status === "refuted" || walks.some(walk => walk.status === "not told")
+    !adequate || armGap || constructions.status === "refuted" || walks.some(walk => walk.status === "not told") || stops.some(stop => stop.status === "may stop")
       ? "not_satisfied"
       : constructions.status !== "verified" || comparisons.status === "partial" ||
           pairAnalysis.measure.status === "partial" ||
           armUndecided ||
           walks.some(walk => walk.status === "undecided") ||
+          stops.some(stop => stop.status === "not resolved") ||
           externals.length > 0 ||
           incompleteness.some(item => item.kind === "disregards not checked")
         ? "undetermined"
@@ -927,6 +938,7 @@ export async function check(
     fakeWarnings: fakeWarningsOf(definition.dependencies, specification.fakes),
     toBeChangedFirst,
     walks,
+    stops,
     evidence: {
       input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,

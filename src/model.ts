@@ -325,6 +325,31 @@ export function withWalk<T>(
   }
 }
 
+// The step a run stopped at — an operation past its type, a division by
+// nought, a construction its schema refuses, a move past a temporal type's
+// range — handed to the observer set around the run (Souther 0.5.0 says a stop
+// of the step it is at, not of a comparison it was found on the way to).
+export type StopStep = Extract<Node, { kind: "operation" | "temporal" | "construct" }>;
+let stopObserver: ((step: StopStep, error: unknown) => void) | undefined;
+export function withStops<T>(observer: (step: StopStep, error: unknown) => void, run: () => T): T {
+  const before = stopObserver;
+  stopObserver = observer;
+  try {
+    return run();
+  } finally {
+    stopObserver = before;
+  }
+}
+function stopping<T>(step: StopStep, compute: () => T): T {
+  if (stopObserver === undefined) return compute();
+  try {
+    return compute();
+  } catch (error) {
+    stopObserver(step, error);
+    throw error;
+  }
+}
+
 export function interpret(template: unknown, scope: unknown, options: {
   readonly steps?: number;
   readonly invoke?: (name: string, input: unknown) => unknown;
@@ -391,37 +416,23 @@ export function interpret(template: unknown, scope: unknown, options: {
       return yield* read(outcome ? node.yes : node.no, current);
     }
     if (node?.kind === "construct") {
-      const parsed = node.schema.parse(yield* read(node.value, current));
-      if (!parsed.success) throw new Error(`Invalid construction: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
-      return parsed.value;
+      const value = yield* read(node.value, current);
+      return stopping(node, () => {
+        const parsed = node.schema.parse(value);
+        if (!parsed.success) throw new Error(`Invalid construction: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
+        return parsed.value;
+      });
     }
     if (node?.kind === "temporal") {
       const left = yield* read(node.left, current), right = yield* read(node.right, current);
-      return node.operator === "between" ? countBetween(left, right, node.unit) : moveTemporal(node.operator, left, right, node.unit, node.overflow);
+      return stopping(node, () => node.operator === "between" ? countBetween(left, right, node.unit) : moveTemporal(node.operator, left, right, node.unit, node.overflow));
     }
     if (node?.kind === "operation") {
       const left = yield* read(node.left, current), right = yield* read(node.right, current);
-      if (node.operator === "concat") {
-        if (typeof left !== "string" || typeof right !== "string") throw new Error("concat expects strings");
-        return (left + right).normalize("NFC");
-      }
-      if (node.operator === "quotient") return fractionOf(left as number).dividedBy(fractionOf(right as number));
-      if (isDecimal(left) && isDecimal(right)) {
-        const a = fractionOf(left), b = fractionOf(right);
-        return decimalOf(node.operator === "add" ? a.plus(b) : node.operator === "subtract" ? a.minus(b) : node.operator === "multiply" ? a.times(b) : a.dividedBy(b));
-      }
-      if (isRational(left) && isRational(right)) return node.operator === "add" ? left.plus(right) : node.operator === "subtract" ? left.minus(right) : node.operator === "multiply" ? left.times(right) : left.dividedBy(right);
-      if (typeof left === "bigint" && typeof right === "bigint") {
-        if (node.operator === "divide" && (right === 0n || left % right !== 0n)) throw new Error("Integer division must be exact and nonzero");
-        return node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
-      }
-      if (typeof left !== "number" || typeof right !== "number") throw new Error("Arithmetic expects matching numeric types");
-      if (node.operator === "divide" && right === 0) throw new Error("Division by zero");
-      const result = node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
-      if (!Number.isFinite(result) || Number.isInteger(result) && !Number.isSafeInteger(result)) throw new Error("Arithmetic result is outside the exact number range");
-      return result;
+      return stopping(node, () => operate(node, left, right));
     }
     if (atom(value)) return value;
+
     if (Array.isArray(value)) {
       const elements: unknown[] = [];
       for (const child of value) elements.push(yield* read(child, current));
@@ -439,6 +450,28 @@ export function interpret(template: unknown, scope: unknown, options: {
     return options.onPending(first.value);
   }
   return resume(evaluation, first.value);
+}
+
+function operate(node: Extract<Node, { kind: "operation" }>, left: unknown, right: unknown): unknown {
+  if (node.operator === "concat") {
+    if (typeof left !== "string" || typeof right !== "string") throw new Error("concat expects strings");
+    return (left + right).normalize("NFC");
+  }
+  if (node.operator === "quotient") return fractionOf(left as number).dividedBy(fractionOf(right as number));
+  if (isDecimal(left) && isDecimal(right)) {
+    const a = fractionOf(left), b = fractionOf(right);
+    return decimalOf(node.operator === "add" ? a.plus(b) : node.operator === "subtract" ? a.minus(b) : node.operator === "multiply" ? a.times(b) : a.dividedBy(b));
+  }
+  if (isRational(left) && isRational(right)) return node.operator === "add" ? left.plus(right) : node.operator === "subtract" ? left.minus(right) : node.operator === "multiply" ? left.times(right) : left.dividedBy(right);
+  if (typeof left === "bigint" && typeof right === "bigint") {
+    if (node.operator === "divide" && (right === 0n || left % right !== 0n)) throw new Error("Integer division must be exact and nonzero");
+    return node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
+  }
+  if (typeof left !== "number" || typeof right !== "number") throw new Error("Arithmetic expects matching numeric types");
+  if (node.operator === "divide" && right === 0) throw new Error("Division by zero");
+  const result = node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
+  if (!Number.isFinite(result) || Number.isInteger(result) && !Number.isSafeInteger(result)) throw new Error("Arithmetic result is outside the exact number range");
+  return result;
 }
 
 // A generator over the expression being read: it yields a call's pending

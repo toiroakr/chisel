@@ -574,6 +574,7 @@ function formatReport(report: AdequacyReport): string {
     `  構築の保証           ${report.measures.constructions.status}`,
     ...report.measures.constructions.decisions.map(proof => `    ${proof.decision}: ${proof.status} — ${proof.reason}`),
     ...formatWalks(report.walks),
+    ...formatStops(report.stops),
   ];
 
   for (const row of report.unanswered) {
@@ -809,6 +810,18 @@ function formatMeasure(measure: Measure | RulesMeasure, changes: readonly ModelC
         ? `計測しない (not measured, to be changed first): ${named(measure.notRead)}`
         : `計測不能 (not measured); 読めないdecision: ${named(measure.notRead)}`;
   }
+}
+
+function formatStops(stops: AdequacyReport["stops"]): string[] {
+  const shown = stops.filter(stop => stop.status !== "never stops");
+  if (shown.length === 0) return [];
+  const count = (status: string) => stops.filter(stop => stop.status === status).length;
+  return [
+    `  停止                 止まりうる ${count("may stop")}   未解決 ${count("not resolved")}`,
+    ...shown.map(stop => stop.status === "may stop"
+      ? `    ! 実行が止まりうる: ${stop.decision}: ${stop.at} — 入力 ${formatTypeScriptValue(stop.input)}${stop.keeping === undefined ? "" : `。${stop.keeping}`}`
+      : `    ? 停止が未解決: ${stop.decision}: ${stop.at} — ${stop.reason}`),
+  ];
 }
 
 function formatWalks(walks: AdequacyReport["walks"]): string[] {

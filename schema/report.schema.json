@@ -567,6 +567,12 @@
             "$ref": "#/$defs/walk"
           }
         },
+        "stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stop"
+          }
+        },
         "evidence": {
           "type": "object",
           "properties": {
@@ -1065,6 +1071,7 @@
         "fakeWarnings",
         "toBeChangedFirst",
         "walks",
+        "stops",
         "evidence",
         "measures",
         "adequate",
@@ -1180,6 +1187,39 @@
         "decision",
         "walk",
         "rewrite",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "stop": {
+      "type": "object",
+      "description": "A step of a model a run may stop at (Souther 0.5.0).",
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "may stop",
+            "never stops",
+            "not resolved"
+          ]
+        },
+        "input": {},
+        "with": {},
+        "reason": {
+          "type": "string"
+        },
+        "keeping": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "at",
         "status"
       ],
       "additionalProperties": false

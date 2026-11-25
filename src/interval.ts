@@ -249,3 +249,11 @@ function measuredRange(value: unknown, scope: AnySchema, steps: readonly Step[])
   const floating = found.kind === "number";
   return floating && !found.integral ? undefined : { low: found.low, high: found.high, floating };
 }
+
+// Whether working out an operation completes wherever its operands do: an
+// exact range of its answer exists, read from the bounds of what it reads, so
+// no division by nought and no number past the exact range is in it. Undefined
+// ranges say nothing either way.
+export function completes(value: unknown, scope: AnySchema, steps: readonly Step[]): boolean {
+  return interval(value, scope, steps) !== undefined;
+}
