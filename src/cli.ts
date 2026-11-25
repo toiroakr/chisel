@@ -595,6 +595,8 @@ function formatReport(report: AdequacyReport): string {
   for (const item of report.incompleteness) {
     if (item.kind === "disregards not checked") {
       lines.push(`  ! disregardsを確かめていない行: ${item.subject} — ${item.reason}`);
+    } else if (item.kind === "out of room") {
+      lines.push(`  ? 実行環境の余地が足りず答えを書けなかった行（OutOfRoom）: ${item.subject} — ${item.reason}`);
     } else if (!report.failures.some(failure => failure.name === item.subject)) {
       lines.push(`  ! 実行できなかった行: ${item.subject} — ${item.reason}`);
     }

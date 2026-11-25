@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { Rational, fractionOf, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Rational, fractionOf, isRational, INT64_MIN, INT64_MAX, roundedAt } from "./exact.js";
 import { nodeOf } from "./model.js";
 import type { Rule, Operator } from "./rule.js";
 import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData, counts } from "./rule.js";
@@ -80,7 +80,8 @@ export function provesNumeric(schema: AnySchema, value: unknown, scope: AnySchem
   if (schema.kind === "number" && range.kind !== "number") return false;
   if (schema.kind === "int64" && (range.kind !== "bigint" || range.low.comparedTo(new Rational(INT64_MIN)) < 0 || range.high.comparedTo(new Rational(INT64_MAX)) > 0)) return false;
   if (schema.kind === "rational" && range.kind !== "rational") return false;
-  if (schema.kind === "decimal" && (range.kind !== "decimal" || range.scale === undefined || range.scale > (schema as DecimalSchema).scale)) return false;
+  const declared = (schema as DecimalSchema).scale;
+  if (schema.kind === "decimal" && (range.kind !== "decimal" || (declared !== undefined && (range.scale === undefined || range.scale > declared)))) return false;
   if (!["integer", "number", "int64", "rational", "decimal"].includes(schema.kind)) return false;
   return schema.invariants.every(rule => satisfied(rule, range));
 }
@@ -171,6 +172,13 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     const held = TIMELINE_RANGE[left.kind];
     if (low.comparedTo(held.low) < 0 || high.comparedTo(held.high) > 0) return undefined;
     return { kind: left.kind, integral: true, low, high };
+  }
+  if (node?.kind === "operation" && node.operator === "round") {
+    // Rounding keeps order, so the range rounds at its ends.
+    const inner = interval(node.left, scope, steps);
+    if (!inner || onTimeline(inner.kind) || typeof node.right !== "number") return undefined;
+    const mode = node.mode ?? "half-even";
+    return { kind: "decimal", integral: node.right === 0, scale: node.right, low: roundedAt(inner.low, node.right, mode), high: roundedAt(inner.high, node.right, mode) };
   }
   if (node?.kind === "operation") {
     if (node.operator === "concat") return undefined;

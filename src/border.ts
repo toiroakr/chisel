@@ -68,8 +68,17 @@ export const lengthCarrier: Carrier = {
 // Steps by one unit of the last digit and compares exactly. A bound written off
 // that grid is moved onto it first, so `>= 0.004` in cents draws the border of
 // `>= 0.01`, whose points are values a row can hold.
-export function decimalCarrier(scale: number): Carrier {
+// Without a scale, any finite decimal: no value is next to another, so a
+// strict bound draws no OFF point, as a number's does not.
+export function decimalCarrier(scale: number | undefined): Carrier {
   const asDecimal = (value: unknown): Decimal => isDecimal(value) ? value : new Decimal(value as Decimal.Value);
+  if (scale === undefined) {
+    return {
+      compare: (left, right) => asDecimal(left).comparedTo(asDecimal(right)),
+      past: (value, direction) => asDecimal(value).plus(direction),
+      format: String,
+    };
+  }
   const next = decimalStep(scale);
   const step = (value: unknown, direction: 1 | -1) => next(asDecimal(value), direction);
   return {

@@ -128,7 +128,9 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
       for (const value of local) if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < limit) values.push("_".repeat(value), "_".repeat(Math.max(0, value - 1)), "_".repeat(value + 1));
       exhaustive = integralBounds(current, "length").upper === 0;
     } else if (current.kind === "decimal") {
-      const step = new Decimal(10).pow(-(current as DecimalSchema).scale);
+      const { scale } = current as DecimalSchema;
+      const step = scale === undefined ? new Decimal("0.5") : new Decimal(10).pow(-scale);
+      values.push(new Decimal(0), new Decimal(1), new Decimal(-1));
       for (const value of local) if (Decimal.isDecimal(value) || typeof value === "number") {
         const decimal = new Decimal(value);
         values.push(decimal, decimal.plus(step), decimal.minus(step));

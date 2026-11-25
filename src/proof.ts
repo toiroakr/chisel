@@ -360,7 +360,10 @@ function sameShape(target: AnySchema, source: AnySchema, limit: number): boolean
     Object.hasOwn(target.variants, tag) && includesSchema(target.variants[tag]!, source.variants[tag]!, limit));
   if (target.kind === "literal") return (target as LiteralSchema<any>).value === (source as LiteralSchema<any>).value;
   if (target.kind === "enum") return (source as EnumSchema<string>).values.every(value => (target as EnumSchema<string>).values.includes(value));
-  if (target.kind === "decimal") return (source as DecimalSchema).scale <= (target as DecimalSchema).scale;
+  if (target.kind === "decimal") {
+    const [from, into] = [(source as DecimalSchema).scale, (target as DecimalSchema).scale];
+    return into === undefined || (from !== undefined && from <= into);
+  }
   if (["string", "number", "integer", "boolean", "instant", "date", "time", "datetime", "int64", "rational"].includes(target.kind)) return true;
   return false;
 }

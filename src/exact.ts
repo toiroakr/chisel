@@ -3,6 +3,45 @@ export class EvaluationLimit extends Error {
   constructor(message: string) { super(message); this.name = "EvaluationLimit"; }
 }
 
+// A run that has no room to write an answer the model defines (ADR-0128): the
+// platform failing, not the model. Told apart by its name, since a model may
+// be run by a copy of Chisel another module graph loaded.
+export class OutOfRoom extends EvaluationLimit {
+  constructor(message: string) { super(message); this.name = "OutOfRoom"; }
+}
+
+export function isOutOfRoom(error: unknown): boolean {
+  return error instanceof Error && error.name === "OutOfRoom";
+}
+
+export type Rounding = "half-up" | "half-down" | "half-even" | "up" | "down" | "ceiling" | "floor";
+
+// A rational rounded to `scale` digits after the point, as Souther's
+// Decimal.round does: exact, at any scale.
+export function roundedAt(value: Rational, scale: number, mode: Rounding): Rational {
+  const unit = 10n ** BigInt(scale);
+  const scaled = value.times(new Rational(unit));
+  const { numerator, denominator } = scaled;
+  const floor = numerator >= 0n ? numerator / denominator : -((-numerator + denominator - 1n) / denominator);
+  const remainder = numerator - floor * denominator;
+  if (remainder === 0n) return new Rational(floor, unit);
+  const ceil = floor + 1n;
+  const twice = remainder * 2n;
+  const awayFromZero = numerator >= 0n ? ceil : floor;
+  const towardZero = numerator >= 0n ? floor : ceil;
+  const nearest = twice < denominator ? floor : twice > denominator ? ceil : undefined;
+  const chosen =
+    mode === "floor" ? floor
+    : mode === "ceiling" ? ceil
+    : mode === "up" ? awayFromZero
+    : mode === "down" ? towardZero
+    : nearest !== undefined ? nearest
+    : mode === "half-up" ? awayFromZero
+    : mode === "half-down" ? towardZero
+    : floor % 2n === 0n ? floor : ceil;
+  return new Rational(chosen, unit);
+}
+
 export class Rational {
   readonly numerator: bigint;
   readonly denominator: bigint;
@@ -50,7 +89,7 @@ export function fractionOf(value: number | bigint | Decimal | Rational): Rationa
   const match = /^([+-]?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(String(value));
   if (!match) throw new Error("Expected a finite exact numeric value");
   const shift = Number(match[4] ?? 0) - (match[3]?.length ?? 0);
-  if (Math.abs(shift) > 10000) throw new EvaluationLimit("Exact arithmetic exceeds the 10000-digit budget");
+  if (Math.abs(shift) > 10000) throw new OutOfRoom("Exact arithmetic exceeds the 10000-digit budget");
   const numerator = BigInt(`${match[1]}${match[2]}${match[3] ?? ""}`);
   return shift >= 0 ? new Rational(numerator * 10n ** BigInt(shift)) : new Rational(numerator, 10n ** BigInt(-shift));
 }

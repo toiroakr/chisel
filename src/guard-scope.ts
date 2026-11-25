@@ -136,8 +136,7 @@ export function offGridEqualityIn(
       return `compares ${threshold.label}, a ${threshold.schema.kind}, with ${describeConstant(bound)}, which it is never compared with: ${threshold.described}`;
     }
     if (holdsNoDecimal(threshold.schema, operator, bound)) {
-      const scale = (threshold.schema as DecimalSchema).scale;
-      return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
+      return `compares ${threshold.label} with ${String(bound)}, which no decimal(${(threshold.schema as DecimalSchema).scale}) holds: ${threshold.described}`;
     }
   }
   const scope = guardScope(definition, tag, decision);

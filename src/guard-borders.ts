@@ -807,7 +807,7 @@ function betweenOn(
       const otherSide = side === 1;
       // Move the side that can take every value of the difference: the finer of
       // a decimal and an integer, and never a stand-in, which a row writes as given.
-      const preferred = first.standsIn || (!second.standsIn && second.scale > first.scale);
+      const preferred = first.standsIn || (!second.standsIn && (second.scale ?? 0) > (first.scale ?? 0));
       const swappable = !first.standsIn && !second.standsIn && first.scale === second.scale;
       const moveSecond = otherSide === true && swappable ? !preferred : preferred;
       const [moving, fixed, sign] = moveSecond ? [second, first, -1] : [first, second, 1];
@@ -862,15 +862,17 @@ interface Moment {
 
 // Reads two decimals as whole numbers of units of the finer scale of the two, so
 // their difference is exact, and writes one back where the other side's value
-// plus the difference lands on its own scale.
+// plus the difference lands on its own scale. Only two decimals of a scale
+// have such units: differenceCarrier draws no border between others.
 function decimalMoment(first: Side, second: Side): Moment {
-  const scale = Math.max(first.scale, second.scale);
+  const scale = Math.max(first.scale ?? 0, second.scale ?? 0);
   return {
     read: value => decimalUnits(value as Decimal, scale, "floor"),
     shift: () => undefined,
     write: (units, side, like) => {
-      const coarser = 10n ** BigInt(scale - side.scale);
-      return units % coarser === 0n ? decimalOfUnits(like as Decimal, units / coarser, side.scale) : undefined;
+      const own = side.scale ?? 0;
+      const coarser = 10n ** BigInt(scale - own);
+      return units % coarser === 0n ? decimalOfUnits(like as Decimal, units / coarser, own) : undefined;
     },
   };
 }
@@ -916,8 +918,9 @@ const MOMENTS: Readonly<Record<string, Moment>> = {
 
 interface Side {
   readonly kind: string | undefined;
-  // Digits after the decimal point, for a decimal; 0 for anything else.
-  readonly scale: number;
+  // Digits after the decimal point, for a decimal; 0 for anything else, and
+  // undefined for a decimal of any scale, whose difference has no unit.
+  readonly scale: number | undefined;
 }
 
 function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: second, scale: secondScale }: Side): Carrier | undefined {
@@ -928,7 +931,7 @@ function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: sec
   // Two decimals count their difference in units of the finer scale; a decimal
   // is not ordered against any other kind.
   if (first === "decimal" && second === "decimal") {
-    return decimalUnitsCarrier(Math.max(firstScale, secondScale));
+    return firstScale === undefined || secondScale === undefined ? undefined : decimalUnitsCarrier(Math.max(firstScale, secondScale));
   }
   if (first === "decimal" || second === "decimal") {
     return undefined;

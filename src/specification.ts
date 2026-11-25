@@ -23,6 +23,7 @@ import type { ArmTaken, ComparisonReached, RulesDecision, WayTaken } from "./beh
 import type { Step, Way } from "./ways.js";
 import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
 import { changeOf } from "./changes.js";
+import { isOutOfRoom } from "./exact.js";
 import { foldsOf, runWalk, tells, tookSecond, walks as walkRewrites, walksOf } from "./rewrites.js";
 import type { WalkCoverage, WalkRow } from "./rewrites.js";
 import { stopsOf } from "./stops.js";
@@ -220,7 +221,9 @@ export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 export type CoverageStatus = "met" | "gap" | "answer owed" | "no row owed" | "undecided";
 
 export interface Incompleteness {
-  readonly kind: "row not run" | "row did not come back" | "disregards not checked";
+  // `out of room`: the run had no room to write an answer the model defines
+  // (ADR-0128), which says nothing about the model.
+  readonly kind: "row not run" | "row did not come back" | "disregards not checked" | "out of room";
   readonly subject: string;
   readonly reason: string;
 }
@@ -687,6 +690,8 @@ export async function check(
       const open = openDecisionIn(implementation, error);
       if (open !== undefined) {
         incompleteness.push({ kind: "row not run", subject: row.name, reason: `判断が未定（${open}）` });
+      } else if (isOutOfRoom(error)) {
+        incompleteness.push({ kind: "out of room", subject: row.name, reason: (error as Error).message });
       } else if (failure !== undefined) {
         failures.push(failure);
         if (actual === undefined) {
@@ -921,7 +926,7 @@ export async function check(
           walks.some(walk => walk.status === "undecided") ||
           stops.some(stop => stop.status === "not resolved") ||
           externals.length > 0 ||
-          incompleteness.some(item => item.kind === "disregards not checked")
+          incompleteness.some(item => item.kind === "disregards not checked" || item.kind === "out of room")
         ? "undetermined"
         : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")

@@ -341,7 +341,8 @@
                 "enum": [
                   "row not run",
                   "row did not come back",
-                  "disregards not checked"
+                  "disregards not checked",
+                  "out of room"
                 ]
               },
               "subject": {

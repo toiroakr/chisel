@@ -1,6 +1,7 @@
 import { isPromiseLike, snapshotValue } from "./data.js";
 import type { Decimal } from "decimal.js";
-import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
+import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit, OutOfRoom, roundedAt } from "./exact.js";
+import type { Rounding } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Replacement, Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
 import { DEPS, depsTerm, describeTerm, holds, rebaseRule, rebaseTerm, pathsRead as pathsReadOfRule, isDecimal, isTerm, linearCombination, positionData, readOperand, selfTerm, substitutedOperand, substitutedRule, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
@@ -27,7 +28,7 @@ export type Node =
   | { readonly kind: "call"; readonly dependency: Term<unknown>; readonly input: unknown }
   | { readonly kind: "choose"; readonly condition: Rule; readonly yes: unknown; readonly no: unknown }
   | { readonly kind: "construct"; readonly schema: Schema<unknown>; readonly value: unknown }
-  | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat"; readonly left: unknown; readonly right: unknown }
+  | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat" | "round"; readonly left: unknown; readonly right: unknown; readonly mode?: Rounding }
   | { readonly kind: "temporal"; readonly operator: "plus" | "minus" | "between"; readonly left: unknown; readonly right: unknown; readonly unit: string; readonly overflow: Overflow };
 
 function expression<T>(node: Node): Expression<T> {
@@ -174,6 +175,19 @@ export function between(start: unknown, end: unknown, unit: string): Expression<
 }
 export function quotient(left: Template<number | bigint | Decimal | Rational>, right: Template<number | bigint | Decimal | Rational>): Expression<Rational> {
   return expression({ kind: "operation", operator: "quotient", left, right });
+}
+// A decimal of `scale` digits after the point, rounded as `mode` says
+// (ADR-0128): a decimal, a rational, an integer or an int64 rounded exactly, at
+// any scale, so it always has an answer.
+export function round(value: Template<number | bigint | Decimal | Rational>, scale: number, mode: Rounding): Expression<Decimal> {
+  if (!Number.isSafeInteger(scale) || scale < 0) throw new Error(`round takes a whole number of digits, not ${scale}`);
+  return expression({ kind: "operation", operator: "round", left: value, right: scale, mode });
+}
+// The quotient of two numbers as a decimal of `scale` digits, rounded as
+// `mode` says, as Souther's Decimal.divide is: it has an answer wherever the
+// divisor is not nought.
+export function divide(left: Template<number | bigint | Decimal | Rational>, right: Template<number | bigint | Decimal | Rational>, scale: number, mode: Rounding): Expression<Decimal> {
+  return round(quotient(left, right), scale, mode);
 }
 export function nodeOf(value: unknown): Node | undefined {
   return typeof value === "object" && value !== null && !isTerm(value)
@@ -453,6 +467,19 @@ export function interpret(template: unknown, scope: unknown, options: {
 }
 
 function operate(node: Extract<Node, { kind: "operation" }>, left: unknown, right: unknown): unknown {
+  try {
+    return operateExactly(node, left, right);
+  } catch (error) {
+    // A whole number larger than the platform builds is a run short of room.
+    if (error instanceof RangeError) throw new OutOfRoom(`No room to work out ${node.operator}: ${error.message}`);
+    throw error;
+  }
+}
+function operateExactly(node: Extract<Node, { kind: "operation" }>, left: unknown, right: unknown): unknown {
+  if (node.operator === "round") {
+    if (typeof left === "number" && !Number.isSafeInteger(left)) throw new Error("round takes an exact number");
+    return decimalOf(roundedAt(fractionOf(left as number), right as number, node.mode ?? "half-even"));
+  }
   if (node.operator === "concat") {
     if (typeof left !== "string" || typeof right !== "string") throw new Error("concat expects strings");
     return (left + right).normalize("NFC");

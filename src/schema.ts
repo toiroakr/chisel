@@ -86,8 +86,14 @@ export interface RationalSchema extends Schema<Rational>, ValueBounds<Rational> 
 
 export interface DecimalSchema extends Schema<Decimal>, ValueBounds<Decimal> {
   readonly kind: "decimal";
-  // How many digits a value may have after the decimal point.
-  readonly scale: number;
+  // How many digits a value may have after the decimal point; undefined for
+  // any finite decimal (ADR-0128), which has no value next to another.
+  readonly scale: number | undefined;
+}
+
+// How a decimal schema is written: `decimal(2)`, or `decimal()` for any finite decimal.
+export function decimalLabel(schema: DecimalSchema): string {
+  return schema.scale === undefined ? "decimal()" : `decimal(${schema.scale})`;
 }
 
 export interface BooleanSchema extends Schema<boolean> {
@@ -255,7 +261,7 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         if (at?.kind === "enum") {
           return { among: (at as EnumSchema<string>).values.filter(value => at.invariants.every(rule => holds(rule, value))) };
         }
-        return at?.kind === "decimal" ? decimalStep((at as DecimalSchema).scale)
+        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => (value as Decimal).plus(direction) : decimalStep((at as DecimalSchema).scale!))
           : at?.kind === "int64" ? (value: unknown, direction: 1 | -1) => (value as bigint) + BigInt(direction)
           : at?.kind === "rational" ? (value: unknown, direction: 1 | -1) => (value as Rational).plus(new Rational(BigInt(direction))) : undefined;
       };
@@ -369,8 +375,11 @@ export function int(): IntSchema {
 // A Decimal from decimal.js with at most `scale` digits after the point, such as
 // an amount in cents (`decimal(2)`), so the value next to a bound is known and
 // arithmetic on it is exact.
-export function decimal(scale: number): DecimalSchema {
-  if (!Number.isSafeInteger(scale) || scale < 0) {
+// Without a scale, any finite decimal (ADR-0128): sums, differences, products
+// and roundings always have an answer, and a run short of room to write one
+// fails as OutOfRoom, saying nothing about the model.
+export function decimal(scale?: number): DecimalSchema {
+  if (scale !== undefined && (!Number.isSafeInteger(scale) || scale < 0)) {
     throw new Error(`decimal takes a whole number of digits, not ${scale}`);
   }
   return refinable<DecimalSchema>({
@@ -384,7 +393,7 @@ export function decimal(scale: number): DecimalSchema {
     if (!isDecimal(value) || !value.isFinite()) {
       return invalid(path, "Expected a Decimal");
     }
-    if (value.decimalPlaces() > scale) {
+    if (scale !== undefined && value.decimalPlaces() > scale) {
       return invalid(path, `Expected a Decimal with at most ${scale} decimal places`);
     }
     // -0 is 0: a Decimal keeps the sign of a zero, and a row writing 0 must match.
@@ -725,7 +734,8 @@ function temporalPlain(type: PlainType): { from(text: string): unknown; new (...
 // An equality between a decimal and a value with more digits than it keeps
 // settles without a row, so it is written by mistake.
 export function holdsNoDecimal(schema: AnySchema, operator: Operator, bound: unknown): boolean {
-  return schema.kind === "decimal" && offGrid((schema as DecimalSchema).scale, operator, bound);
+  const { scale } = schema as DecimalSchema;
+  return schema.kind === "decimal" && scale !== undefined && offGrid(scale, operator, bound);
 }
 
 function offGrid(scale: number, operator: Operator, bound: unknown): boolean {
@@ -770,7 +780,7 @@ export function offGridEquality(
       const { path } = position;
       const schema = resolve(path);
       return schema !== undefined && holdsNoDecimal(schema, rule.operator, bound)
-        ? `compares ${nameOf(path, label, labels)} with ${String(bound)}, which no decimal(${(schema as DecimalSchema).scale}) holds: ${describeRule(rule, label, labels)}`
+        ? `compares ${nameOf(path, label, labels)} with ${String(bound)}, which no ${decimalLabel(schema as DecimalSchema)} holds: ${describeRule(rule, label, labels)}`
         : undefined;
     }
   }
