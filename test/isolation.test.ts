@@ -34,8 +34,8 @@ it("hands what to change in the model over before the report", async () => {
   const early: string[] = [];
   const result = await runIsolated(["check", fileURLToPath(new URL("./fixtures/many-ways.ts", import.meta.url)), "--feasibility-ways", "5"], 30000, { early: line => early.push(line) });
   expect(early.length).toBe(1);
-  expect(early[0]!.startsWith("計測の前に:")).toBe(true);
+  expect(early[0]).toMatch(/^計測の前に:/);
   expect(result.logs.some(entry => entry.message.includes("計測の前に"))).toBe(false);
   const kept = await runIsolated(["check", fileURLToPath(new URL("./fixtures/many-ways.ts", import.meta.url)), "--feasibility-ways", "5"]);
-  expect(kept.logs[0]!.message.startsWith("計測の前に:")).toBe(true);
+  expect(kept.logs[0]!.message).toMatch(/^計測の前に:/);
 });

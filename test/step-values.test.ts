@@ -86,3 +86,19 @@ describe("a step handed over as a value (ADR-0127)", () => {
     await expect(c.perform(implementation, { kind: "request", double: false, xs: [1, 2] })).resolves.toStrictEqual({ result: [1, 2], effects: [] });
   });
 });
+
+it("leaves a step that may leave the accumulator's schema unproved", () => {
+  const digit = c.int().min(1).max(9);
+  const 和 = c.behavior("和", { input: c.variants("kind", { request: c.object({ sum: c.boolean(), xs: c.array(digit) }) }), result: digit, effects: emptyEffects });
+  const implementation = c.implement(和, {
+    cases: {
+      request: c.model("和", input => ({
+        result: c.fold(digit, digit, input.xs, 5, c.choose(input.sum.$eq(true),
+          c.step<[number, number], number>((total, x) => c.arithmetic("add", total, x)),
+          c.step<[number, number], number>((kept, x) => c.choose(x.$lt(kept), x, kept)))),
+        effects: [],
+      })),
+    },
+  });
+  expect(c.verify(implementation).status).not.toBe("verified");
+});

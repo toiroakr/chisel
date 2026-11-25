@@ -128,9 +128,9 @@ function same(left: readonly number[], right: readonly number[]): boolean {
 // their weights, reduced and signed so that `a + b` cut at 10 and at 20, or
 // written `2a + 2b`, is one computation. Its weights are owed once, however
 // many places it is cut at.
-export function computationOf(tag: string | undefined, parts: readonly { readonly path: string; readonly coefficient: number }[]): string {
-  const sorted = [...parts].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+export function computationOf(tag: string | undefined, parts: readonly { readonly identity: string; readonly coefficient: number }[]): string {
+  const sorted = [...parts].sort((a, b) => (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0));
   const divisor = sorted.reduce((d, part) => gcd(d, Math.abs(part.coefficient)), 0) || 1;
   const sign = (sorted[0]?.coefficient ?? 1) < 0 ? -1 : 1;
-  return `${tag ?? ""}|${sorted.map(part => `${(part.coefficient * sign) / divisor}*${part.path}`).join("+")}`;
+  return JSON.stringify([tag ?? "", sorted.map(part => [(part.coefficient * sign) / divisor, part.identity])]);
 }

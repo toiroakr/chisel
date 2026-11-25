@@ -340,7 +340,7 @@ describe("chisel check and generate with the limit of the ways listed", () => {
     const result = await run(["check", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "5"]);
     const stdout = stdoutOf(result);
 
-    expect(stdout.startsWith("計測の前に:\n  ↻ 多い: 道筋が13本あり、上限の5本を超えるため計測しない。")).toBe(true);
+    expect(stdout).toMatch(/^計測の前に:\n  ↻ 多い: 道筋が13本あり、上限の5本を超えるため計測しない。/);
     expect(stdout).toContain("guard 1（4本）、guard 2（4本）をそれぞれbehaviorにしてcomposeでつなげば、各段は上限の内で計測される。");
     expect(stdout.indexOf("計測の前に:")).toBeLessThan(stdout.indexOf("多さ (数える)"));
   });
@@ -357,7 +357,7 @@ describe("chisel generate with rows suggested from a called behavior", () => {
     const result = await run(["generate", fixture("test/fixtures/suggested.ts")]);
 
     expect(stdoutOf(result)).toMatch(/^\/\/ 義務のある行 \d+件、提案する行 1件（義務はない）$/m);
-    expect(stdoutOf(result)).toContain("在庫()の記録行「商品-Bは0個」の入力を尋ねる");
+    expect(stdoutOf(result)).toContain("在庫()の記録行「商品-Bは0個」の入力を$.商品IDで尋ねる");
   });
 });
 

@@ -1,4 +1,4 @@
-import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Rational, isRational, INT64_MIN, INT64_MAX, decimalOf, fractionOf } from "./exact.js";
 import { Decimal } from "decimal.js";
 import { deepEqual } from "./equal.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, DecimalSchema } from "./schema.js";
@@ -87,7 +87,10 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
       }
       case "record": {
         const child = nested((current as RecordSchema<unknown>).value);
-        return finish([{}, ...child.values.map(value => ({ key: value }))], integralBounds(current, "length").upper === 0);
+        // The keys the rules write ($hasKey) are tried as keys, as `key` is.
+        const keys = [...new Set(["key", ...[...constants, ...constantsOf(current.invariants)].filter((value): value is string => typeof value === "string")])];
+        const first = child.values[0];
+        return finish([{}, ...keys.flatMap(key => child.values.map(value => ({ [key]: value }))), ...(first === undefined ? [] : [Object.fromEntries(keys.map(key => [key, first]))])], integralBounds(current, "length").upper === 0);
       }
     }
     const local = [...constants, ...constantsOf(current.invariants)];
@@ -129,11 +132,12 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
       exhaustive = integralBounds(current, "length").upper === 0;
     } else if (current.kind === "decimal") {
       const { scale } = current as DecimalSchema;
-      const step = scale === undefined ? new Decimal("0.5") : new Decimal(10).pow(-scale);
       values.push(new Decimal(0), new Decimal(1), new Decimal(-1));
-      for (const value of local) if (Decimal.isDecimal(value) || typeof value === "number") {
-        const decimal = new Decimal(value);
-        values.push(decimal, decimal.plus(step), decimal.minus(step));
+      // Neighbours worked out exactly, as decimal.js rounds a sum to 20 digits.
+      for (const value of local) if (Decimal.isDecimal(value) || (typeof value === "number" && Number.isFinite(value))) {
+        const exact = fractionOf(new Decimal(value));
+        const step = scale === undefined ? new Rational(1n, 10n ** BigInt(Math.max(1, new Decimal(value).decimalPlaces() + 1))) : new Rational(1n, 10n ** BigInt(scale));
+        values.push(new Decimal(value), decimalOf(exact.plus(step)), decimalOf(exact.minus(step)));
       }
     }
     for (const border of bordersOf(current.invariants.flatMap(conjuncts), measure => carrierOf(current, measure))) {

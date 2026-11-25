@@ -399,6 +399,12 @@ export function shiftTerms(rule: CompareRule): CompareRule {
 }
 
 export function stepInto(rule: Rule, key: string): Rule | undefined {
+  // A relation of a field to a written value is one of the field itself.
+  if (rule.kind === "relation") {
+    const subject = positionData(rule.subject);
+    if (subject === undefined || isTerm(rule.other) || subject.path[0] !== key) return undefined;
+    return { ...rule, subject: shiftedTerm(termData(rule.subject)) as Term<unknown> };
+  }
   const path = boundTermPath(rule);
   if (rule.kind !== "compare" || path === undefined || path[0] !== key) {
     return undefined;
@@ -472,7 +478,8 @@ export function relationHolds(relation: Relation, subject: unknown, other: unkno
     case "hasKey":
       return typeof subject === "object" && subject !== null && !Array.isArray(subject) && typeof other === "string" && Object.hasOwn(subject, other);
     case "includes":
-      return Array.isArray(subject) && subject.some(element => deepEqual(element, other));
+      // Decimals are one value however written, as $eq reads them.
+      return Array.isArray(subject) && subject.some(element => (isDecimal(element) && isDecimal(other) ? element.equals(other) : deepEqual(element, other)));
   }
 }
 

@@ -213,11 +213,13 @@ export function between(start: unknown, end: unknown, unit: string): Expression<
 export function quotient(left: Template<number | bigint | Decimal | Rational>, right: Template<number | bigint | Decimal | Rational>): Expression<Rational> {
   return expression({ kind: "operation", operator: "quotient", left, right });
 }
+const ROUNDINGS: readonly Rounding[] = ["half-up", "half-down", "half-even", "up", "down", "ceiling", "floor"];
 // A decimal of `scale` digits after the point, rounded as `mode` says
 // (ADR-0128): a decimal, a rational, an integer or an int64 rounded exactly, at
 // any scale, so it always has an answer.
 export function round(value: Template<number | bigint | Decimal | Rational>, scale: number, mode: Rounding): Expression<Decimal> {
   if (!Number.isSafeInteger(scale) || scale < 0) throw new Error(`round takes a whole number of digits, not ${scale}`);
+  if (!ROUNDINGS.includes(mode)) throw new Error(`round takes a rounding mode of ${ROUNDINGS.join(", ")}, not ${String(mode)}`);
   return expression({ kind: "operation", operator: "round", left: value, right: scale, mode });
 }
 // The quotient of two numbers as a decimal of `scale` digits, rounded as
@@ -313,6 +315,7 @@ export function choicesOf(template: unknown): readonly Extract<Node, { kind: "ch
 function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaining = { value: 10000 }): unknown {
   if (--remaining.value < 0) throw new Error("Model declaration exceeds 10000 nodes");
   if (typeof value === "function" || typeof value === "symbol") throw new Error("Model expressions cannot contain callbacks or symbols");
+  if (typeof value === "object" && value !== null && STEPS.has(value)) throw new Error("A step made with step() is handed to map or fold, not left in a model");
   if (isTerm(value)) return value;
   if (atom(value)) {
     if (isDecimal(value)) return snapshotValue(value);

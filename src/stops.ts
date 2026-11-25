@@ -125,17 +125,26 @@ export function stopsOf(
     ];
     for (const step of steps) candidates.push(...edgesFor(step, bases));
     const stopped = new Map<unknown, StopRow>();
+    // Only this decision's steps: a dependency that runs a model of its own
+    // stops at steps of that model, which are no steps of this one.
+    const own = new Set<unknown>(steps.map(step => step.node));
+    // A run cut short by a limit of evaluation shows neither a stop nor that
+    // every step it would have reached completes.
+    let incomplete = false;
     for (const row of candidates) {
       if (stopped.size === steps.length) break;
       try {
         withStops((step, error) => {
-          if (!(error instanceof EvaluationLimit) && !stopped.has(step)) stopped.set(step, row);
+          if (own.has(step) && !isLimit(error) && !stopped.has(step)) stopped.set(step, row);
         }, () => performSync(implementation as never, row.given as never, row.deps as never));
-      } catch {
+      } catch (error) {
+        if (isLimit(error)) incomplete = true;
         // A run that stops is what is looked for; one that fails elsewhere says nothing of the steps.
       }
     }
-    const proved = options.proof?.decisions.some(item => item.decision === rules.id && item.status === "verified") ?? false;
+    // Proved for every case the decision decides, not for one of them.
+    const proofs = options.proof?.decisions.filter(item => item.decision === rules.id) ?? [];
+    const proved = proofs.length >= tags.length && proofs.every(item => item.status === "verified");
     const scopes = tags.map(tag => feasibilityScope(definition, tag));
     for (const step of steps) {
       const base = { decision: rules.id, at: describeStep(step.template) };
@@ -149,7 +158,7 @@ export function stopsOf(
           reason: `この入力の実行は${base.at}で止まる`,
           ...keepingFor(step),
         });
-      } else if (domain?.exhaustive) {
+      } else if (domain?.exhaustive && !incomplete) {
         coverage.push({ ...base, status: "never stops", reason: "有効な入力をすべて実行した" });
       } else if (step.node.kind === "construct" && proved) {
         coverage.push({ ...base, status: "never stops", reason: "構築の証明が成り立つ" });
@@ -163,14 +172,19 @@ export function stopsOf(
   return coverage;
 }
 
-// A division by an input field is kept from stopping by declaring that the
-// field is never nought.
+// A quotient by an input field is kept from stopping by declaring that the
+// field is never nought. Not a `divide`, which stops too where the answer has
+// no exact value of its type, as 1n / 3n and a decimal 1 / 3 have none.
 function keepingFor(step: Step): { readonly keeping?: string } {
   const node = step.node;
-  if (node.kind !== "operation" || (node.operator !== "divide" && node.operator !== "quotient") || !isTerm(node.right)) return {};
+  if (node.kind !== "operation" || node.operator !== "quotient" || !isTerm(node.right)) return {};
   const position = positionData(node.right as Term<unknown>);
   if (position === undefined || position.measure !== "value" || position.path.some(key => key.startsWith("#"))) return {};
   return { keeping: `${describeTerm(node.right as Term<unknown>)}に .refine(v => v.$ne(0)) を宣言すれば、${describeStep(step.template)}で止まる実行はなくなる` };
+}
+
+function isLimit(error: unknown): boolean {
+  return error instanceof EvaluationLimit || (error instanceof Error && (error.name === "EvaluationLimit" || error.name === "OutOfRoom"));
 }
 
 const EDGES: readonly unknown[] = [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER, 0, 1, -1];

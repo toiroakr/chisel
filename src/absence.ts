@@ -80,7 +80,7 @@ export function leftOutReadIn(rule: Rule, roots: Roots, facts: readonly Fact[] =
       }
       return undefined;
     case "relation":
-      if (rule.other === undefined) return `${rule.relation} with undefined, which no value is: write the absence as a case of a sum`;
+      if (rule.other === undefined) return `$${rule.relation} with undefined, which no value is: write the absence as a case of a sum`;
       for (const side of [rule.subject, rule.other]) {
         const found = leftOutOperand(side, roots, facts, label);
         if (found !== undefined) return found;

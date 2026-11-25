@@ -127,3 +127,67 @@ describe("the phases a check says it is on", () => {
     ]);
   });
 });
+
+describe("counting the ways without listing them", () => {
+  it("counts a guard of thirty joined disjunctions at once", () => {
+    const 多重 = c.behavior("多重", {
+      input: c.variants("kind", { request: c.object(Object.fromEntries(Array.from({ length: 60 }, (_, index) => [`f${index}`, c.int()]))) }),
+      result: c.boolean(),
+      effects: c.variants("種類", {}),
+    });
+    const implementation = c.implement(多重, {
+      cases: {
+        request: c.action("多重", {
+          guards: v => [
+            Array.from({ length: 30 }, (_, index) => (v as never as Record<string, c.TermOf<number>>)[`f${2 * index}`]!.$gt(0).$or((v as never as Record<string, c.TermOf<number>>)[`f${2 * index + 1}`]!.$gt(0)))
+              .reduce((all, next) => all.$and(next))
+              .$else(() => ({ result: false, effects: [] })),
+          ],
+          run: () => ({ result: true, effects: [] }),
+        }),
+      },
+    });
+    const started = Date.now();
+    const changes = c.modelChanges(c.spec("多重", { examples: c.examples(多重, {}), implementation }));
+    expect({ fast: Date.now() - started < 5000, ways: changes[0]?.ways }).toStrictEqual({ fast: true, ways: String(2n ** 30n + (2n ** 31n - 1n - 2n ** 30n)) });
+  });
+
+  it("never names a part that is itself past the limit", () => {
+    const 部分 = c.behavior("部分", {
+      input: c.variants("kind", { request: c.object({ a: c.int(), b: c.int(), d: c.int(), e: c.int() }) }),
+      result: c.object({ x: c.int(), y: c.int() }),
+      effects: c.variants("種類", {}),
+    });
+    const implementation = c.implement(部分, {
+      cases: {
+        request: c.model("部分", input => ({
+          result: {
+            x: c.choose(input.a.$gt(0), c.choose(input.b.$gt(0), c.choose(input.d.$gt(0), 1, 2), c.choose(input.d.$gt(0), 3, 4)), c.choose(input.b.$gt(0), c.choose(input.d.$gt(0), 5, 6), c.choose(input.d.$gt(0), 7, 8))),
+            y: c.choose(input.e.$gt(0), 1, 0),
+          },
+          effects: [],
+        })),
+      },
+    });
+    const [change] = c.modelChanges(c.spec("部分", { examples: c.examples(部分, {}), implementation }), { feasibility: { ways: 4 } });
+    expect(change?.parts.every(part => BigInt(part.ways) <= 4n)).toBe(true);
+  });
+
+  it("lets the match be a stage of its own", () => {
+    const 段 = c.behavior("段", {
+      input: c.variants("kind", { request: c.object({ n: c.int(), a: c.boolean(), b: c.boolean(), level: c.enum(["x", "y", "z"]) }) }),
+      result: c.boolean(),
+      effects: c.variants("種類", {}),
+    });
+    const implementation = c.implement(段, {
+      cases: {
+        request: c.action("段", {
+          guards: v => [v.n.$gt(0).$or(v.a.$eq(true)).$or(v.b.$eq(true)).$else(() => ({ result: false, effects: [] }))],
+          run: c.match(input => input.level, { x: () => ({ result: true, effects: [] }), y: () => ({ result: true, effects: [] }), z: () => ({ result: true, effects: [] }) }),
+        }),
+      },
+    });
+    const [change] = c.modelChanges(c.spec("段", { examples: c.examples(段, {}), implementation }), { feasibility: { ways: 4 } });
+    expect(change?.parts.map(part => [part.at, part.ways])).toStrictEqual([["guard 1", "4"], ["match", "3"]]);
+  });
+});

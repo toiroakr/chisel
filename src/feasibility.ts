@@ -251,10 +251,15 @@ export function feasibilityOf(
   // Relations on a place no other step reads are settled among themselves; one
   // whose place another step reads too is read with it as an opaque step.
   let unsettled = false;
+  // A place relations settled among themselves is still read: an opaque step
+  // on it (another relation read through a transform, an all/any, a
+  // comparison not read) leaves the way undecided.
+  const relationReads: (readonly string[])[] = [];
   for (const verdict of relationsVerdict(relationSteps, scope)) {
     if (verdict.kind === "infeasible") return { kind: "infeasible", reason: contradicts };
-    const shared = verdict.paths.some(path => [...groups.values()].some(group => sharesValue(path, group.path)));
+    const shared = verdict.paths.some(path => [...groups.values()].some(group => sharesValue(path, group.path)) || opaque.flat().some(other => sharesValue(path, other)));
     if (verdict.kind === "unknown" || shared) opaque.push(verdict.paths);
+    else relationReads.push(...verdict.paths);
     if (verdict.kind === "unknown" && verdict.searched) unsettled = true;
   }
 
@@ -339,7 +344,7 @@ export function feasibilityOf(
     }
   }
 
-  const readPaths = [...groups.values()].map(group => group.path);
+  const readPaths = [...[...groups.values()].map(group => group.path), ...relationReads];
   const overlaps = opaque.some((paths, index) =>
     paths.some(path =>
       [...readPaths, ...opaque.filter((_, other) => other !== index).flat()].some(other =>

@@ -69,3 +69,17 @@ describe("a stop is said of the step the run stops at", () => {
     ]);
   });
 });
+
+describe("what keeps a division from stopping", () => {
+  it("offers no invariant for a divide, which stops on an inexact answer as well as on nought", async () => {
+    const 割る = c.behavior("割る", {
+      input: c.variants("kind", { request: c.object({ a: c.int64().min(0n).max(9n), b: c.int64().min(0n).max(3n) }) }),
+      result: c.int64(),
+      effects: emptyEffects,
+    });
+    const implementation = c.implement(割る, { cases: { request: c.model("割る", input => ({ result: c.arithmetic("divide", input.a, input.b), effects: [] })) } });
+    const report = await c.check(c.spec("割る", { examples: c.examples(割る, {}), implementation }));
+
+    expect(report.stops.map(stop => [stop.status, stop.keeping])).toStrictEqual([["may stop", undefined]]);
+  });
+});

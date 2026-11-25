@@ -261,7 +261,8 @@ function refinable<S extends AnySchema>(core: SchemaCore<S>, invariants: readonl
         if (at?.kind === "enum") {
           return { among: (at as EnumSchema<string>).values.filter(value => at.invariants.every(rule => holds(rule, value))) };
         }
-        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => (value as Decimal).plus(direction) : decimalStep((at as DecimalSchema).scale!))
+        // A decimal of any scale steps exactly by the unit of the bound's last digit.
+        return at?.kind === "decimal" ? ((at as DecimalSchema).scale === undefined ? (value: unknown, direction: 1 | -1) => decimalStep((value as Decimal).decimalPlaces())(value, direction) : decimalStep((at as DecimalSchema).scale!))
           : at?.kind === "int64" ? (value: unknown, direction: 1 | -1) => (value as bigint) + BigInt(direction)
           : at?.kind === "rational" ? (value: unknown, direction: 1 | -1) => (value as Rational).plus(new Rational(BigInt(direction))) : undefined;
       };
@@ -765,9 +766,16 @@ export function offGridEquality(
         path[0] === rule.element ? (element === undefined ? undefined : schemaAtPath(element, path.slice(1))) : resolve(path);
       return offGridEquality(rule.each, inner, label, { ...labels, [rule.element]: `${nameOf(of, label, labels)}[]` });
     }
-    // A relation holds no decimal against a value off its grid.
-    case "relation":
-      return undefined;
+    // An array of decimals of a scale never includes a value off their grid.
+    case "relation": {
+      const subject = rule.relation === "includes" && !isTerm(rule.other) ? positionData(rule.subject) : undefined;
+      if (subject === undefined || subject.measure !== "value") return undefined;
+      const collection = resolve(subject.path);
+      const element = collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
+      return element !== undefined && holdsNoDecimal(element, "==", rule.other)
+        ? `compares ${nameOf(subject.path, label, labels)}[] with ${String(rule.other)}, which no ${decimalLabel(element as DecimalSchema)} holds: ${describeRule(rule, label, labels)}`
+        : undefined;
+    }
     case "compare": {
       const [term, bound] = isTerm(rule.left) ? [rule.left, rule.right] : [rule.right, rule.left];
       if (isTerm(term) && !isTerm(bound) && positionData(term as Term<unknown>) === undefined) {

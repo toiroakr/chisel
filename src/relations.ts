@@ -7,9 +7,24 @@
 // witness is held to is one the place's schema declares.
 import { deepEqual } from "./equal.js";
 import type { Relation, RelationRule, Term } from "./rule.js";
-import { isTerm, positionData, relationHolds } from "./rule.js";
+import { holds, isTerm, positionData, relationHolds } from "./rule.js";
+import type { Rule } from "./rule.js";
 import type { AnySchema } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
+import { inheritedAt } from "./guard-scope.js";
+import { integralBounds } from "./domain.js";
+
+// The value a candidate parses to, where the place's schema takes it and every
+// invariant an enclosing object writes on the place holds of it: what a row
+// would hold, NFC and all, rather than what was written.
+function taken(candidate: unknown, schema: AnySchema | undefined, inherited: readonly Rule[]): { readonly value: unknown } | undefined {
+  const parsed = schema === undefined ? { success: true as const, value: candidate } : schema.parse(candidate);
+  if (!parsed.success) return undefined;
+  return inherited.every(rule => holds(rule, parsed.value)) ? { value: parsed.value } : undefined;
+}
+
+// Past this many relations on one place their combinations are not drawn.
+export const RELATION_LIMIT = 12;
 
 export interface RelationStep {
   readonly rule: RelationRule;
@@ -56,8 +71,8 @@ export function relationsVerdict(steps: readonly RelationStep[], scope: AnySchem
     const kind = [...kinds][0]!;
     if (refuted(kind, group)) { verdicts.push({ kind: "infeasible" }); continue; }
     const holdsAll = (value: unknown) => group.every(step => relationHolds(step.rule.relation, value, step.rule.other) === step.outcome);
-    const taken = (value: unknown) => schema === undefined || schema.parse(value).success;
-    const witness = witnessesOf(kind, group, schema).find(value => holdsAll(value) && taken(value));
+    const inherited = inheritedAt(scope, path);
+    const witness = witnessesOf(kind, group, schema).map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && holdsAll(found.value));
     verdicts.push(witness === undefined ? { kind: "unknown", paths: [path], searched: true } : { kind: "feasible", paths: [path] });
   }
   return verdicts;
@@ -101,14 +116,26 @@ function refuted(kind: string, group: readonly RelationStep[]): boolean {
 }
 
 function witnessesOf(kind: string, group: readonly RelationStep[], schema: AnySchema | undefined): readonly unknown[] {
+  // The lengths the place's schema declares, which a witness is padded to.
+  const { lower, upper } = schema === undefined ? { lower: 0, upper: undefined } : integralBounds(schema, "length");
+  const lengths = [lower, lower + 1, ...(upper === undefined ? [] : [upper, upper - 1])].filter(size => size >= 0 && size <= 4096);
   if (kind === "record") {
     const held = written(group, "hasKey", true).filter((key): key is string => typeof key === "string");
+    const lacked = new Set(written(group, "hasKey", false));
     const value = (schema as { readonly value?: AnySchema } | undefined)?.value?.placeholder();
-    return [Object.fromEntries(held.map(key => [key, value]))];
+    const base = Object.fromEntries(held.map(key => [key, value]));
+    const padded = lengths.map(size => {
+      const entries: Record<string, unknown> = { ...base };
+      for (let index = 1; Object.keys(entries).length < size; index++) if (!lacked.has(`_${index}`)) entries[`_${index}`] = value;
+      return entries;
+    });
+    return [base, ...padded];
   }
   if (kind === "array") {
     const held = written(group, "includes", true);
-    return [held, [...held, ...held]];
+    const element = (schema as { readonly element?: AnySchema } | undefined)?.element?.placeholder();
+    const padded = lengths.map(size => [...held, ...Array.from({ length: Math.max(0, size - held.length) }, () => element)]);
+    return [held, [...held, ...held], ...padded];
   }
   const strings = (relation: Relation) => written(group, relation, true).filter((value): value is string => typeof value === "string");
   const prefix = strings("startsWith").reduce((a, b) => (b.length > a.length ? b : a), "");
@@ -125,8 +152,12 @@ function witnessesOf(kind: string, group: readonly RelationStep[], schema: AnySc
   for (const middle of middles) {
     witnesses.push(prefix + middle + suffix, joined(joined(prefix, middle), suffix));
   }
-  // A place the schema holds to some length is tried at lengths it declares too.
-  for (const filler of ["_", "a", "0"]) for (let size = 1; size <= 8; size++) witnesses.push(prefix + filler.repeat(size) + pieces.join("") + suffix);
+  // Then at the lengths the place's schema declares, filled in after the prefix.
+  const core = prefix + pieces.join("") + suffix;
+  for (const filler of ["_", "a", "0"]) {
+    for (let size = 1; size <= 8; size++) witnesses.push(prefix + filler.repeat(size) + pieces.join("") + suffix);
+    for (const size of lengths) if (size > core.length) witnesses.push(prefix + filler.repeat(size - core.length) + pieces.join("") + suffix);
+  }
   return witnesses;
 }
 
@@ -158,12 +189,16 @@ export function relationClasses(
   rules: readonly RelationRule[],
   schema: AnySchema,
   base: readonly RelationClass[] = [],
+  inherited: readonly Rule[] = [],
 ): { readonly classes: readonly RelationClass[]; readonly excluded: readonly string[] } {
   const distinct = rules.filter((rule, index) => rules.findIndex(other => other.relation === rule.relation && deepEqual(other.other, rule.other)) === index);
   const kind = distinct.every(rule => rule.relation === "hasKey") ? "record" : distinct.every(rule => rule.relation === "includes") ? "array" : "string";
   const label = (rule: RelationRule, outcome: boolean) => `${outcome ? "" : "¬"}${symbols[rule.relation]}(${show(rule.other)})`;
   const combos: { readonly rule: RelationRule; readonly outcome: boolean }[][] = [];
-  if (distinct.length <= 4) {
+  // Every way they come out together, up to RELATION_LIMIT relations; past it
+  // each holds and fails apart, and the place is said to be read no further
+  // (comparisonsNotReadOf), since those classes are not a partition.
+  if (distinct.length <= RELATION_LIMIT) {
     for (let mask = 0; mask < 1 << distinct.length; mask++) combos.push(distinct.map((rule, index) => ({ rule, outcome: (mask & (1 << index)) === 0 })));
   } else {
     for (const rule of distinct) combos.push([{ rule, outcome: true }], [{ rule, outcome: false }]);
@@ -178,7 +213,7 @@ export function relationClasses(
       if (refuted(kind, steps)) { excluded.push(name); continue; }
       const contains = (value: unknown) => outer.contains(value) && combo.every(item => relationHolds(item.rule.relation, value, item.rule.other) === item.outcome);
       const candidates = [...(outer.witness === undefined ? [] : [outer.witness]), ...witnessesOf(kind, steps, schema)];
-      const witness = candidates.find(value => contains(value) && schema.parse(value).success);
+      const witness = candidates.map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && contains(found.value))?.value;
       classes.push({ name, witness, contains });
     }
   }

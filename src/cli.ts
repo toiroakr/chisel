@@ -838,7 +838,9 @@ function formatWalks(walks: AdequacyReport["walks"]): string[] {
   return [
     `  foldの書き換え       ${told}/${walks.length}`,
     ...walks.filter(walk => walk.status === "not told" || walk.status === "undecided").map(walk =>
-      `    ${walk.status === "not told" ? "!" : "?"} ${describeWalk(walk)}${walk.reason === undefined ? "" : ` — ${walk.reason}`}`),
+      walk.status === "not told"
+        ? `    ! ${describeWalk(walk)}${walk.reason === undefined ? "" : ` — ${walk.reason}`}`
+        : `    ? ${walk.decision}: ${walk.walk}の書き換え（${walk.rewrite}）を見分けられたか決められない${walk.reason === undefined ? "" : ` — ${walk.reason}`}`),
   ];
 }
 

@@ -177,6 +177,8 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     // Rounding keeps order, so the range rounds at its ends.
     const inner = interval(node.left, scope, steps);
     if (!inner || onTimeline(inner.kind) || typeof node.right !== "number") return undefined;
+    // A number is rounded only where it is a whole one: round refuses any other.
+    if (inner.kind === "number" && !(inner.integral && safeInteger(inner))) return undefined;
     const mode = node.mode ?? "half-even";
     return { kind: "decimal", integral: node.right === 0, scale: node.right, low: roundedAt(inner.low, node.right, mode), high: roundedAt(inner.high, node.right, mode) };
   }

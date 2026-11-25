@@ -12,6 +12,9 @@ import { SpecificationError, performSync } from "./behavior.js";
 import { childrenOf, iterationsOf, nodeOf, withWalk } from "./model.js";
 import type { Walk } from "./model.js";
 import { describeTerm, isTerm, localLabel, pathsRead, termData } from "./rule.js";
+import { schemaAtPath } from "./schema.js";
+import type { AnySchema } from "./schema.js";
+import { integralBounds } from "./domain.js";
 import type { Rule, Term } from "./rule.js";
 
 export type { Walk } from "./model.js";
@@ -75,7 +78,15 @@ export function foldsOf(implementation: AnyImplementation | undefined): readonly
       const label = isTerm(values) ? `fold over ${termLabel(values)}` : "fold";
       const position = isTerm(values) ? termData(values as Term<unknown>) : undefined;
       const over = position?.kind === "position" && position.measure === "value" && !position.path[0]!.startsWith("#") ? position.path : undefined;
-      const single = Array.isArray(values) && nodeOf(values) === undefined && values.length <= 1;
+      // A list written with one element or none, or an input list every case
+      // the fold walks holds to one element at most, takes no second step.
+      const written = Array.isArray(values) && nodeOf(values) === undefined && values.length <= 1;
+      const bounded = over !== undefined && tags.every(tag => {
+        const list = schemaAtPath(implementation.behavior.input.variants[tag] as AnySchema, over);
+        const upper = list === undefined ? undefined : integralBounds(list, "length").upper;
+        return upper !== undefined && upper <= 1;
+      });
+      const single = written || bounded;
       folds.push({ decision: rules, tags, node, label, ...(over === undefined ? {} : { over }), ...(single ? { single: true as const } : {}) });
     }
   }
@@ -92,8 +103,9 @@ function readsRun(fold: FoldNode): boolean {
   const own = new Set([fold.name, fold.accumulator]);
   const seen = new Set<unknown>();
   let reads = false;
+  // The whole input, read by the empty path, is a read of what a run is handed.
   const rooted = (path: readonly string[]) => {
-    if (path[0] !== undefined && !own.has(path[0])) reads = true;
+    if (path[0] === undefined || !own.has(path[0])) reads = true;
   };
   const walk = (value: unknown) => {
     if (reads || value === null || typeof value !== "object" || seen.has(value)) return;
@@ -165,7 +177,9 @@ export function walksOf(
     const plain = ofCase.map(row => ({ row, run: runWalk(implementation, row.given, row.deps) }));
     const entered = plain.filter(({ run }) => run.elements.has(fold.node));
     const second = plain.filter(({ run }) => tookSecond(run, fold.node));
-    const pendingPlain = plain.some(({ run }) => run.pending);
+    // A run that could not be made synchronously might still reach the fold
+    // and take a second element, unless it is seen to have entered it with fewer.
+    const pendingPlain = plain.some(({ run }) => run.pending && !(run.elements.has(fold.node) && !tookSecond(run, fold.node)));
     for (const walk of walks) {
       const base = { decision: fold.decision.id, walk: fold.label, rewrite: walk };
       if (fold.single) {

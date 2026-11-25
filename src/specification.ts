@@ -1601,7 +1601,7 @@ function suggestedRowsFor(
           if (given === undefined || !definition.input.parse(given).success || seen.some(other => deepEqual(other, given))) continue;
           seen.push(given);
           suggested.push({
-            name: `${definition.name}: ${call.dependency}()の記録行「${recorded.name}」の入力を尋ねる`,
+            name: `${definition.name}: ${call.dependency}()の記録行「${recorded.name}」の入力を${describeArgument(call.input)}で尋ねる`,
             given,
             reason: "提案する入力（満たしていない義務はない）",
             suggested: true,
@@ -1655,12 +1655,24 @@ function walkRowsFor(
     }
     let best: { given: unknown; origin: Example<AnyBehavior>; told: number } | undefined;
     search: for (const origin of origins) {
-      const list = read(origin.given);
-      if (!Array.isArray(list)) continue;
-      const grown: unknown[][] = list.length === 0
-        ? pool.flatMap(first => pool.map(second => [first, second]))
-        : pool.flatMap(element => [[...list, element], [element, ...list]]);
-      for (const candidate of grown.slice(0, 64)) {
+      const held = read(origin.given);
+      if (!Array.isArray(held)) continue;
+      const list: readonly unknown[] = held;
+      // Made one at a time, in the order a list of two is reached, and no more
+      // than 64 from each origin: a long list grows into long candidates.
+      function* grown(): Generator<unknown[]> {
+        if (list.length === 0) {
+          for (const first of pool) for (const second of pool) yield [first, second];
+          return;
+        }
+        for (const element of pool) {
+          yield [...list, element];
+          yield [element, ...list];
+        }
+      }
+      let made = 0;
+      for (const candidate of grown()) {
+        if (++made > 64) break;
         const given = writtenAt(origin.given, path, candidate);
         if (!definition.input.parse(given).success) continue;
         const deps = depsOf(origin);
@@ -1684,6 +1696,18 @@ function walkRowsFor(
     });
   }
   return { rows: offered, notComposed };
+}
+
+// The input a call's argument reads, as the report writes it, so two calls
+// of one dependency asking one recorded row are named apart.
+function describeArgument(argument: unknown): string {
+  const read: string[] = [];
+  const walk = (value: unknown) => {
+    if (isTerm(value)) read.push(describeTerm(value));
+    else if (value !== null && typeof value === "object") for (const child of Object.values(value)) walk(child);
+  };
+  walk(argument);
+  return read.length === 0 ? "定数" : read.join("・");
 }
 
 function writtenAt(given: unknown, path: readonly string[], value: unknown): unknown {
@@ -2470,7 +2494,15 @@ function besideTheNearest(
     return values.length === 0 ? undefined : Math.min(...values.map(value => Math.abs(value - target)));
   };
   const variant = definition.input.variants[drawn.origin?.tag ?? ""] as { readonly shape?: Readonly<Record<string, AnySchema>> } | undefined;
-  const fields = Object.entries(variant?.shape ?? {}).filter(([, schema]) => schema.kind === "integer" || schema.kind === "number").map(([key]) => key);
+  // Every integer, number and int64 leaf of the case, nested objects included.
+  const fields: (readonly string[])[] = [];
+  const numericLeaves = (schema: AnySchema | undefined, path: readonly string[]) => {
+    if (schema === undefined) return;
+    if (schema.kind === "integer" || schema.kind === "number" || schema.kind === "int64") fields.push(path);
+    else if (schema.kind === "object") for (const [key, field] of Object.entries((schema as unknown as { readonly shape: Readonly<Record<string, AnySchema>> }).shape)) numericLeaves(field, [...path, key]);
+  };
+  numericLeaves(variant as AnySchema | undefined, []);
+  const readAt = (given: unknown, path: readonly string[]) => path.reduce<unknown>((value, key) => (value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined), given);
   const scored = runs
     .map(run => ({ ...run, distance: distance(run.given, run.with) }))
     .filter((run): run is typeof run & { distance: number } => run.distance !== undefined)
@@ -2483,9 +2515,9 @@ function besideTheNearest(
       let best: typeof current | undefined;
       for (const field of fields) {
         for (const by of [1, -1, 2, -2, 10, -10, 100, -100]) {
-          const value = (current.given as Record<string, unknown>)[field];
-          if (typeof value !== "number") continue;
-          const given = { ...(current.given as object), [field]: value + by };
+          const value = readAt(current.given, field);
+          if (typeof value !== "number" && typeof value !== "bigint") continue;
+          const given = writtenAt(current.given, field, typeof value === "bigint" ? value + BigInt(by) : value + by);
           if (!definition.input.parse(given).success) continue;
           steps++;
           if (coordinates(given, current.with).some(reached => point.contains(reached))) {
@@ -3107,7 +3139,27 @@ type WayPlan =
   | { readonly kind: "ways"; readonly ways: readonly Way[] }
   | { readonly kind: "too many" };
 
+// Planned once per implementation and limits: what to change is read off the
+// plans before the measurement and the measurement reads the same plans, so
+// `modelChanges` followed by `check` plans each decision once.
+const planned = new WeakMap<object, Map<string, ReadonlyMap<unknown, WayPlan>>>();
 function plansOf(
+  implementation: Implementation<AnyBehavior> | undefined,
+  combinations: number,
+  wayLimit: number,
+): ReadonlyMap<unknown, WayPlan> {
+  if (implementation === undefined) return new Map();
+  const key = `${combinations}:${wayLimit}`;
+  const cached = planned.get(implementation)?.get(key);
+  if (cached !== undefined) return cached;
+  const made = planFor(implementation, combinations, wayLimit);
+  const byLimits = planned.get(implementation) ?? new Map<string, ReadonlyMap<unknown, WayPlan>>();
+  byLimits.set(key, made);
+  planned.set(implementation, byLimits);
+  return made;
+}
+
+function planFor(
   implementation: Implementation<AnyBehavior> | undefined,
   combinations: number,
   wayLimit: number,

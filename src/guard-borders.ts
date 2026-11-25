@@ -13,7 +13,7 @@ import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm,
 import { enumOf, int, isVariantsSchema, object, variants } from "./schema.js";
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
 import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, relationThresholdsIn, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
-import { relationClasses } from "./relations.js";
+import { RELATION_LIMIT, relationClasses } from "./relations.js";
 import type { Frame, Frames, Threshold } from "./guard-scope.js";
 export interface GuardBorder {
   readonly path: string;
@@ -40,6 +40,9 @@ export interface GuardBorder {
 export interface BorderForm {
   readonly parts: readonly {
     readonly path: string;
+    // The position as segments and measure, which the rendered path cannot
+    // tell apart: the key "a.b" renders as the path a.b does.
+    readonly identity: string;
     readonly coefficient: number;
     valueOf(scope: unknown): number | undefined;
     write(given: unknown, value: number): unknown;
@@ -343,7 +346,7 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
     );
     if (related.length === 0) return partition === undefined ? [] : [partition];
     // The relations divide the place within each class the comparisons divide it into.
-    const { classes, excluded } = relationClasses(related.map(threshold => threshold.rule), first.schema, partition?.classes ?? []);
+    const { classes, excluded } = relationClasses(related.map(threshold => threshold.rule), first.schema, partition?.classes ?? [], first.inherited);
     return [{ path: first.path, segments: first.segments, classes, excluded: [...(partition?.excluded ?? []), ...excluded] }];
   });
 }
@@ -636,6 +639,7 @@ function betweenExpressionOn(
       ? {
           parts: parts.map(part => ({
             path: part.path,
+            identity: JSON.stringify([part.segments, part.measure]),
             coefficient: part.coefficient,
             valueOf: scope => valueOf(part, scope),
             write: (given, value) => at(part.segments)?.write(given, part.measure, value),
@@ -788,6 +792,7 @@ function betweenOn(
     ? {
         parts: sides.map((side, index) => ({
           path: side.path,
+          identity: JSON.stringify([side.segments, side.measure]),
           coefficient: index === 0 ? 1 : -1,
           valueOf: scope => read(side, scope) as number | undefined,
           write: (given, value) => at(side.segments)?.write(given, side.measure, value),
@@ -963,8 +968,7 @@ function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: sec
 }
 
 export function comparisonsNotReadOf(implementation: AnyImplementation): readonly string[] {
-  const input = implementation.behavior.input;
-  return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+  const unread = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
@@ -973,6 +977,22 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
           ),
         ),
   );
+  // A place more relations are written against than their combinations are
+  // drawn for is divided into no partition.
+  const relations = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+    decision.kind !== "rules" ? [] : decision.guards.flatMap(candidate => relationThresholdsIn(candidate.condition, framesFor(implementation.behavior, tag, decision))),
+  );
+  const places = new Map<string, { path: string; rules: Set<string> }>();
+  for (const threshold of relations) {
+    const key = JSON.stringify(threshold.segments);
+    const place = places.get(key) ?? { path: threshold.path, rules: new Set<string>() };
+    place.rules.add(threshold.described);
+    places.set(key, place);
+  }
+  const crowded = [...places.values()]
+    .filter(place => place.rules.size > RELATION_LIMIT)
+    .map(place => `${place.path}: 関係が${place.rules.size}個あり、上限の${RELATION_LIMIT}個を超えるため組み合わせを引かない`);
+  return [...unread, ...crowded];
 }
 
 function unreadIn(rule: Rule, frames: Frames): string[] {

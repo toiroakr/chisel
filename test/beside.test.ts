@@ -202,3 +202,29 @@ describe("a computation cut at several places owes its weights once", () => {
     expect(generated.filter(row => row.name.includes("隣の線"))).toStrictEqual([]);
   });
 });
+
+describe("a computation is told by its positions, not by how they render", () => {
+  it("keeps the key \"a.b\" apart from the path a.b", async () => {
+    const { guardBordersOf } = await import("../src/guard-borders.js");
+    const { computationOf } = await import("../src/beside.js");
+    const 点 = behavior("点", {
+      input: variants("状態", { 入力済み: object({ "a.b": int(), a: object({ b: int() }), y: int() }) }),
+      result: variants("結果", { 真: object({}), 偽: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 二つ = implement(点, {
+      cases: {
+        入力済み: action("二つ", {
+          guards: v => [
+            v["a.b"].$plus(v.y).$plus(v.y).$lt(10).$else(偽),
+            v.a.b.$plus(v.y).$plus(v.y).$lt(20).$else(偽),
+          ],
+          run: () => ({ result: { 結果: "真" }, effects: [] }),
+        }),
+      },
+    });
+    const keys = guardBordersOf(二つ).map(drawn => computationOf(drawn.origin?.tag, drawn.form!.parts));
+    expect(keys.length).toBe(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+});

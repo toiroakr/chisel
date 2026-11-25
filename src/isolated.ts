@@ -39,16 +39,23 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
     }
   };
   let ticker: ReturnType<typeof setInterval> | undefined;
+  let started = false;
   const starter = setTimeout(() => {
+    started = true;
     say();
     ticker = setInterval(() => { said = undefined; say(); }, progress.every ?? 60000);
   }, progress.after ?? 3000);
   const output: { stream: "stdout" | "stderr"; message: string }[] = [];
   return new Promise(resolve => {
     let done = false;
-    const finish = async (result: IsolatedResult) => {
+    // Lines said before the result that no callback took are kept before
+    // whatever the run ends with, a failure as much as a result.
+    const finish = async (ended: IsolatedResult) => {
       if (done) return;
       done = true;
+      const result = early.length === 0 || ended.logs.length === 0 && ended.error === "Execution output exceeded 1 MiB"
+        ? ended
+        : { ...ended, logs: [...early.map(line => ({ stream: "stdout" as const, message: line })), ...ended.logs] };
       clearTimeout(timer);
       clearTimeout(starter);
       if (ticker !== undefined) clearInterval(ticker);
@@ -64,6 +71,8 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
     worker.on("message", (message: IsolatedResult | { readonly kind: "progress" | "early"; readonly message: string }) => {
       if ("kind" in message && message.kind === "progress") {
         phase = message.message;
+        // The first phase known after the run has gone on a while is said at once.
+        if (started && said === undefined) say();
         return;
       }
       if ("kind" in message && message.kind === "early") {
@@ -71,9 +80,8 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
         else early.push(message.message);
         return;
       }
-      const posted = message as IsolatedResult;
-      const result = early.length === 0 ? posted : { ...posted, logs: [...early.map(line => ({ stream: "stdout" as const, message: line })), ...posted.logs] };
-      const size = result.logs.reduce((sum, entry) => sum + Buffer.byteLength(entry.message), 0);
+      const result = message as IsolatedResult;
+      const size = [...early, ...result.logs.map(entry => entry.message)].reduce((sum, line) => sum + Buffer.byteLength(line), 0);
       void finish(size > 1024 * 1024 ? { exitCode: 1, logs: [], error: "Execution output exceeded 1 MiB" } : result);
     });
     worker.once("error", error => void finish({ exitCode: 1, logs: output, error: error instanceof Error ? error.message : String(error) }));

@@ -510,7 +510,11 @@ class Compiler {
       const operands = new Map([...names, ["", self]]);
       const subject = this.value(rule.subject, operands), other = this.value(rule.other, operands);
       if (rule.relation === "hasKey") return `(${other} \\in DOMAIN ${subject})`;
-      if (rule.relation === "includes") return `(\\E i \\in 1..Len(${subject}): ${subject}[i] = ${other})`;
+      if (rule.relation === "includes") {
+        // A fresh index: an enclosing quantifier of a paired transition may already bind i.
+        const index = `element${this.next++}`;
+        return `(\\E ${index} \\in 1..Len(${subject}): ${subject}[${index}] = ${other})`;
+      }
       throw new SpecificationError(`TLA+ translation does not read ${rule.relation}: strings are no sequences there`);
     }
     if (rule.kind === "not") return `~(${this.rule(rule.rule, names, self)})`;

@@ -111,3 +111,53 @@ describe("relations in a model, in feasibility and in the absence check", () => 
     })).toThrow("reads $.note, which may be left out");
   });
 });
+
+describe("the values that stand for a class of relations", () => {
+  const 値 = (fields: Readonly<Record<string, c.AnySchema>>, refine?: (v: never) => c.Rule) => {
+    const object = c.object(fields);
+    return c.behavior("値", {
+      input: c.variants("kind", { request: refine === undefined ? object : object.refine(refine as never) }),
+      result: c.boolean(),
+      effects: c.variants("種類", {}),
+    });
+  };
+  const guarded = (definition: c.AnyBehavior, guard: (v: never) => c.Rule) => c.implement(definition as never, {
+    cases: { request: c.action("判定", { guards: ((v: never) => [(guard(v) as never as { $else: (f: unknown) => unknown }).$else(() => ({ result: false, effects: [] }))]) as never, run: () => ({ result: true, effects: [] }) }) },
+  } as never);
+
+  it("takes the invariant an enclosing object writes on the place into account", async () => {
+    const definition = 値({ s: c.string() }, ((v: c.TermOf<{ s: string }>) => v.s.$startsWith("A")) as never);
+    const implementation = guarded(definition, ((v: c.TermOf<{ s: string }>) => v.s.$startsWith("B")) as never);
+    const report = await c.check(c.spec("値", { examples: c.examples(definition as never, {}), implementation: implementation as never }));
+    const rules = report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => `${rule.way}: ${rule.status}`) : [];
+    expect(rules.some(rule => rule.startsWith('startsWith($.s, "B") holds') && rule.endsWith("gap"))).toBe(false);
+  });
+
+  it("stands for a class with the value a row holds once parsed, NFC and all", async () => {
+    const definition = 値({ tags: c.array(c.string()) });
+    const implementation = guarded(definition, ((v: c.TermOf<{ tags: string[] }>) => v.tags.$includes("é")) as never);
+    const { rows } = c.generate(c.examples(definition as never, {}), implementation as never);
+    const held = rows.filter(row => row.name.includes("includes")).map(row => (row.given as { tags: string[] }).tags);
+    expect(held.every(tags => tags.every(tag => tag === tag.normalize("NFC")))).toBe(true);
+  });
+
+  it("pads a witness to the length the place's schema declares", async () => {
+    const definition = 値({ code: c.string().min(12) });
+    const implementation = guarded(definition, ((v: c.TermOf<{ code: string }>) => v.code.$startsWith("AB")) as never);
+    const { rows, notComposed } = c.generate(c.examples(definition as never, {}), implementation as never);
+    expect(notComposed.filter(item => item.includes("startsWith"))).toStrictEqual([]);
+    expect(rows.filter(row => row.name.includes("startsWith")).every(row => (row.given as { code: string }).code.length >= 12)).toBe(true);
+  });
+});
+
+describe("a relation that never holds as written", () => {
+  it("refuses an array of cents asked whether it includes a value off their grid", async () => {
+    const { Decimal } = await import("decimal.js");
+    expect(() => c.object({ amounts: c.array(c.decimal(2)) }).refine(v => v.amounts.$includes(new Decimal("0.005"))))
+      .toThrow("refine compares $.amounts[] with 0.005, which no decimal(2) holds");
+  });
+
+  it("names $startsWith with undefined as the author writes it", () => {
+    expect(() => c.object({ s: c.string() }).refine(v => v.s.$startsWith(undefined as never))).toThrow("$startsWith with undefined");
+  });
+});

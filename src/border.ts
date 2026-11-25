@@ -1,6 +1,6 @@
 import { requireTemporal } from "./temporal-global.js";
 import { temporalNeighbor } from "./temporal.js";
-import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Rational, INT64_MIN, INT64_MAX, decimalOf, fractionOf } from "./exact.js";
 import { compareText } from "./text.js";
 import type { Measure, Operator, Rule, Term } from "./rule.js";
 import { Decimal } from "decimal.js";
@@ -68,14 +68,16 @@ export const lengthCarrier: Carrier = {
 // Steps by one unit of the last digit and compares exactly. A bound written off
 // that grid is moved onto it first, so `>= 0.004` in cents draws the border of
 // `>= 0.01`, whose points are values a row can hold.
-// Without a scale, any finite decimal: no value is next to another, so a
-// strict bound draws no OFF point, as a number's does not.
+// Without a scale, any finite decimal: no value is next to another, so no
+// point is named as the neighbour of a bound (an OFF point beside a strict
+// one, as for a number), and a run past a bound is taken one whole unit away,
+// worked out exactly.
 export function decimalCarrier(scale: number | undefined): Carrier {
   const asDecimal = (value: unknown): Decimal => isDecimal(value) ? value : new Decimal(value as Decimal.Value);
   if (scale === undefined) {
     return {
       compare: (left, right) => asDecimal(left).comparedTo(asDecimal(right)),
-      past: (value, direction) => asDecimal(value).plus(direction),
+      past: (value, direction) => decimalOf(fractionOf(asDecimal(value)).plus(fractionOf(direction))),
       format: String,
     };
   }

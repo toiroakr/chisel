@@ -8,7 +8,6 @@
 // finds.
 import type { RulesDecision } from "./behavior.js";
 import { childrenOf, nodeOf } from "./model.js";
-import { outcomesOf } from "./outcomes.js";
 import { describeRule, isTerm } from "./rule.js";
 import type { Rule } from "./rule.js";
 
@@ -57,6 +56,35 @@ function conditionsText(conditions: readonly string[]): string {
   return conditions.length > 3 ? `${shown}ほか${conditions.length - 3}つ` : shown;
 }
 
+// --- counting ----------------------------------------------------------------
+
+// How many outcomes of a rule hold and how many fail, as outcomesOf lists
+// them, worked out without listing them: a conjunction of n disjunctions has
+// 2^n outcomes, too many to visit.
+export function outcomeCounts(rule: Rule): { readonly holds: bigint; readonly fails: bigint } {
+  switch (rule.kind) {
+    case "not": {
+      const inner = outcomeCounts(rule.rule);
+      return { holds: inner.fails, fails: inner.holds };
+    }
+    case "and":
+    case "or": {
+      // The outcomes that settle the junction end it; the others go on to the next part.
+      const settles = rule.kind === "or";
+      let going = 1n, settled = 0n;
+      for (const part of rule.rules) {
+        const counts = outcomeCounts(part);
+        const [settling, continuing] = settles ? [counts.holds, counts.fails] : [counts.fails, counts.holds];
+        settled += going * settling;
+        going *= continuing;
+      }
+      return settles ? { holds: settled, fails: going } : { holds: going, fails: settled };
+    }
+    default:
+      return { holds: 1n, fails: 1n };
+  }
+}
+
 // --- a model -----------------------------------------------------------------
 
 // The children a way of the model goes through, as `modelPaths` reads them: an
@@ -69,48 +97,167 @@ function pathChildren(template: unknown): readonly unknown[] {
   return childrenOf(template);
 }
 
-interface Located {
+// Where each child of a node stands, as the report names it.
+function labelled(template: unknown, at: string): { readonly paths: readonly (readonly [unknown, string])[]; readonly body?: readonly [unknown, string] } {
+  const node = nodeOf(template);
+  const join = (key: string) => (at === "答え" ? key : `${at}.${key}`);
+  if (node === undefined) {
+    if (isTerm(template) || template === null || typeof template !== "object") return { paths: [] };
+    if (Array.isArray(template)) return { paths: template.map((child, index) => [child, `${at}[${index}]`] as const) };
+    return { paths: Object.entries(template as object).map(([key, child]) => [child, join(key)] as const) };
+  }
+  switch (node.kind) {
+    case "choose": {
+      const condition = describeRule(node.condition as Rule);
+      return { paths: [[node.yes, `「${condition}」が成り立つ側`], [node.no, `「${condition}」が成り立たない側`]] };
+    }
+    case "bind":
+      return { paths: [[node.value, `${at}で束ねる値`], [node.body, at]] };
+    case "map":
+      return { paths: [[node.values, `${at}のmapが回す値`]], body: [node.body, `${at}のmapの本体`] };
+    case "fold":
+      return { paths: [[node.values, `${at}のfoldが回す値`], [node.initial, `${at}のfoldの初期値`]], body: [node.body, `${at}のfoldの本体`] };
+    case "call":
+      return { paths: [[node.input, `${at}のcallの引数`]] };
+    case "construct":
+      return { paths: [[node.value, at]] };
+    case "operation":
+    case "temporal":
+      return { paths: [[node.left, `${at}の${node.operator}の左`], [node.right, `${at}の${node.operator}の右`]] };
+  }
+}
+
+interface TreeNode {
   readonly template: unknown;
   readonly at: string;
+  readonly parent: number | undefined;
+  readonly choose: boolean;
+  readonly children: number[];
+  // For a choice, how many of its outcomes go to each branch.
+  readonly weights: bigint[];
+  readonly root: number;
+  // The bodies of the walks this node is, each a root of its own.
+  readonly bodies: number[];
+  // For a body's root, the walk it is the body of.
+  readonly owner?: number;
+  size: number;
+}
+
+// The model as the ways count it: one tree of the paths through it, and one
+// for each walk's body, whose ways are listed apart.
+function treeOf(expression: unknown): TreeNode[] {
+  const nodes: TreeNode[] = [];
+  const build = (template: unknown, at: string, parent: number | undefined, root: number | undefined, owner?: number): number => {
+    const id = nodes.length;
+    const node = nodeOf(template);
+    const entry: TreeNode = { template, at, parent, choose: node?.kind === "choose", children: [], weights: [], root: root ?? id, bodies: [], ...(owner === undefined ? {} : { owner }), size: 1 };
+    nodes.push(entry);
+    const { paths, body } = labelled(template, at);
+    const followed = new Set(pathChildren(template));
+    if (node?.kind === "choose") {
+      const { holds, fails } = outcomeCounts(node.condition as Rule);
+      entry.children.push(build(node.yes, paths[0]![1], id, entry.root), build(node.no, paths[1]![1], id, entry.root));
+      entry.weights.push(holds, fails);
+    } else {
+      for (const [child, label] of paths) if (followed.has(child)) entry.children.push(build(child, label, id, entry.root));
+    }
+    if (body !== undefined) entry.bodies.push(build(body[0], body[1], undefined, undefined, id));
+    entry.size = 1 + entry.children.reduce((sum, child) => sum + nodes[child]!.size, 0) + entry.bodies.reduce((sum, child) => sum + nodes[child]!.size, 0);
+    return id;
+  };
+  build(expression, "答え", undefined, undefined);
+  return nodes;
+}
+
+interface Counted {
+  readonly count: readonly bigint[];
+  // The ways of the bodies of walks within each node, alive under the cut.
+  readonly within: readonly bigint[];
+  readonly total: bigint;
+}
+
+function counted(nodes: readonly TreeNode[], cut: ReadonlySet<number>): Counted {
+  const count: bigint[] = Array(nodes.length).fill(1n);
+  const within: bigint[] = Array(nodes.length).fill(0n);
+  // Children come after their parent, so a pass from the end sees them first.
+  for (let id = nodes.length - 1; id >= 0; id--) {
+    const node = nodes[id]!;
+    if (cut.has(id)) { count[id] = 1n; within[id] = 0n; continue; }
+    count[id] = node.choose
+      ? node.children.reduce((sum, child, index) => sum + node.weights[index]! * count[child]!, 0n)
+      : node.children.reduce((product, child) => product * count[child]!, 1n);
+    within[id] = node.children.reduce((sum, child) => sum + within[child]!, 0n) +
+      node.bodies.reduce((sum, body) => sum + contribution(count[body]!, true) + within[body]!, 0n);
+  }
+  return { count, within, total: count[0]! + within[0]! };
+}
+
+// A body with one way distinguishes nothing and lists none.
+function contribution(count: bigint, body: boolean): bigint {
+  return body && count <= 1n ? 0n : count;
 }
 
 function expressionChange(decision: string, expression: unknown, limit: number): ModelChange | undefined {
-  const total = (cut: ReadonlySet<unknown>) => decisionWays(expression, cut);
-  const ways = total(new Set());
-  if (ways <= BigInt(limit)) return undefined;
-  const candidates = locate(expression).filter(item => item.template !== expression && !isTerm(item.template) && pathsIn(item.template, new Set()) + bodyWays(item.template, new Set()) > 1n);
-  const sizes = new Map(candidates.map(item => [item.template, sizeOf(item.template)]));
-  const cut: Located[] = [];
-  for (let round = 0; round < 8 && total(new Set(cut.map(item => item.template))) > BigInt(limit); round++) {
-    const taken = new Set(cut.map(item => item.template));
-    const under = new Set(cut.flatMap(item => locate(item.template).map(inner => inner.template)));
-    let alone: { item: Located; size: number } | undefined;
-    let best: { item: Located; left: bigint; size: number } | undefined;
-    for (const item of candidates.slice(0, 2000)) {
-      if (under.has(item.template)) continue;
-      const left = total(new Set([...taken, item.template]));
-      const size = sizes.get(item.template)!;
-      if (left <= BigInt(limit)) {
-        if (alone === undefined || size < alone.size) alone = { item, size };
-      } else if (best === undefined || left < best.left || (left === best.left && size < best.size)) {
-        best = { item, left, size };
+  const nodes = treeOf(expression);
+  const bound = BigInt(limit);
+  const first = counted(nodes, new Set());
+  const ways = first.total;
+  if (ways <= bound) return undefined;
+  const own = (id: number) => first.count[id]! + first.within[id]!;
+  const ancestors = (id: number): number[] => {
+    const chain: number[] = [];
+    for (let at: number | undefined = id; at !== undefined;) {
+      const node: TreeNode = nodes[at]!;
+      const up: number | undefined = node.parent ?? node.owner;
+      if (up !== undefined) chain.push(up);
+      at = up;
+    }
+    return chain;
+  };
+  const cut = new Set<number>();
+  for (let round = 0; round < 8; round++) {
+    const now = counted(nodes, cut);
+    if (now.total <= bound) break;
+    const blocked = (id: number) => cut.has(id) || ancestors(id).some(up => cut.has(up));
+    let alone: { id: number; size: number } | undefined;
+    let best: { id: number; left: bigint; size: number } | undefined;
+    for (let id = 1; id < nodes.length; id++) {
+      const node = nodes[id]!;
+      if (isTerm(node.template) || blocked(id) || [...cut].some(other => ancestors(other).includes(id))) continue;
+      // A part declared as a behavior is measured under the same limit.
+      if (own(id) <= 1n || own(id) > bound) continue;
+      // The root's count with this node taken as one way, along the path up to it.
+      let value = 1n;
+      let at = id;
+      while (nodes[at]!.parent !== undefined) {
+        const parent = nodes[nodes[at]!.parent!]!;
+        const index = parent.children.indexOf(at);
+        const old = now.count[nodes[at]!.parent!]!;
+        value = parent.choose ? old - parent.weights[index]! * now.count[at]! + parent.weights[index]! * value : (old / now.count[at]!) * value;
+        at = nodes[at]!.parent!;
+      }
+      const root = nodes[at]!;
+      const isBody = root.owner !== undefined;
+      const left = now.total - contribution(now.count[at]!, isBody) + contribution(value, isBody) - now.within[id]!;
+      if (left <= bound) {
+        if (alone === undefined || node.size < alone.size) alone = { id, size: node.size };
+      } else if (best === undefined || left < best.left || (left === best.left && node.size < best.size)) {
+        best = { id, left, size: node.size };
       }
     }
-    const chosen = alone?.item ?? (best !== undefined && best.left < total(taken) ? best.item : undefined);
+    const chosen = alone?.id ?? (best !== undefined && best.left < now.total ? best.id : undefined);
     if (chosen === undefined) break;
-    cut.push(chosen);
+    cut.add(chosen);
   }
-  // A part another part holds goes with it.
-  const kept = cut.filter(item => !cut.some(other => other !== item && locate(other.template).some(inner => inner.template === item.template)));
-  const remaining = total(new Set(kept.map(item => item.template)));
+  const remaining = counted(nodes, cut).total;
   const factors = factorsOf(expression).filter(item => item.ways > 1n);
   const product = factors.length > 1 ? `道筋は${factors.map(item => `${item.at}（${format(item.ways)}本）`).join("、")}の掛け算で増える。` : "";
-  const head = `${decision}: 道筋が${format(ways)}本あり、上限の${format(BigInt(limit))}本を超えるため計測しない。${product}`;
+  const head = `${decision}: 道筋が${format(ways)}本あり、上限の${format(bound)}本を超えるため計測しない。${product}`;
   const tail = `いまのまま計測するには上限（--feasibility-ways）を${format(ways)}以上にする。`;
-  if (kept.length === 0 || remaining > BigInt(limit)) {
-    return { decision, figure: "ways", limit, ways: ways.toString(), kind: "none", parts: [], message: `${head}一部をbehaviorとして切り出しても上限の内に収まらない。選択を減らすか、${tail}` };
+  if (cut.size === 0 || remaining > bound) {
+    return { decision, figure: "ways", limit, ways: ways.toString(), kind: "none", parts: [], message: `${head}上限の内に収まる部分をbehaviorとして切り出しても、残りが上限の内に収まらない。選択を減らすか、${tail}` };
   }
-  const parts = kept.map((item): ModelChangePart => ({ at: item.at, conditions: conditionsIn(item.template), ways: (pathsIn(item.template, new Set()) + bodyWays(item.template, new Set())).toString() }));
+  const parts = [...cut].sort((a, b) => a - b).map((id): ModelChangePart => ({ at: nodes[id]!.at, conditions: conditionsIn(nodes[id]!.template), ways: own(id).toString() }));
   const named = parts.map(part => `${part.at}${part.conditions.length === 0 ? "" : `（${conditionsText(part.conditions)}で選ぶ、${format(BigInt(part.ways))}本）`}`).join("と");
   return {
     decision,
@@ -124,103 +271,36 @@ function expressionChange(decision: string, expression: unknown, limit: number):
   };
 }
 
-// The ways eachWayOf lists for a model: those through the model, and those
-// through each iteration's body that distinguishes anything.
-function decisionWays(expression: unknown, cut: ReadonlySet<unknown>): bigint {
-  return pathsIn(expression, cut) + bodyWays(expression, cut);
-}
-
-function pathsIn(template: unknown, cut: ReadonlySet<unknown>): bigint {
-  if (cut.has(template)) return 1n;
+function pathsIn(template: unknown): bigint {
   const node = nodeOf(template);
   if (node?.kind === "choose") {
-    let sum = 0n;
-    for (const outcome of outcomesOf(node.condition as Rule)) sum += pathsIn(outcome.result ? node.yes : node.no, cut);
-    return sum;
+    const { holds, fails } = outcomeCounts(node.condition as Rule);
+    return holds * pathsIn(node.yes) + fails * pathsIn(node.no);
   }
   let product = 1n;
-  for (const child of pathChildren(template)) product *= pathsIn(child, cut);
+  for (const child of pathChildren(template)) product *= pathsIn(child);
   return product;
-}
-
-function bodyWays(template: unknown, cut: ReadonlySet<unknown>, seen: Set<unknown> = new Set()): bigint {
-  if (cut.has(template) || seen.has(template)) return 0n;
-  seen.add(template);
-  const node = nodeOf(template);
-  let sum = 0n;
-  if (node?.kind === "map" || node?.kind === "fold") {
-    const own = pathsIn(node.body, cut);
-    if (own > 1n) sum += own;
-  }
-  for (const child of childrenOf(template)) sum += bodyWays(child, cut, seen);
-  return sum;
-}
-
-// Every subexpression with where it stands.
-function locate(template: unknown, at = "答え", found: Located[] = [], seen: Set<unknown> = new Set()): Located[] {
-  if (seen.has(template) || isTerm(template) || template === null || typeof template !== "object") return found;
-  seen.add(template);
-  found.push({ template, at });
-  const node = nodeOf(template);
-  const join = (key: string) => (at === "答え" ? key : `${at}.${key}`);
-  if (node === undefined) {
-    if (Array.isArray(template)) template.forEach((child, index) => locate(child, `${at}[${index}]`, found, seen));
-    else for (const [key, child] of Object.entries(template as object)) locate(child, join(key), found, seen);
-    return found;
-  }
-  switch (node.kind) {
-    case "choose": {
-      const condition = describeRule(node.condition as Rule);
-      locate(node.yes, `「${condition}」が成り立つ側`, found, seen);
-      locate(node.no, `「${condition}」が成り立たない側`, found, seen);
-      break;
-    }
-    case "bind":
-      locate(node.value, `${at}で束ねる値`, found, seen);
-      locate(node.body, at, found, seen);
-      break;
-    case "map":
-    case "fold":
-      locate(node.values, `${at}の${node.kind}が回す値`, found, seen);
-      if (node.kind === "fold") locate(node.initial, `${at}のfoldの初期値`, found, seen);
-      locate(node.body, `${at}の${node.kind}の本体`, found, seen);
-      break;
-    case "call":
-      locate(node.input, `${at}のcallの引数`, found, seen);
-      break;
-    case "construct":
-      locate(node.value, at, found, seen);
-      break;
-    case "operation":
-    case "temporal":
-      locate(node.left, `${at}の${node.operator}の左`, found, seen);
-      locate(node.right, `${at}の${node.operator}の右`, found, seen);
-      break;
-    default:
-      for (const child of childrenOf(template)) locate(child, at, found, seen);
-  }
-  return found;
 }
 
 // The parts whose ways multiply at the top of the model: the children of
 // every node a way goes through all of, down to the first choice.
 function factorsOf(expression: unknown): readonly { readonly at: string; readonly ways: bigint }[] {
-  const located = new Map(locate(expression).map(item => [item.template, item.at]));
   const factors: { at: string; ways: bigint }[] = [];
-  const walk = (template: unknown) => {
+  const walk = (template: unknown, at: string) => {
     const node = nodeOf(template);
     const children = pathChildren(template);
     if (node?.kind === "choose" || children.length === 0) {
-      factors.push({ at: located.get(template) ?? "答え", ways: pathsIn(template, new Set()) });
+      factors.push({ at, ways: pathsIn(template) });
       return;
     }
-    if (children.filter(child => pathsIn(child, new Set()) > 1n).length <= 1 && template !== expression) {
-      factors.push({ at: located.get(template) ?? "答え", ways: pathsIn(template, new Set()) });
+    if (children.filter(child => pathsIn(child) > 1n).length <= 1 && template !== expression) {
+      factors.push({ at, ways: pathsIn(template) });
       return;
     }
-    for (const child of children) walk(child);
+    const labels = new Map(labelled(template, at).paths.map(([child, label]) => [child, label]));
+    for (const child of children) walk(child, labels.get(child) ?? at);
   };
-  walk(expression);
+  walk(expression, "答え");
   return factors;
 }
 
@@ -238,54 +318,52 @@ function conditionsIn(template: unknown): readonly string[] {
   return [...conditions];
 }
 
-function sizeOf(template: unknown): number {
-  return locate(template).length;
-}
-
 // --- guards ------------------------------------------------------------------
 
 function guardsChange(decision: RulesDecision<unknown, unknown, unknown>, limit: number): ModelChange | undefined {
-  const counts = decision.guards.map(guard => {
-    let holds = 0n, fails = 0n;
-    for (const outcome of outcomesOf(guard.condition as Rule)) outcome.result ? holds++ : fails++;
-    return { holds, fails };
-  });
+  const counts = decision.guards.map(guard => outcomeCounts(guard.condition as Rule));
   const { otherwise } = decision;
-  const cases = typeof otherwise === "function" ? 1n : BigInt(Object.keys(otherwise.cases).length);
+  const matched = typeof otherwise !== "function";
+  const cases = matched ? BigInt(Object.keys(otherwise.cases).length) : 1n;
   const n = counts.length;
-  // The ways through guards [from, to), continuing to `to` in one way unless
-  // it is the end, where the match divides them.
+  // The items stages are cut from: each guard, then the match, which may be a stage of its own.
+  const end = n + (matched ? 1 : 0);
+  // The ways through items [from, to), continuing to `to` in one way unless
+  // it is the end, where the match (if the stage holds it) divides them.
   const waysOf = (from: number, to: number) => {
     let through = 1n, sum = 0n;
-    for (let index = from; index < to; index++) {
+    for (let index = from; index < Math.min(to, n); index++) {
       sum += through * counts[index]!.fails;
       through *= counts[index]!.holds;
     }
-    return sum + through * (to === n ? cases : 1n);
+    return sum + through * (matched && to === end ? cases : 1n);
   };
-  const ways = waysOf(0, n);
-  if (ways <= BigInt(limit)) return undefined;
-  const head = `${decision.id}: 道筋が${format(ways)}本あり、上限の${format(BigInt(limit))}本を超えるため計測しない。guardを順に通る道筋は、各guardが成り立つ道筋の掛け算で増える。`;
+  const ways = waysOf(0, end);
+  const bound = BigInt(limit);
+  if (ways <= bound) return undefined;
+  const head = `${decision.id}: 道筋が${format(ways)}本あり、上限の${format(bound)}本を超えるため計測しない。guardを順に通る道筋は、各guardが成り立つ道筋の掛け算で増える。`;
   const tail = `いまのまま計測するには上限（--feasibility-ways）を${format(ways)}以上にする。`;
   const stages: { from: number; to: number; ways: bigint }[] = [];
   let from = 0;
-  while (from < n) {
-    if (waysOf(from, from + 1) > BigInt(limit)) { stages.length = 0; break; }
+  while (from < end) {
+    if (waysOf(from, from + 1) > bound) { stages.length = 0; break; }
     let to = from + 1;
-    while (to < n && waysOf(from, to + 1) <= BigInt(limit)) to++;
+    while (to < end && waysOf(from, to + 1) <= bound) to++;
     stages.push({ from, to, ways: waysOf(from, to) });
     from = to;
   }
   const label = (stage: { from: number; to: number }) => {
-    const guards = stage.from + 1 === stage.to ? `guard ${stage.from + 1}` : `guard ${stage.from + 1}〜${stage.to}`;
-    return stage.to === n && typeof otherwise !== "function" ? `${guards}とmatch` : guards;
+    const last = Math.min(stage.to, n);
+    const guards = stage.from >= n ? "" : stage.from + 1 === last ? `guard ${stage.from + 1}` : `guard ${stage.from + 1}〜${last}`;
+    const match = matched && stage.to === end ? "match" : "";
+    return [guards, match].filter(part => part !== "").join("と");
   };
   if (stages.length < 2) {
     return { decision: decision.id, figure: "ways", limit, ways: ways.toString(), kind: "none", parts: [], message: `${head}guardを段に分けても上限の内に収まらない。一つの条件の書き方を減らすか、${tail}` };
   }
   const parts = stages.map((stage): ModelChangePart => ({
     at: label(stage),
-    conditions: decision.guards.slice(stage.from, stage.to).map(guard => describeRule(guard.condition as Rule)),
+    conditions: decision.guards.slice(stage.from, Math.min(stage.to, n)).map(guard => describeRule(guard.condition as Rule)),
     ways: stage.ways.toString(),
   }));
   return {

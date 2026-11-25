@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isDecimal, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -305,13 +305,26 @@ export function identityOf(rule: Rule): string {
 function constantsWithin(rule: Rule): readonly string[] {
   switch (rule.kind) {
     case "compare": return [rule.left, rule.right].filter(operand => !isTerm(operand)).map(value => `${typeof value}:${(value as { constructor?: { name?: string } } | null)?.constructor?.name ?? ""}:${String(value)}`);
-    case "relation": return isTerm(rule.other) ? [] : [`${typeof rule.other}:${JSON.stringify(rule.other, (_key, value) => typeof value === "bigint" ? `${value}n` : value)}`];
+    case "relation": return isTerm(rule.other) ? [] : [structuralOf(rule.other)];
     case "all":
     case "any": return constantsWithin(rule.each);
     case "and":
     case "or": return rule.rules.flatMap(constantsWithin);
     case "not": return constantsWithin(rule.rule);
   }
+}
+// A written value as it is told apart: a property holding undefined is not a
+// property left out, and a bigint, a decimal and a rational are each their own.
+function structuralOf(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (typeof value === "bigint") return `${value}n`;
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value === null || typeof value !== "object") return `${typeof value}:${String(value)}`;
+  if (isDecimal(value)) return `decimal:${value.toString()}`;
+  if (Array.isArray(value)) return `[${value.map(structuralOf).join(",")}]`;
+  const named = (value as { constructor?: { name?: string } }).constructor?.name;
+  if (named !== undefined && named !== "Object") return `${named}:${String(value)}`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${structuralOf((value as Record<string, unknown>)[key])}`).join(",")}}`;
 }
 // Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
 function pathsWithin(rule: Rule): readonly (readonly string[])[] {
