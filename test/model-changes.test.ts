@@ -112,3 +112,18 @@ describe("what to change in a model before measuring it", () => {
     expect(validate(schema as never, reportDocument([report], { id: "x", name: "x" }))).toStrictEqual([]);
   });
 });
+
+describe("the phases a check says it is on", () => {
+  it("tells each phase, named by the behavior, as it enters it", async () => {
+    const phases: string[] = [];
+    await c.check(c.spec("見積", { examples: c.examples(見積, {}), implementation: 見積る }), { progress: phase => phases.push(phase) });
+
+    expect(phases).toStrictEqual([
+      "見積: 例の行を実行中",
+      "見積: 分岐と道筋を計測中",
+      "見積: foldの書き換えを確かめ中",
+      "見積: 構築を証明中",
+      "見積: 停止を調べ中",
+    ]);
+  });
+});

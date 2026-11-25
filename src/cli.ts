@@ -107,7 +107,11 @@ const checkCommand = defineCommand({
     if (!args.json) {
       // Said before the measurement, which may take long and does not change it.
       const changes = targets.flatMap(target => modelChanges(target.specification, { feasibility: feasibilityOptions(args) }));
-      if (changes.length > 0) console.log(formatChanges(changes));
+      if (changes.length > 0) {
+        const text = formatChanges(changes);
+        if (!isMainThread && workerData?.chisel === true) parentPort!.postMessage({ kind: "early", message: text });
+        else console.log(text);
+      }
     }
     const reports = await Promise.all(
       targets.map(target =>
@@ -115,6 +119,7 @@ const checkCommand = defineCommand({
           disregards,
           feasibility: feasibilityOptions(args),
           pairs: pairOptions(args),
+          progress: postProgress,
         }),
       ),
     );
@@ -161,6 +166,7 @@ const generateCommand = defineCommand({
           feasibility: feasibilityOptions(args),
           pairs: pairOptions(args),
           fakes: target.specification.fakes,
+          progress: postProgress,
         },
       );
       return [
@@ -939,10 +945,16 @@ if (!isMainThread && workerData?.chisel === true) {
   const at = argv.indexOf("--timeout");
   const assigned = argv.find(arg => arg.startsWith("--timeout="));
   const timeout = Number(assigned?.slice("--timeout=".length) ?? (at >= 0 ? argv[at + 1] : 30000));
-  const result = await runIsolated(argv, Number.isSafeInteger(timeout) && timeout > 0 ? timeout : 30000);
+  const result = await runIsolated(argv, Number.isSafeInteger(timeout) && timeout > 0 ? timeout : 30000, { early: line => console.log(line) });
   for (const entry of result.logs) (entry.stream === "stderr" ? console.error : console.log)(entry.message);
   if (result.error) console.error(`Error: ${result.error}`);
   process.exitCode = result.exitCode;
+}
+
+// In the worker, each phase is posted to the parent, which says it on stderr
+// once the run has gone on a while; run in process, nothing is said.
+function postProgress(phase: string): void {
+  if (!isMainThread && workerData?.chisel === true) parentPort!.postMessage({ kind: "progress", message: phase });
 }
 
 function feasibilityOptions(args: {

@@ -400,6 +400,9 @@ export interface CheckOptions {
     readonly combinations?: number;
     readonly ways?: number;
   };
+  // Told each phase of the check as it enters it, for saying on stderr what a
+  // long measurement is on.
+  readonly progress?: (phase: string) => void;
 }
 
 export async function check(
@@ -417,6 +420,8 @@ export async function check(
   );
   const definition = specification.examples.behavior;
   const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  const progress = (phase: string) => options.progress?.(`${definition.name}: ${phase}`);
+  progress("例の行を実行中");
   const walkRows: WalkRow[] = [];
   const stopRows: StopRow[] = [];
   const coveredInputs = new Set<string>();
@@ -875,8 +880,10 @@ export async function check(
     borders.every(border => border.points.every(point => point.status !== "gap")) &&
     borders.every(border => border.beside?.status !== "not told");
 
+  progress("分岐と道筋を計測中");
   const plans = plansOf(specification.implementation, combinations, wayLimit);
   const toBeChangedFirst = changesFrom(specification.implementation, plans, wayLimit);
+  progress("foldの書き換えを確かめ中");
   const walks = walksOf(specification.implementation, walkRows, (expected, actual) => answers(definition, expected as Expected<AnyBehavior>, actual), given => tagOf(definition.input, given));
   const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans, usableFakes);
   const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans, usableFakes);
@@ -898,7 +905,9 @@ export async function check(
     unreadComparisons.length === 0
       ? { status: "complete" }
       : { status: "partial", notRead: unreadComparisons };
+  progress("構築を証明中");
   const constructions: ProofReport = specification.implementation === undefined ? { status: "undetermined", decisions: [] } : verify(specification.implementation, { candidates: combinations, ways: wayLimit });
+  progress("停止を調べ中");
   const stops = stopsOf(specification.implementation, stopRows, { candidates: combinations, proof: constructions });
   const verdict: Verdict =
     !adequate || armGap || constructions.status === "refuted" || walks.some(walk => walk.status === "not told") || stops.some(stop => stop.status === "may stop")
@@ -1008,6 +1017,8 @@ export interface GenerationOptions {
     readonly combinations?: number;
     readonly ways?: number;
   };
+  // Told each phase as it enters it, as CheckOptions.progress is.
+  readonly progress?: (phase: string) => void;
 }
 
 export function generate(
@@ -1022,6 +1033,7 @@ export function generate(
   );
   const definition = target.kind === "behavior" ? target : target.behavior;
   const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  options.progress?.(`${definition.name}: 行を組み立て中`);
   const rows =
     target.kind === "behavior" ? [] : target.rows.filter(row => definition.input.parse(row.given).success);
   const existing = new Set(
