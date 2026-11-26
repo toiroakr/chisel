@@ -19,9 +19,16 @@ import type {
   Implementation,
   Todo,
 } from "./behavior.js";
-import type { ArmTaken, ComparisonReached, WayTaken } from "./behavior.js";
+import type { ArmTaken, ComparisonReached, RulesDecision, WayTaken } from "./behavior.js";
 import type { Step, Way } from "./ways.js";
 import { WAY_LIMIT, describeWay, eachWayOf, sameSteps } from "./ways.js";
+import { changeOf } from "./changes.js";
+import { isOutOfRoom } from "./exact.js";
+import { foldsOf, runWalk, tells, tookSecond, walks as walkRewrites, walksOf } from "./rewrites.js";
+import type { WalkCoverage, WalkRow } from "./rewrites.js";
+import { stopsOf } from "./stops.js";
+import type { StopCoverage, StopRow } from "./stops.js";
+import type { ModelChange } from "./changes.js";
 import type { FakeTable, ValueDependencies } from "./dependency.js";
 import { answerFrom, fakeIssuesOf, fakeWarningsOf } from "./dependency.js";
 import { answerSchema } from "./guard-scope.js";
@@ -46,6 +53,7 @@ import {
   runTraced,
   traceSync,
 } from "./behavior.js";
+import { isDecimal } from "./rule.js";
 import { DEPS, localLabel, describeRule, describeTerm, differenceOf, holds, withDeps, isTerm, positionData, positionOf, positionTerm, termData, termPaths, pathsRead } from "./rule.js";
 import type { Rule, Term } from "./rule.js";
 import type { BorderPoint, PointRole } from "./border.js";
@@ -57,7 +65,7 @@ import type { Feasibility, Placement, Reached, Witness } from "./feasibility.js"
 import type { GuardBorder, GuardPartition } from "./guard-borders.js";
 import type { Beside } from "./beside.js";
 import type { Parting } from "./beside.js";
-import { allOnOneSide, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
+import { allOnOneSide, computationOf, lineTheRowsAllow, partingsOf, spelled } from "./beside.js";
 import type { DividedInstance, Position } from "./partition.js";
 import { coordinatesIn, excludedCases, positionsOf, writeExactly } from "./partition.js";
 import { isVariantsSchema, object, schemaAtPath, tagOf } from "./schema.js";
@@ -178,6 +186,20 @@ export interface AdequacyReport {
   readonly pairs: readonly PairCount[];
   readonly fakeIssues: readonly string[];
   readonly fakeWarnings: readonly string[];
+  // The decisions left unmeasured for having more ways than the limit, each
+  // with what to change in the model so that it is measured (Souther's
+  // `toBeChangedFirst`).
+  readonly toBeChangedFirst: readonly ModelChange[];
+  // Each fold a model writes put to Souther's two rewrites (ADR-0126): the
+  // walk stopping after its first step, and every step handed the seed. A
+  // rewrite no answered row tells apart is `not told`, which makes the report
+  // not adequate.
+  readonly walks: readonly WalkCoverage[];
+  // Each step of a model a run may stop at, judged once (Souther 0.5.0's
+  // `stops`): `may stop` with an input that stops there, which makes the
+  // report not adequate, `never stops` where that is shown, and `not
+  // resolved` otherwise, which is read as neither.
+  readonly stops: readonly StopCoverage[];
   readonly evidence: {
     readonly input: readonly InputCaseEvidence[];
     readonly result: readonly ResultCaseEvidence[];
@@ -199,7 +221,9 @@ export type Verdict = "satisfied" | "not_satisfied" | "undetermined";
 export type CoverageStatus = "met" | "gap" | "answer owed" | "no row owed" | "undecided";
 
 export interface Incompleteness {
-  readonly kind: "row not run" | "row did not come back" | "disregards not checked";
+  // `out of room`: the run had no room to write an answer the model defines
+  // (ADR-0128), which says nothing about the model.
+  readonly kind: "row not run" | "row did not come back" | "disregards not checked" | "out of room";
   readonly subject: string;
   readonly reason: string;
 }
@@ -306,6 +330,9 @@ export interface GeneratedExample {
   readonly given: unknown;
   readonly with?: unknown;
   readonly reason: string;
+  // A row that owes nothing: an input a called behavior's recorded rows were
+  // written with, tried in its caller (Souther 0.5.0's suggested rows).
+  readonly suggested?: true;
 }
 
 export type ConformanceSubject<B extends AnyBehavior> = (
@@ -380,6 +407,9 @@ export interface CheckOptions {
     readonly combinations?: number;
     readonly ways?: number;
   };
+  // Told each phase of the check as it enters it, for saying on stderr what a
+  // long measurement is on.
+  readonly progress?: (phase: string) => void;
 }
 
 export async function check(
@@ -397,6 +427,10 @@ export async function check(
   );
   const definition = specification.examples.behavior;
   const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  const progress = (phase: string) => options.progress?.(`${definition.name}: ${phase}`);
+  progress("例の行を実行中");
+  const walkRows: WalkRow[] = [];
+  const stopRows: StopRow[] = [];
   const coveredInputs = new Set<string>();
   const coveredResults = new Set<string>();
   const coveredEffects = new Set<string>();
@@ -537,6 +571,8 @@ export async function check(
           const open = openDecisionIn(implementation, error);
           if (open !== undefined) {
             incompleteness.push({ kind: "row not run", subject: row.name, reason: `判断が未定（${open}）` });
+          } else if (isOutOfRoom(error)) {
+            incompleteness.push({ kind: "out of room", subject: row.name, reason: (error as Error).message });
           } else {
             const message = error instanceof Error ? error.message : String(error);
             failures.push({ name: row.name, message });
@@ -601,6 +637,7 @@ export async function check(
       failures.push({ name: row.name, message: unstood });
       incompleteness.push({ kind: "row not run", subject: row.name, reason: unstood });
     } else if (implementation !== undefined) {
+      stopRows.push({ given: row.given, deps: standIns(row) });
       const { actual, failure, error } = await runAndCompare(
         definition,
         row.name,
@@ -637,6 +674,7 @@ export async function check(
         }
         if (failure === undefined) {
           verifiedInputs.add(inputTag);
+          walkRows.push({ name: row.name, given: row.given, deps: standIns(row), expected: row.expect });
           const disregard = await disregardBroken(
             implementation,
             row,
@@ -654,6 +692,8 @@ export async function check(
       const open = openDecisionIn(implementation, error);
       if (open !== undefined) {
         incompleteness.push({ kind: "row not run", subject: row.name, reason: `判断が未定（${open}）` });
+      } else if (isOutOfRoom(error)) {
+        incompleteness.push({ kind: "out of room", subject: row.name, reason: (error as Error).message });
       } else if (failure !== undefined) {
         failures.push(failure);
         if (actual === undefined) {
@@ -771,9 +811,8 @@ export async function check(
       };
     }),
   );
-  const guardBorders = (
-    specification.implementation === undefined ? [] : guardBordersOf(specification.implementation)
-  ).map((drawn): BorderCoverage => {
+  const guardDrawn = specification.implementation === undefined ? [] : guardBordersOf(specification.implementation);
+  const guardBorders = guardDrawn.map((drawn): BorderCoverage => {
     const reachedIt = reached.filter(
       item => item.comparison.rule === drawn.comparison && item.tag === drawn.origin?.tag,
     );
@@ -801,7 +840,7 @@ export async function check(
       ...(beside === undefined ? {} : { beside }),
     };
   });
-  borders.push(...guardBorders);
+  borders.push(...toldOnce(guardBorders, guardDrawn));
   // Not met by reaching a comparison, as a guard border is: what an ensures
   // clause or an input invariant states holds of every input of the case.
   const writtenCoverage = (drawn: GuardBorder): BorderCoverage => {
@@ -851,7 +890,11 @@ export async function check(
     borders.every(border => border.points.every(point => point.status !== "gap")) &&
     borders.every(border => border.beside?.status !== "not told");
 
+  progress("分岐と道筋を計測中");
   const plans = plansOf(specification.implementation, combinations, wayLimit);
+  const toBeChangedFirst = changesFrom(specification.implementation, plans, wayLimit);
+  progress("foldの書き換えを確かめ中");
+  const walks = walksOf(specification.implementation, walkRows, (expected, actual) => answers(definition, expected as Expected<AnyBehavior>, actual), given => tagOf(definition.input, given));
   const arms = measureArms(specification.implementation, armsMet, armsOwed, combinations, plans, usableFakes);
   const rulesMeasure = measureRules(specification.implementation, waysMet, waysOwed, combinations, plans, usableFakes);
   const lines = [
@@ -872,15 +915,20 @@ export async function check(
     unreadComparisons.length === 0
       ? { status: "complete" }
       : { status: "partial", notRead: unreadComparisons };
+  progress("構築を証明中");
   const constructions: ProofReport = specification.implementation === undefined ? { status: "undetermined", decisions: [] } : verify(specification.implementation, { candidates: combinations, ways: wayLimit });
+  progress("停止を調べ中");
+  const stops = stopsOf(specification.implementation, stopRows, { candidates: combinations, proof: constructions });
   const verdict: Verdict =
-    !adequate || armGap || constructions.status === "refuted"
+    !adequate || armGap || constructions.status === "refuted" || walks.some(walk => walk.status === "not told") || stops.some(stop => stop.status === "may stop")
       ? "not_satisfied"
       : constructions.status !== "verified" || comparisons.status === "partial" ||
           pairAnalysis.measure.status === "partial" ||
           armUndecided ||
+          walks.some(walk => walk.status === "undecided") ||
+          stops.some(stop => stop.status === "not resolved") ||
           externals.length > 0 ||
-          incompleteness.some(item => item.kind === "disregards not checked")
+          incompleteness.some(item => item.kind === "disregards not checked" || item.kind === "out of room")
         ? "undetermined"
         : arms.status === "complete" ||
           (arms.status === "unavailable" && arms.reason === "not applicable")
@@ -907,6 +955,9 @@ export async function check(
     pairs: countPairs(pairablesOf(positions, guardPartitions), answeredGivens),
     fakeIssues: fakeIssues.map(item => item.issue),
     fakeWarnings: fakeWarningsOf(definition.dependencies, specification.fakes),
+    toBeChangedFirst,
+    walks,
+    stops,
     evidence: {
       input: definition.input.variantTags.filter(tag => !refusedInputs.includes(tag)).map(tag => ({
         case: tag,
@@ -935,6 +986,30 @@ export async function check(
   };
 }
 
+// What to change in the model before measuring it: the decisions `check`
+// would leave unmeasured for having more ways than the limit, each with where
+// its ways multiply and which part, declared as a behavior of its own, leaves
+// the rest within the limit. Read off the shape of the model, without running
+// a row, so it can be said before the measurement and is not changed by it.
+export function modelChanges(specification: Specification, options: CheckOptions = {}): readonly ModelChange[] {
+  const combinations = positiveLimit("feasibility.combinations", options.feasibility?.combinations, FEASIBILITY_COMBINATION_LIMIT);
+  const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  return changesFrom(specification.implementation, plansOf(specification.implementation, combinations, wayLimit), wayLimit);
+}
+
+function changesFrom(
+  implementation: AnyImplementation | undefined,
+  plans: ReadonlyMap<unknown, WayPlan>,
+  wayLimit: number,
+): readonly ModelChange[] {
+  if (implementation === undefined || implementation.pipeline !== undefined || implementation.external !== undefined) return [];
+  return decisionsWithCases(implementation).flatMap(([decision]) => {
+    if (decision.kind !== "rules" || plans.get(decision)?.kind !== "too many") return [];
+    const change = changeOf(decision as RulesDecision<unknown, unknown, unknown>, wayLimit);
+    return change === undefined ? [] : [change];
+  });
+}
+
 export interface GenerationReport {
   readonly rows: readonly GeneratedExample[];
   readonly notComposed: readonly string[];
@@ -952,6 +1027,8 @@ export interface GenerationOptions {
     readonly combinations?: number;
     readonly ways?: number;
   };
+  // Told each phase as it enters it, as CheckOptions.progress is.
+  readonly progress?: (phase: string) => void;
 }
 
 export function generate(
@@ -966,6 +1043,7 @@ export function generate(
   );
   const definition = target.kind === "behavior" ? target : target.behavior;
   const wayLimit = positiveLimit("feasibility.ways", options.feasibility?.ways, WAY_LIMIT);
+  options.progress?.(`${definition.name}: 行を組み立て中`);
   const rows =
     target.kind === "behavior" ? [] : target.rows.filter(row => definition.input.parse(row.given).success);
   const existing = new Set(
@@ -1127,7 +1205,7 @@ export function generate(
   }
 
   const positionsByPath = new Map(
-    positionsOf(definition.input).map(position => [trailKey(position.segments), position] as const),
+    positionsOf(definition.input, { containers: true }).map(position => [trailKey(position.segments), position] as const),
   );
   for (const drawn of implementation === undefined ? [] : guardPartitionsOf(implementation)) {
     const position = positionsByPath.get(trailKey(drawn.segments));
@@ -1138,7 +1216,10 @@ export function generate(
       const standsIn = [...rows, ...generated].some(row =>
         position.valuesIn(row.given).some(value => value !== undefined && item.contains(value)),
       );
-      if (!standsIn) {
+      if (!standsIn && item.witness === undefined) {
+        // Owed all the same: no law refutes it, though no value was found (ADR-0130).
+        notComposed.push(`${drawn.path} = ${item.name}: スキーマが受け付ける値が見つからない`);
+      } else if (!standsIn) {
         const origin = originFor(position);
         offer({
           name: `${definition.name}: ${drawn.path} = ${item.name}`,
@@ -1150,11 +1231,14 @@ export function generate(
     }
   }
 
+  const toldComputations = new Set<string>();
+  const untold: { readonly computation: string; readonly drawn: GuardBorder; readonly found: { readonly beside: { readonly status: "not told"; readonly another: string }; readonly given?: unknown; readonly deps?: unknown } }[] = [];
   for (const drawn of implementation === undefined ? [] : guardBordersOf(implementation)) {
     const reachedBy = (given: unknown, deps: unknown) =>
       tagOf(definition.input, given) === drawn.origin?.tag
         ? comparisonsReached(implementation!, given, tracedWith(deps)).filter(item => item.rule === drawn.comparison)
         : [];
+    const searchNotes = new Map<BorderPoint, string>();
     for (const point of drawn.border.points) {
       if (point.status !== "owed" || point.witness === undefined) {
         continue;
@@ -1180,9 +1264,22 @@ export function generate(
         if (drawn.origin === undefined || (drawn.origin.decision as { readonly expression?: unknown }).expression === undefined) return undefined;
         const hit = searchedWays(implementation!, drawn.origin.tag, drawn.origin.decision, combinations, usableFakes).witnessed
           .find(item => item.comparison.rule === drawn.comparison && point.contains(drawn.coordinateOf(item.comparison)) && definition.input.parse(item.given).success);
-        if (hit === undefined) return undefined;
-        if (hit.with !== undefined) searchedStandIns.set(hit.given, hit.with);
-        return hit.given;
+        if (hit !== undefined) {
+          if (hit.with !== undefined) searchedStandIns.set(hit.given, hit.with);
+          return hit.given;
+        }
+        // None reached the point: step from the runs nearest to it, one
+        // numeric field at a time, toward it (Souther 0.5.0's rows beside the
+        // nearest ones), and say what was tried where that reaches it neither.
+        const tried = searchedWays(implementation!, drawn.origin.tag, drawn.origin.decision, combinations, usableFakes).witnessed
+          .filter(item => item.comparison.rule === drawn.comparison && definition.input.parse(item.given).success);
+        const stepped = besideTheNearest(definition, drawn, point, tried, (given, deps) => reachedBy(given, deps).map(item => drawn.coordinateOf(item)));
+        if (stepped.given !== undefined) {
+          if (stepped.with !== undefined) searchedStandIns.set(stepped.given, stepped.with);
+          return stepped.given;
+        }
+        searchNotes.set(point, stepped.tried);
+        return undefined;
       };
       const given =
         candidates.find(candidate => definition.input.parse(candidate).success && reaches(candidate)) ??
@@ -1194,7 +1291,8 @@ export function generate(
         candidates.find(candidate => !definition.input.parse(candidate).success) ??
         candidates.find(candidate => definition.input.parse(candidate).success);
       if (given === undefined) {
-        notComposed.push(`${drawn.path} ${point.role} (${point.relation})${askedOf(drawn.segments.flatMap(segment => segment.startsWith(".#local:") ? [segment.slice(1)] : []))}`);
+        const note = searchNotes.get(point);
+        notComposed.push(`${drawn.path} ${point.role} (${point.relation})${askedOf(drawn.segments.flatMap(segment => segment.startsWith(".#local:") ? [segment.slice(1)] : []))}${note === undefined ? "" : ` — ${note}`}`);
       } else {
         offer({
           name: `${definition.name}: ${drawn.path} ${point.role} (${point.relation})`,
@@ -1219,9 +1317,17 @@ export function generate(
           standsAt(point) || unmetStatus(pointFeasibility(drawn, point, implementation!, combinations, wayLimit, usableFakes)).status === "no row owed",
       );
     const found = due ? besideOf(definition, implementation!, drawn, items) : undefined;
+    const computation = computationOf(drawn.origin?.tag, drawn.form.parts);
+    if (found?.beside.status === "told") toldComputations.add(computation);
     if (found?.beside.status !== "not told") {
       continue;
     }
+    untold.push({ computation, drawn, found: found as typeof found & { readonly beside: { readonly status: "not told"; readonly another: string } } });
+  }
+  // A computation cut at several places owes its weights once (ADR-0124): no
+  // row is offered beside a border whose computation another border tells.
+  for (const { computation, drawn, found } of untold) {
+    if (toldComputations.has(computation)) continue;
     const label = `${drawn.path} 隣の線 (${found.beside.another})`;
     if (found.given === undefined) {
       notComposed.push(label);
@@ -1461,7 +1567,156 @@ export function generate(
       reason: "組み合わせの期待結果を人間が決める必要があります", ...withFrom(given) });
   }
   notComposed.push(...pairs.measure.notRead, ...pairs.measure.obligations.filter(pair => pair.status === "undecided").map(pair => `${pair.positions.join(" × ")}: ${pair.classes.join(" × ")} (${pair.reason})`));
+  if (implementation !== undefined) {
+    const walked = walkRowsFor(definition, implementation, answeredRows, row => tracedWith(withFrom(row.given).with), rows, generated);
+    for (const { origin, ...row } of walked.rows) offer({ ...row, ...withFrom(origin) });
+    notComposed.push(...walked.notComposed);
+    for (const { origin, ...row } of suggestedRowsFor(definition, implementation, rows, [...rows.map(row => row.given), ...generated.map(row => row.given)])) {
+      generated.push({ ...row, ...withFrom(origin) });
+    }
+  }
   return { rows: generated, notComposed };
+}
+
+// The inputs a called behavior's recorded rows were written with, asked in
+// its caller: each call of a dependency declared with its examples
+// (`dependency(checkStockExamples)`) has the argument a recorded row asks
+// written into a row of the case that makes the call. Such a row owes nothing
+// and is marked so; it is offered where no row asks it yet.
+function suggestedRowsFor(
+  definition: AnyBehavior,
+  implementation: AnyImplementation,
+  rows: readonly Example<AnyBehavior>[],
+  taken: readonly unknown[],
+): readonly (GeneratedExample & { readonly origin: unknown })[] {
+  const suggested: (GeneratedExample & { readonly origin: unknown })[] = [];
+  const seen = [...taken];
+  for (const [decision, tags] of decisionsWithCases(implementation)) {
+    const expression = decision.kind === "rules" ? decision.expression : undefined;
+    if (expression === undefined) continue;
+    const origins = rows.filter(row => tags.includes(tagOf(definition.input, row.given) ?? ""));
+    for (const call of callsIn(expression)) {
+      const declared = definition.dependencies[call.dependency] as { readonly injected?: { readonly rows: readonly { readonly name: string; readonly given: unknown }[] } } | undefined;
+      for (const recorded of declared?.injected?.rows ?? []) {
+        for (const origin of origins) {
+          const given = writtenArgument(origin.given, call.input, recorded.given);
+          if (given === undefined || !definition.input.parse(given).success || seen.some(other => deepEqual(other, given))) continue;
+          seen.push(given);
+          suggested.push({
+            name: `${definition.name}: ${call.dependency}()の記録行「${recorded.name}」の入力を${describeArgument(call.input)}で尋ねる`,
+            given,
+            reason: "提案する入力（満たしていない義務はない）",
+            suggested: true,
+            origin: origin.given,
+          });
+          break;
+        }
+      }
+    }
+  }
+  return suggested;
+}
+
+// A row of two or more elements for each fold whose rewrites (ADR-0126) no
+// answered row tells apart: the list a fold walks, where it is an input field,
+// grown by an element the rows hold, put last and then first, and the row kept
+// that tells the most rewrites apart from what the model answers on it.
+function walkRowsFor(
+  definition: AnyBehavior,
+  implementation: AnyImplementation,
+  answeredRows: readonly Example<AnyBehavior>[],
+  depsOf: (row: Example<AnyBehavior>) => unknown,
+  rows: readonly Example<AnyBehavior>[],
+  generated: readonly GeneratedExample[],
+): { readonly rows: readonly (GeneratedExample & { readonly origin: unknown })[]; readonly notComposed: readonly string[] } {
+  const offered: (GeneratedExample & { readonly origin: unknown })[] = [];
+  const notComposed: string[] = [];
+  const tagOfGiven = (given: unknown) => tagOf(definition.input, given);
+  for (const fold of foldsOf(implementation)) {
+    if (fold.single) continue;
+    const ofCase = answeredRows.filter(row => fold.tags.includes(tagOfGiven(row.given) ?? ""));
+    const open = walkRewrites.filter(walk => !ofCase.some(row => {
+      const deps = depsOf(row);
+      const plain = runWalk(implementation, row.given, deps);
+      if (plain.pending || plain.error !== undefined || !answers(definition, row.expect as Expected<AnyBehavior>, plain.actual) || !tookSecond(plain, fold.node)) return false;
+      return tells(implementation, fold, walk, row.given, deps, actual => answers(definition, row.expect as Expected<AnyBehavior>, actual)) === true;
+    }));
+    if (open.length === 0) continue;
+    const label = `${fold.decision.id}: ${fold.label}`;
+    if (fold.over === undefined) {
+      notComposed.push(`${label}: 歩くリストが入力の欄ではないため、二つ以上の要素を歩く行を組み立てない`);
+      continue;
+    }
+    const path = fold.over;
+    const read = (given: unknown) => path.reduce<unknown>((value, key) => (value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined), given);
+    const origins = [...ofCase, ...rows.filter(row => isTodo(row.expect) && fold.tags.includes(tagOfGiven(row.given) ?? ""))];
+    const pool: unknown[] = [];
+    for (const row of rows) {
+      const list = read(row.given);
+      if (Array.isArray(list)) for (const element of list) if (!pool.some(other => deepEqual(other, element))) pool.push(element);
+    }
+    let best: { given: unknown; origin: Example<AnyBehavior>; told: number } | undefined;
+    search: for (const origin of origins) {
+      const held = read(origin.given);
+      if (!Array.isArray(held)) continue;
+      const list: readonly unknown[] = held;
+      // Made one at a time, in the order a list of two is reached, and no more
+      // than 64 from each origin: a long list grows into long candidates.
+      function* grown(): Generator<unknown[]> {
+        if (list.length === 0) {
+          for (const first of pool) for (const second of pool) yield [first, second];
+          return;
+        }
+        for (const element of pool) {
+          yield [...list, element];
+          yield [element, ...list];
+        }
+      }
+      let made = 0;
+      for (const candidate of grown()) {
+        if (++made > 64) break;
+        const given = writtenAt(origin.given, path, candidate);
+        if (!definition.input.parse(given).success) continue;
+        const deps = depsOf(origin);
+        const plain = runWalk(implementation, given, deps);
+        if (plain.pending || plain.error !== undefined || !tookSecond(plain, fold.node)) continue;
+        const told = open.filter(walk => tells(implementation, fold, walk, given, deps, actual => answers(definition, plain.actual as Expected<AnyBehavior>, actual)) === true).length;
+        if (told > (best?.told ?? 0)) best = { given, origin, told };
+        if (told === open.length) break search;
+      }
+    }
+    if (best === undefined) {
+      notComposed.push(`${label}: 書き換え（${open.join("・")}）を見分ける二つ以上の要素の行が見つからない`);
+      continue;
+    }
+    if ([...generated, ...offered].some(row => deepEqual(row.given, best!.given))) continue;
+    offered.push({
+      name: `${label} を二つ以上の要素で歩く`,
+      given: best.given,
+      reason: "foldの各段階が前の段階の答えを読むことを確かめる行の期待結果を人間が決める必要があります",
+      origin: best.origin.given,
+    });
+  }
+  return { rows: offered, notComposed };
+}
+
+// The input a call's argument reads, as the report writes it, so two calls
+// of one dependency asking one recorded row are named apart.
+function describeArgument(argument: unknown): string {
+  const read: string[] = [];
+  const walk = (value: unknown) => {
+    if (isTerm(value)) read.push(describeTerm(value));
+    else if (value !== null && typeof value === "object") for (const child of Object.values(value)) walk(child);
+  };
+  walk(argument);
+  return read.length === 0 ? "定数" : read.join("・");
+}
+
+function writtenAt(given: unknown, path: readonly string[], value: unknown): unknown {
+  if (path.length === 0) return value;
+  const [key, ...rest] = path;
+  const record = (given ?? {}) as Record<string, unknown>;
+  return { ...record, [key!]: writtenAt(record[key!], rest, value) };
 }
 
 export interface TestOutcome {
@@ -2221,6 +2476,97 @@ function unmetStatus(
   return { status: "no row owed", reason: (feasibilities[0] as { readonly reason: string }).reason };
 }
 
+// The rows beside the runs nearest to a point on a computed value: from each
+// of the three runs whose value came nearest, one numeric field of the input
+// is moved by one, two, ten or a hundred either way, and the move that brings
+// the value nearest is kept, until the point is reached or no move brings it
+// nearer. Where none reaches it, what was tried is said: that is no proof the
+// point is unreachable.
+function besideTheNearest(
+  definition: AnyBehavior,
+  drawn: GuardBorder,
+  point: BorderPoint,
+  runs: readonly { readonly given: unknown; readonly with?: unknown }[],
+  coordinates: (given: unknown, deps: unknown) => readonly unknown[],
+): { readonly given?: unknown; readonly with?: unknown; readonly tried: string } {
+  const target = numeric(point.witness);
+  if (target === undefined || runs.length === 0) return { tried: `${runs.length}件の実行を試したが、点に届く行は見つからない` };
+  const distance = (given: unknown, deps: unknown): number | undefined => {
+    const values = coordinates(given, deps).map(numeric).filter((value): value is number => value !== undefined);
+    return values.length === 0 ? undefined : Math.min(...values.map(value => Math.abs(value - target)));
+  };
+  const variant = definition.input.variants[drawn.origin?.tag ?? ""] as { readonly shape?: Readonly<Record<string, AnySchema>> } | undefined;
+  // Every integer, number and int64 leaf of the case, nested objects included.
+  const fields: (readonly string[])[] = [];
+  const numericLeaves = (schema: AnySchema | undefined, path: readonly string[]) => {
+    if (schema === undefined) return;
+    if (schema.kind === "integer" || schema.kind === "number" || schema.kind === "int64") fields.push(path);
+    else if (schema.kind === "object") for (const [key, field] of Object.entries((schema as unknown as { readonly shape: Readonly<Record<string, AnySchema>> }).shape)) numericLeaves(field, [...path, key]);
+  };
+  numericLeaves(variant as AnySchema | undefined, []);
+  const readAt = (given: unknown, path: readonly string[]) => path.reduce<unknown>((value, key) => (value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined), given);
+  const scored = runs
+    .map(run => ({ ...run, distance: distance(run.given, run.with) }))
+    .filter((run): run is typeof run & { distance: number } => run.distance !== undefined)
+    .sort((a, b) => a.distance - b.distance);
+  let nearest = scored[0]?.distance;
+  let steps = 0;
+  for (const start of scored.slice(0, 3)) {
+    let current = start;
+    for (let round = 0; round < 64 && current.distance > 0; round++) {
+      let best: typeof current | undefined;
+      for (const field of fields) {
+        for (const by of [1, -1, 2, -2, 10, -10, 100, -100]) {
+          const value = readAt(current.given, field);
+          if (typeof value !== "number" && typeof value !== "bigint") continue;
+          const given = writtenAt(current.given, field, typeof value === "bigint" ? value + BigInt(by) : value + by);
+          if (!definition.input.parse(given).success) continue;
+          steps++;
+          if (coordinates(given, current.with).some(reached => point.contains(reached))) {
+            return { given, ...(current.with === undefined ? {} : { with: current.with }), tried: "" };
+          }
+          const moved = distance(given, current.with);
+          if (moved !== undefined && moved < (best?.distance ?? current.distance)) best = { ...current, given, distance: moved };
+        }
+      }
+      if (best === undefined) break;
+      current = best;
+      nearest = Math.min(nearest ?? current.distance, current.distance);
+    }
+    if (current.distance === 0 && coordinates(current.given, current.with).some(value => point.contains(value))) {
+      return { given: current.given, ...(current.with === undefined ? {} : { with: current.with }), tried: "" };
+    }
+  }
+  return { tried: `${runs.length}件の実行と、近いものから${steps}件の隣の行を試したが、点に届く行は見つからない${nearest === undefined ? "" : `（最も近い差は${nearest}）`}` };
+}
+
+function numeric(value: unknown): number | undefined {
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  if (isDecimal(value)) return value.toNumber();
+  return undefined;
+}
+
+// A computation cut at several places owes its weights once (ADR-0124): a
+// border of it the rows tell from the lines beside it tells the computation's
+// weights, so another border of the same computation is told through it.
+function toldOnce(borders: readonly BorderCoverage[], drawn: readonly GuardBorder[]): readonly BorderCoverage[] {
+  const keyOf = (index: number) => {
+    const form = drawn[index]!.form;
+    return form === undefined ? undefined : computationOf(drawn[index]!.origin?.tag, form.parts);
+  };
+  const told = new Map<string, string>();
+  borders.forEach((border, index) => {
+    const key = keyOf(index);
+    if (key !== undefined && border.beside?.status === "told" && border.beside.through === undefined && !told.has(key)) told.set(key, border.rule);
+  });
+  return borders.map((border, index) => {
+    const key = keyOf(index);
+    const through = key === undefined ? undefined : told.get(key);
+    return through !== undefined && border.beside?.status === "not told" ? { ...border, beside: { status: "told", through } } : border;
+  });
+}
+
 function besideOf(
   definition: AnyBehavior,
   implementation: Implementation<AnyBehavior>,
@@ -2495,6 +2841,8 @@ function segmentsRead(
   switch (rule.kind) {
     case "compare":
       return [rule.left, rule.right].flatMap(trailsOf);
+    case "relation":
+      return [rule.subject, rule.other].flatMap(trailsOf);
     case "all":
     case "any": {
       const of = trailOf(rule.of);
@@ -2543,7 +2891,7 @@ function measuredPositionsOf(
   guardRead: readonly (readonly string[])[] = [],
   combinations: number = FEASIBILITY_COMBINATION_LIMIT,
 ): readonly Position[] {
-  return positionsOf(definition.input).map(position => withJointExclusions(definition, position, combinations)).flatMap((position): Position[] => {
+  return withDividedContainers(definition.input, guardDivided).map(position => withJointExclusions(definition, position, combinations)).flatMap((position): Position[] => {
     if (!isDisregarded(definition, position)) {
       return [position];
     }
@@ -2560,6 +2908,15 @@ function measuredPositionsOf(
         : { ...position, borders: [] },
     ];
   });
+}
+
+// The positions of an input, with a record or an array a guard's relation
+// divides as a container (ADR-0129), which is no position otherwise.
+function withDividedContainers(input: AnyVariantsSchema, guardDivided: ReadonlySet<string>): readonly Position[] {
+  const plain = positionsOf(input);
+  const known = new Set(plain.map(position => trailKey(position.segments)));
+  const containers = positionsOf(input, { containers: true }).filter(position => !known.has(trailKey(position.segments)) && guardDivided.has(trailKey(position.segments)));
+  return [...plain, ...containers];
 }
 
 const DISREGARD_COMBINATION_LIMIT = 255;
@@ -2784,7 +3141,27 @@ type WayPlan =
   | { readonly kind: "ways"; readonly ways: readonly Way[] }
   | { readonly kind: "too many" };
 
+// Planned once per implementation and limits: what to change is read off the
+// plans before the measurement and the measurement reads the same plans, so
+// `modelChanges` followed by `check` plans each decision once.
+const planned = new WeakMap<object, Map<string, ReadonlyMap<unknown, WayPlan>>>();
 function plansOf(
+  implementation: Implementation<AnyBehavior> | undefined,
+  combinations: number,
+  wayLimit: number,
+): ReadonlyMap<unknown, WayPlan> {
+  if (implementation === undefined) return new Map();
+  const key = `${combinations}:${wayLimit}`;
+  const cached = planned.get(implementation)?.get(key);
+  if (cached !== undefined) return cached;
+  const made = planFor(implementation, combinations, wayLimit);
+  const byLimits = planned.get(implementation) ?? new Map<string, ReadonlyMap<unknown, WayPlan>>();
+  byLimits.set(key, made);
+  planned.set(implementation, byLimits);
+  return made;
+}
+
+function planFor(
   implementation: Implementation<AnyBehavior> | undefined,
   combinations: number,
   wayLimit: number,

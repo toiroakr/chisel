@@ -3,7 +3,7 @@
 // it tells the two apart.
 
 export type Beside =
-  | { readonly status: "told" }
+  | { readonly status: "told"; readonly through?: string }
   | { readonly status: "not told"; readonly another: string; readonly input?: string }
   | { readonly status: "undecided"; readonly reason: string };
 
@@ -122,4 +122,15 @@ function gcd(left: number, right: number): number {
 
 function same(left: readonly number[], right: readonly number[]): boolean {
   return left.length === right.length && left.every((weight, index) => weight === right[index]);
+}
+
+// The computation a border is cut from (ADR-0124): the positions it weighs and
+// their weights, reduced and signed so that `a + b` cut at 10 and at 20, or
+// written `2a + 2b`, is one computation. Its weights are owed once, however
+// many places it is cut at.
+export function computationOf(tag: string | undefined, parts: readonly { readonly identity: string; readonly coefficient: number }[]): string {
+  const sorted = [...parts].sort((a, b) => (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0));
+  const divisor = sorted.reduce((d, part) => gcd(d, Math.abs(part.coefficient)), 0) || 1;
+  const sign = (sorted[0]?.coefficient ?? 1) < 0 ? -1 : 1;
+  return JSON.stringify([tag ?? "", sorted.map(part => [(part.coefficient * sign) / divisor, part.identity])]);
 }

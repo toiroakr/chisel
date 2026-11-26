@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isDecimal, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -305,6 +305,7 @@ export function identityOf(rule: Rule): string {
 function constantsWithin(rule: Rule): readonly string[] {
   switch (rule.kind) {
     case "compare": return [rule.left, rule.right].filter(operand => !isTerm(operand)).map(value => `${typeof value}:${(value as { constructor?: { name?: string } } | null)?.constructor?.name ?? ""}:${String(value)}`);
+    case "relation": return isTerm(rule.other) ? [] : [structuralOf(rule.other)];
     case "all":
     case "any": return constantsWithin(rule.each);
     case "and":
@@ -312,10 +313,27 @@ function constantsWithin(rule: Rule): readonly string[] {
     case "not": return constantsWithin(rule.rule);
   }
 }
+// A written value as it is told apart: a property holding undefined is not a
+// property left out, and a bigint, a decimal and a rational are each their own.
+function structuralOf(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (typeof value === "bigint") return `${value}n`;
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value === null || typeof value !== "object") return `${typeof value}:${String(value)}`;
+  if (isDecimal(value)) return `decimal:${value.toString()}`;
+  if (Array.isArray(value)) return `[${value.map(structuralOf).join(",")}]`;
+  const named = (value as { constructor?: { name?: string } }).constructor?.name;
+  const fields = `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${structuralOf((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  // A named object reads as its constructor and text, and its own fields too,
+  // so two that render alike but hold other fields are told apart.
+  if (named !== undefined && named !== "Object") return `${named}:${String(value)}${fields}`;
+  return fields;
+}
 // Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
 function pathsWithin(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
-    case "compare": return termPaths(rule);
+    case "compare":
+    case "relation": return termPaths(rule);
     case "all":
     case "any": return [positionOf(rule.of).path, ...pathsWithin(rule.each)];
     case "and":
@@ -358,7 +376,10 @@ function sameShape(target: AnySchema, source: AnySchema, limit: number): boolean
     Object.hasOwn(target.variants, tag) && includesSchema(target.variants[tag]!, source.variants[tag]!, limit));
   if (target.kind === "literal") return (target as LiteralSchema<any>).value === (source as LiteralSchema<any>).value;
   if (target.kind === "enum") return (source as EnumSchema<string>).values.every(value => (target as EnumSchema<string>).values.includes(value));
-  if (target.kind === "decimal") return (source as DecimalSchema).scale <= (target as DecimalSchema).scale;
+  if (target.kind === "decimal") {
+    const [from, into] = [(source as DecimalSchema).scale, (target as DecimalSchema).scale];
+    return into === undefined || (from !== undefined && from <= into);
+  }
   if (["string", "number", "integer", "boolean", "instant", "date", "time", "datetime", "int64", "rational"].includes(target.kind)) return true;
   return false;
 }

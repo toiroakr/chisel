@@ -4,7 +4,7 @@ import { answersOf, choicesOf, iterationsOf, localsOf } from "./model.js";
 import { casesLeft, choiceFacts, factsOf } from "./absence.js";
 import type { Fact } from "./absence.js";
 import type { AnyBehavior, RulesDecision } from "./behavior.js";
-import type { CompareRule, ElementLabels, Rule, Term } from "./rule.js";
+import type { CompareRule, ElementLabels, RelationRule, Rule, Term } from "./rule.js";
 import { DEPS, conjuncts, describeRule, holds, isTerm, normalize, stepInto, pathsRead, positionData, positionOf, positionTerm, localLabel, rebaseRule } from "./rule.js";
 import { enumOf, holdsNoDecimal, isVariantsSchema, object, offGridEquality, schemaAtPath, tagOf, variants } from "./schema.js";
 import type { AnySchema, ArraySchema, DecimalSchema, AnyVariantsSchema, ObjectSchema, ObjectShape, OptionalSchema } from "./schema.js";
@@ -136,8 +136,7 @@ export function offGridEqualityIn(
       return `compares ${threshold.label}, a ${threshold.schema.kind}, with ${describeConstant(bound)}, which it is never compared with: ${threshold.described}`;
     }
     if (holdsNoDecimal(threshold.schema, operator, bound)) {
-      const scale = (threshold.schema as DecimalSchema).scale;
-      return `compares ${threshold.label} with ${String(bound)}, which no decimal(${scale}) holds: ${threshold.described}`;
+      return `compares ${threshold.label} with ${String(bound)}, which no decimal(${(threshold.schema as DecimalSchema).scale}) holds: ${threshold.described}`;
     }
   }
   const scope = guardScope(definition, tag, decision);
@@ -354,7 +353,12 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
   if (rule.kind !== "compare" || normalized === undefined || normalized.measure !== "value") {
     return [];
   }
-  const term = (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>;
+  return placesOf(rule, (isTerm(rule.left) ? rule.left : rule.right) as Term<unknown>, frames);
+}
+
+// The place a rule reads through `term`, under each trail of cases that
+// declares it, as a comparison's and a relation's thresholds name it.
+function placesOf<R extends CompareRule | RelationRule>(rule: R, term: Term<unknown>, frames: Frames): (Omit<Threshold, "rule"> & { readonly rule: R })[] {
   const { frame, keys } = locate(term, frames);
   const schema = schemaAt(frame.scope, keys);
   return schema === undefined
@@ -369,6 +373,23 @@ export function thresholdsIn(rule: Rule, frames: Frames): Threshold[] {
         rule,
         cases: casesOnTrail(frame.scope, keys, steps).map(item => ({ ...item, at: frame === frames.root ? item.at : [positionOf(term).path[0]!, ...item.at] })),
       }));
+}
+
+// The places a relation with a value the source writes divides: a string, or
+// a record or array as the container it is (ADR-0129). Located as a
+// comparison's place is.
+export type RelationThreshold = Omit<Threshold, "rule"> & { readonly rule: RelationRule };
+export function relationThresholdsIn(rule: Rule, frames: Frames): RelationThreshold[] {
+  if (rule.kind === "and" || rule.kind === "or") return rule.rules.flatMap(part => relationThresholdsIn(part, frames));
+  if (rule.kind === "not") return relationThresholdsIn(rule.rule, frames);
+  if (rule.kind === "all" || rule.kind === "any") {
+    const inner = enter(rule, frames);
+    return inner === undefined ? [] : relationThresholdsIn(rule.each, inner);
+  }
+  if (rule.kind !== "relation" || isTerm(rule.other)) return [];
+  const position = positionData(rule.subject as Term<unknown>);
+  if (position === undefined || position.measure !== "value") return [];
+  return placesOf(rule, rule.subject as Term<unknown>, frames);
 }
 
 export function inheritedAt(scope: AnySchema, keys: readonly string[], steps?: readonly string[]): readonly Rule[] {

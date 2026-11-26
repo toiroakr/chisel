@@ -1,10 +1,11 @@
 import { isPromiseLike, snapshotValue } from "./data.js";
 import type { Decimal } from "decimal.js";
-import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit } from "./exact.js";
+import { Rational, isRational, fractionOf, decimalOf, EvaluationLimit, OutOfRoom, roundedAt } from "./exact.js";
+import type { Rounding } from "./exact.js";
 import type { AnyBehavior, Execution, RulesDecision, Branch } from "./behavior.js";
 import type { Replacement, Rule, Term, TermOf, ComparisonObserver } from "./rule.js";
 import { DEPS, depsTerm, describeTerm, holds, rebaseRule, rebaseTerm, pathsRead as pathsReadOfRule, isDecimal, isTerm, linearCombination, positionData, readOperand, selfTerm, substitutedOperand, substitutedRule, termData, rootTerm, positionTerm, withLocal } from "./rule.js";
-import { isVariantsSchema } from "./schema.js";
+import { array, isVariantsSchema } from "./schema.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./outcomes.js";
@@ -27,7 +28,7 @@ export type Node =
   | { readonly kind: "call"; readonly dependency: Term<unknown>; readonly input: unknown }
   | { readonly kind: "choose"; readonly condition: Rule; readonly yes: unknown; readonly no: unknown }
   | { readonly kind: "construct"; readonly schema: Schema<unknown>; readonly value: unknown }
-  | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat"; readonly left: unknown; readonly right: unknown }
+  | { readonly kind: "operation"; readonly operator: "add" | "subtract" | "multiply" | "divide" | "quotient" | "concat" | "round"; readonly left: unknown; readonly right: unknown; readonly mode?: Rounding }
   | { readonly kind: "temporal"; readonly operator: "plus" | "minus" | "between"; readonly left: unknown; readonly right: unknown; readonly unit: string; readonly overflow: Overflow };
 
 function expression<T>(node: Node): Expression<T> {
@@ -78,11 +79,48 @@ export function matchValue<S extends AnyVariantsSchema, Result>(schema: S, value
   for (let index = tags.length - 2; index >= 0; index--) body = expression({ kind: "choose", condition: { kind: "compare", left: positionTerm([name, schema.discriminant], "value"), operator: "==", right: tags[index] }, yes: bodies[index], no: body });
   return expression({ kind: "bind", name, schema, value, body });
 }
-export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: (value: TermOf<Element>) => NoInfer<Template<Result>>): Expression<readonly Result[]> {
+// A step handed over as a value (ADR-0127): made with `step`, chosen among
+// with `choose`, and handed to `map` or `fold` in place of a step written
+// there. It is worked out once, before the walk and after the list and the
+// seed, in the order the call writes them, and applied at each element: a
+// fold handed one is read as binding the list and the seed, then choosing
+// among folds each of whose step is written in place, so the choice is one
+// outside the walk, as the step is chosen once, and each fold is a walk of its
+// own to the measures, the proofs and the rewrites.
+declare const STEP: unique symbol;
+export interface StepValue<Args extends readonly unknown[], Result> {
+  readonly [STEP]?: (...args: Args) => Result;
+}
+const STEPS = new WeakMap<object, (...args: never[]) => unknown>();
+// A step's arguments are named by a tuple: `[Element]` for a map's, and
+// `[Accumulator, Element]` for a fold's, the accumulator first.
+export function step<Args extends readonly unknown[], Result>(build: (...args: { readonly [K in keyof Args]: TermOf<Args[K]> }) => Template<Result>): StepValue<Args, Result> {
+  if (typeof build !== "function") throw new Error("step takes the step's body as a function of its arguments");
+  const value = Object.freeze({ description: "a step handed over as a value" });
+  STEPS.set(value, build as unknown as (...args: never[]) => unknown);
+  return value as StepValue<Args, Result>;
+}
+// The step values a choose tree holds, with each leaf made into what `leaf`
+// builds of its body.
+function steppedBy(tree: unknown, leaf: (build: (...args: never[]) => unknown) => unknown): unknown {
+  const build = typeof tree === "object" && tree !== null ? STEPS.get(tree) : undefined;
+  if (build !== undefined) return leaf(build);
+  const node = nodeOf(tree);
+  if (node?.kind === "choose") return expression({ kind: "choose", condition: node.condition, yes: steppedBy(node.yes, leaf), no: steppedBy(node.no, leaf) });
+  throw new Error("A walk takes a step written in place, one made with step(), or a choice among such steps");
+}
+export function map<Element, Result>(element: Schema<Element>, output: Schema<Result>, values: Template<readonly NoInfer<Element>[]>, build: ((value: TermOf<Element>) => NoInfer<Template<Result>>) | Template<StepValue<[NoInfer<Element>], NoInfer<Result>>>): Expression<readonly Result[]> {
+  if (typeof build !== "function") {
+    return bind(array(element), values as never, list => steppedBy(build, body => map(element, output, list as never, body as never)) as Template<readonly Result[]>);
+  }
   const name = localName(values, "element");
   return expression({ kind: "map", name, element: element as Schema<unknown>, output: output as Schema<unknown>, values, body: build(rootTerm<Element>(name)) });
 }
-export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: NoInfer<Template<Accumulator>>, build: (accumulator: TermOf<Accumulator>, value: TermOf<Element>) => NoInfer<Template<Accumulator>>): Expression<Accumulator> {
+export function fold<Element, Accumulator>(element: Schema<Element>, output: Schema<Accumulator>, values: Template<readonly NoInfer<Element>[]>, initial: NoInfer<Template<Accumulator>>, build: ((accumulator: TermOf<Accumulator>, value: TermOf<Element>) => NoInfer<Template<Accumulator>>) | Template<StepValue<[NoInfer<Accumulator>, NoInfer<Element>], NoInfer<Accumulator>>>): Expression<Accumulator> {
+  if (typeof build !== "function") {
+    return bind(array(element), values as never, list =>
+      bind(output, initial as never, seed => steppedBy(build, body => fold(element, output, list as never, seed as never, body as never)) as Template<Accumulator>));
+  }
   const name = localName(values, "element"), accumulator = localName(undefined, "accumulator");
   return expression({ kind: "fold", name, accumulator, element: element as Schema<unknown>, output: output as Schema<unknown>, values, initial, body: build(rootTerm<Accumulator>(accumulator), rootTerm<Element>(name)) });
 }
@@ -175,6 +213,21 @@ export function between(start: unknown, end: unknown, unit: string): Expression<
 export function quotient(left: Template<number | bigint | Decimal | Rational>, right: Template<number | bigint | Decimal | Rational>): Expression<Rational> {
   return expression({ kind: "operation", operator: "quotient", left, right });
 }
+const ROUNDINGS: readonly Rounding[] = ["half-up", "half-down", "half-even", "up", "down", "ceiling", "floor"];
+// A decimal of `scale` digits after the point, rounded as `mode` says
+// (ADR-0128): a decimal, a rational, an integer or an int64 rounded exactly, at
+// any scale, so it always has an answer.
+export function round(value: Template<number | bigint | Decimal | Rational>, scale: number, mode: Rounding): Expression<Decimal> {
+  if (!Number.isSafeInteger(scale) || scale < 0) throw new Error(`round takes a whole number of digits, not ${scale}`);
+  if (!ROUNDINGS.includes(mode)) throw new Error(`round takes a rounding mode of ${ROUNDINGS.join(", ")}, not ${String(mode)}`);
+  return expression({ kind: "operation", operator: "round", left: value, right: scale, mode });
+}
+// The quotient of two numbers as a decimal of `scale` digits, rounded as
+// `mode` says, as Souther's Decimal.divide is: it has an answer wherever the
+// divisor is not nought.
+export function divide(left: Template<number | bigint | Decimal | Rational>, right: Template<number | bigint | Decimal | Rational>, scale: number, mode: Rounding): Expression<Decimal> {
+  return round(quotient(left, right), scale, mode);
+}
 export function nodeOf(value: unknown): Node | undefined {
   return typeof value === "object" && value !== null && !isTerm(value)
     ? (value as Expression<unknown>)[EXPRESSION] : undefined;
@@ -262,6 +315,7 @@ export function choicesOf(template: unknown): readonly Extract<Node, { kind: "ch
 function checkedTemplate(value: unknown, ancestors = new Set<unknown>(), remaining = { value: 10000 }): unknown {
   if (--remaining.value < 0) throw new Error("Model declaration exceeds 10000 nodes");
   if (typeof value === "function" || typeof value === "symbol") throw new Error("Model expressions cannot contain callbacks or symbols");
+  if (typeof value === "object" && value !== null && STEPS.has(value)) throw new Error("A step made with step() is handed to map or fold, not left in a model");
   if (isTerm(value)) return value;
   if (atom(value)) {
     if (isDecimal(value)) return snapshotValue(value);
@@ -301,6 +355,55 @@ export function model<Input, Result, Effect, Deps = unknown>(
 // value continues at once, so a model whose dependencies answer values (or
 // that calls none) is evaluated synchronously, as the analyses that trace it
 // need. `read` is a generator that yields only a pending call.
+// A rewrite of one fold a run is put to (Souther's ADR-0126): the walk
+// stopping after its first step, or every step handed the seed in place of
+// what the step before it answered. It is set around a run, as Souther's
+// per-thread selector is, rather than threaded through every caller: the runs
+// it is set for are synchronous, so nothing else runs while it is set.
+export type Walk = "after one step" | "from the seed";
+let walkRewrite: { readonly node: unknown; readonly walk: Walk } | undefined;
+let walkObserver: ((node: unknown, elements: number) => void) | undefined;
+export function withWalk<T>(
+  rewrite: { readonly node: unknown; readonly walk: Walk } | undefined,
+  observer: ((node: unknown, elements: number) => void) | undefined,
+  run: () => T,
+): T {
+  const [rewriteBefore, observerBefore] = [walkRewrite, walkObserver];
+  walkRewrite = rewrite;
+  walkObserver = observer;
+  try {
+    return run();
+  } finally {
+    walkRewrite = rewriteBefore;
+    walkObserver = observerBefore;
+  }
+}
+
+// The step a run stopped at — an operation past its type, a division by
+// nought, a construction its schema refuses, a move past a temporal type's
+// range — handed to the observer set around the run (Souther 0.5.0 says a stop
+// of the step it is at, not of a comparison it was found on the way to).
+export type StopStep = Extract<Node, { kind: "operation" | "temporal" | "construct" }>;
+let stopObserver: ((step: StopStep, error: unknown) => void) | undefined;
+export function withStops<T>(observer: (step: StopStep, error: unknown) => void, run: () => T): T {
+  const before = stopObserver;
+  stopObserver = observer;
+  try {
+    return run();
+  } finally {
+    stopObserver = before;
+  }
+}
+function stopping<T>(step: StopStep, compute: () => T): T {
+  if (stopObserver === undefined) return compute();
+  try {
+    return compute();
+  } catch (error) {
+    stopObserver(step, error);
+    throw error;
+  }
+}
+
 export function interpret(template: unknown, scope: unknown, options: {
   readonly steps?: number;
   readonly invoke?: (name: string, input: unknown) => unknown;
@@ -331,8 +434,13 @@ export function interpret(template: unknown, scope: unknown, options: {
       const values = yield* read(node.values, current);
       if (!Array.isArray(values)) throw new Error("Iteration expects an array");
       let accumulator = node.kind === "fold" ? parsed(node.output, yield* read(node.initial, current)) : undefined;
+      const seed = accumulator;
+      const walk = node.kind === "fold" && walkRewrite?.node === node ? walkRewrite.walk : undefined;
+      if (node.kind === "fold") walkObserver?.(node, values.length);
       const result: unknown[] = [];
-      for (const value of values) {
+      for (const [index, value] of values.entries()) {
+        if (walk === "after one step" && index > 0) break;
+        if (walk === "from the seed") accumulator = seed;
         const elementScope = withLocal(current, node.name, parsed(node.element, value));
         const iterationScope = node.kind === "fold" ? withLocal(elementScope, node.accumulator, accumulator) : elementScope;
         const around = distinguishing;
@@ -362,37 +470,23 @@ export function interpret(template: unknown, scope: unknown, options: {
       return yield* read(outcome ? node.yes : node.no, current);
     }
     if (node?.kind === "construct") {
-      const parsed = node.schema.parse(yield* read(node.value, current));
-      if (!parsed.success) throw new Error(`Invalid construction: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
-      return parsed.value;
+      const value = yield* read(node.value, current);
+      return stopping(node, () => {
+        const parsed = node.schema.parse(value);
+        if (!parsed.success) throw new Error(`Invalid construction: ${parsed.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
+        return parsed.value;
+      });
     }
     if (node?.kind === "temporal") {
       const left = yield* read(node.left, current), right = yield* read(node.right, current);
-      return node.operator === "between" ? countBetween(left, right, node.unit) : moveTemporal(node.operator, left, right, node.unit, node.overflow);
+      return stopping(node, () => node.operator === "between" ? countBetween(left, right, node.unit) : moveTemporal(node.operator, left, right, node.unit, node.overflow));
     }
     if (node?.kind === "operation") {
       const left = yield* read(node.left, current), right = yield* read(node.right, current);
-      if (node.operator === "concat") {
-        if (typeof left !== "string" || typeof right !== "string") throw new Error("concat expects strings");
-        return (left + right).normalize("NFC");
-      }
-      if (node.operator === "quotient") return fractionOf(left as number).dividedBy(fractionOf(right as number));
-      if (isDecimal(left) && isDecimal(right)) {
-        const a = fractionOf(left), b = fractionOf(right);
-        return decimalOf(node.operator === "add" ? a.plus(b) : node.operator === "subtract" ? a.minus(b) : node.operator === "multiply" ? a.times(b) : a.dividedBy(b));
-      }
-      if (isRational(left) && isRational(right)) return node.operator === "add" ? left.plus(right) : node.operator === "subtract" ? left.minus(right) : node.operator === "multiply" ? left.times(right) : left.dividedBy(right);
-      if (typeof left === "bigint" && typeof right === "bigint") {
-        if (node.operator === "divide" && (right === 0n || left % right !== 0n)) throw new Error("Integer division must be exact and nonzero");
-        return node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
-      }
-      if (typeof left !== "number" || typeof right !== "number") throw new Error("Arithmetic expects matching numeric types");
-      if (node.operator === "divide" && right === 0) throw new Error("Division by zero");
-      const result = node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
-      if (!Number.isFinite(result) || Number.isInteger(result) && !Number.isSafeInteger(result)) throw new Error("Arithmetic result is outside the exact number range");
-      return result;
+      return stopping(node, () => operate(node, left, right));
     }
     if (atom(value)) return value;
+
     if (Array.isArray(value)) {
       const elements: unknown[] = [];
       for (const child of value) elements.push(yield* read(child, current));
@@ -410,6 +504,41 @@ export function interpret(template: unknown, scope: unknown, options: {
     return options.onPending(first.value);
   }
   return resume(evaluation, first.value);
+}
+
+function operate(node: Extract<Node, { kind: "operation" }>, left: unknown, right: unknown): unknown {
+  try {
+    return operateExactly(node, left, right);
+  } catch (error) {
+    // A whole number larger than the platform builds is a run short of room.
+    if (error instanceof RangeError) throw new OutOfRoom(`No room to work out ${node.operator}: ${error.message}`);
+    throw error;
+  }
+}
+function operateExactly(node: Extract<Node, { kind: "operation" }>, left: unknown, right: unknown): unknown {
+  if (node.operator === "round") {
+    if (typeof left === "number" && !Number.isSafeInteger(left)) throw new Error("round takes an exact number");
+    return decimalOf(roundedAt(fractionOf(left as number), right as number, node.mode ?? "half-even"));
+  }
+  if (node.operator === "concat") {
+    if (typeof left !== "string" || typeof right !== "string") throw new Error("concat expects strings");
+    return (left + right).normalize("NFC");
+  }
+  if (node.operator === "quotient") return fractionOf(left as number).dividedBy(fractionOf(right as number));
+  if (isDecimal(left) && isDecimal(right)) {
+    const a = fractionOf(left), b = fractionOf(right);
+    return decimalOf(node.operator === "add" ? a.plus(b) : node.operator === "subtract" ? a.minus(b) : node.operator === "multiply" ? a.times(b) : a.dividedBy(b));
+  }
+  if (isRational(left) && isRational(right)) return node.operator === "add" ? left.plus(right) : node.operator === "subtract" ? left.minus(right) : node.operator === "multiply" ? left.times(right) : left.dividedBy(right);
+  if (typeof left === "bigint" && typeof right === "bigint") {
+    if (node.operator === "divide" && (right === 0n || left % right !== 0n)) throw new Error("Integer division must be exact and nonzero");
+    return node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
+  }
+  if (typeof left !== "number" || typeof right !== "number") throw new Error("Arithmetic expects matching numeric types");
+  if (node.operator === "divide" && right === 0) throw new Error("Division by zero");
+  const result = node.operator === "add" ? left + right : node.operator === "subtract" ? left - right : node.operator === "multiply" ? left * right : left / right;
+  if (!Number.isFinite(result) || Number.isInteger(result) && !Number.isSafeInteger(result)) throw new Error("Arithmetic result is outside the exact number range");
+  return result;
 }
 
 // A generator over the expression being read: it yields a call's pending

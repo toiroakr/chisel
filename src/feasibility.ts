@@ -10,6 +10,8 @@ import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShap
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
 import type { Step, Way } from "./ways.js";
+import { relationsVerdict } from "./relations.js";
+import type { RelationStep } from "./relations.js";
 
 export type Feasibility =
   | { readonly kind: "feasible" }
@@ -116,6 +118,7 @@ export function feasibilityOf(
   const groups = new Map<string, Group>();
   const relations: Relation[] = [];
   const opaque: (readonly (readonly string[])[])[] = [];
+  const relationSteps: RelationStep[] = [];
   const outcomes = new Map<string, { identity: unknown; outcome: boolean | string }[]>();
   const groupFor = (path: readonly string[], measure: Measure): string => {
     const key = JSON.stringify([path, measure]);
@@ -213,6 +216,10 @@ export function feasibilityOf(
       opaque.push(termPaths(distinction));
       continue;
     }
+    if (distinction.kind === "relation") {
+      relationSteps.push({ rule: distinction, outcome: outcome === true });
+      continue;
+    }
     if (distinction.kind !== "compare") {
       continue;
     }
@@ -241,8 +248,22 @@ export function feasibilityOf(
     }
   }
 
-  const intervals = new Map<string, Interval | undefined>();
+  // Relations on a place no other step reads are settled among themselves; one
+  // whose place another step reads too is read with it as an opaque step.
   let unsettled = false;
+  // A place relations settled among themselves is still read: an opaque step
+  // on it (another relation read through a transform, an all/any, a
+  // comparison not read) leaves the way undecided.
+  const relationReads: (readonly string[])[] = [];
+  for (const verdict of relationsVerdict(relationSteps, scope)) {
+    if (verdict.kind === "infeasible") return { kind: "infeasible", reason: contradicts };
+    const shared = verdict.paths.some(path => [...groups.values()].some(group => sharesValue(path, group.path)) || opaque.flat().some(other => sharesValue(path, other)));
+    if (verdict.kind === "unknown" || shared) opaque.push(verdict.paths);
+    else relationReads.push(...verdict.paths);
+    if (verdict.kind === "unknown" && verdict.searched) unsettled = true;
+  }
+
+  const intervals = new Map<string, Interval | undefined>();
   for (const [key, group] of groups) {
     const settled = settle(group, scope);
     if (settled === false) {
@@ -323,7 +344,7 @@ export function feasibilityOf(
     }
   }
 
-  const readPaths = [...groups.values()].map(group => group.path);
+  const readPaths = [...[...groups.values()].map(group => group.path), ...relationReads];
   const overlaps = opaque.some((paths, index) =>
     paths.some(path =>
       [...readPaths, ...opaque.filter((_, other) => other !== index).flat()].some(other =>
@@ -382,6 +403,7 @@ function ruleIdentity(rule: Rule): unknown {
   const operand = (value: unknown): unknown => isTerm(value) ? ["term", termData(value)] : ["constant", value];
   switch (rule.kind) {
     case "compare": return [rule.kind, rule.operator, operand(rule.left), operand(rule.right)];
+    case "relation": return [rule.kind, rule.relation, operand(rule.subject), operand(rule.other)];
     case "all":
     case "any": return [rule.kind, operand(rule.of), rule.element, ruleIdentity(rule.each)];
     case "not": return [rule.kind, ruleIdentity(rule.rule)];

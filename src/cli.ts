@@ -21,7 +21,10 @@ import {
   examples,
   generate,
   isSpecification,
+  modelChanges,
 } from "./specification.js";
+import type { ModelChange } from "./changes.js";
+import { describeWalk } from "./rewrites.js";
 import type { EnsuresClassification, EnsuresReport } from "./ensures.js";
 import { verify } from "./proof.js";
 import { isMachine, runMachine } from "./machine.js";
@@ -101,12 +104,22 @@ const checkCommand = defineCommand({
       ...(args.disregardCombinations === undefined ? {} : { combinations: args.disregardCombinations }),
       ...(args.disregardCandidates === undefined ? {} : { candidates: args.disregardCandidates }),
     };
+    if (!args.json) {
+      // Said before the measurement, which may take long and does not change it.
+      const changes = targets.flatMap(target => modelChanges(target.specification, { feasibility: feasibilityOptions(args) }));
+      if (changes.length > 0) {
+        const text = formatChanges(changes);
+        if (!isMainThread && workerData?.chisel === true) parentPort!.postMessage({ kind: "early", message: text });
+        else console.log(text);
+      }
+    }
     const reports = await Promise.all(
       targets.map(target =>
         check(target.specification, {
           disregards,
           feasibility: feasibilityOptions(args),
           pairs: pairOptions(args),
+          progress: postProgress,
         }),
       ),
     );
@@ -153,6 +166,7 @@ const generateCommand = defineCommand({
           feasibility: feasibilityOptions(args),
           pairs: pairOptions(args),
           fakes: target.specification.fakes,
+          progress: postProgress,
         },
       );
       return [
@@ -553,9 +567,9 @@ function formatReport(report: AdequacyReport): string {
     ...formatEvidence("証拠（結果）", report.evidence.result, ["specified", "observed", "verified"]),
     ...formatEvidence("証拠（作用）", report.evidence.effects, ["specified", "observed", "verified"]),
     `  実装                 ${implementation}`,
-    `  分岐                 ${formatMeasure(report.measures.arms)}`,
+    `  分岐                 ${formatMeasure(report.measures.arms, report.toBeChangedFirst)}`,
     ...formatArms(report.measures.arms),
-    `  道筋                 ${formatMeasure(report.measures.rules)}`,
+    `  道筋                 ${formatMeasure(report.measures.rules, report.toBeChangedFirst)}`,
     ...formatRules(report.measures.rules),
     `  比較                 ${
       report.measures.comparisons.status === "complete"
@@ -565,6 +579,8 @@ function formatReport(report: AdequacyReport): string {
     ...formatEnsures(report.ensures),
     `  構築の保証           ${report.measures.constructions.status}`,
     ...report.measures.constructions.decisions.map(proof => `    ${proof.decision}: ${proof.status} — ${proof.reason}`),
+    ...formatWalks(report.walks),
+    ...formatStops(report.stops),
   ];
 
   for (const row of report.unanswered) {
@@ -579,6 +595,8 @@ function formatReport(report: AdequacyReport): string {
   for (const item of report.incompleteness) {
     if (item.kind === "disregards not checked") {
       lines.push(`  ! disregardsを確かめていない行: ${item.subject} — ${item.reason}`);
+    } else if (item.kind === "out of room") {
+      lines.push(`  ? 実行環境の余地が足りず答えを書けなかった行（OutOfRoom）: ${item.subject} — ${item.reason}`);
     } else if (!report.failures.some(failure => failure.name === item.subject)) {
       lines.push(`  ! 実行できなかった行: ${item.subject} — ${item.reason}`);
     }
@@ -786,17 +804,53 @@ function formatEnsures(ensures: EnsuresReport): string[] {
   ];
 }
 
-function formatMeasure(measure: Measure | RulesMeasure): string {
+function formatMeasure(measure: Measure | RulesMeasure, changes: readonly ModelChange[] = []): string {
+  const toChange = new Set(changes.map(change => change.decision));
+  const named = (ids: readonly string[]) => ids.map(id => (toChange.has(id) ? `${id}（先に変更する）` : id)).join(", ");
   switch (measure.status) {
     case "complete":
       return "計測済み (complete)";
     case "partial":
-      return `一部のみ (partial); 読めないdecision: ${measure.notRead.join(", ")}`;
+      return `一部のみ (partial); 読めないdecision: ${named(measure.notRead)}`;
     case "unavailable":
-      return measure.reason === "not applicable"
-        ? "対象なし (not applicable)"
-        : `計測不能 (not measured); 読めないdecision: ${measure.notRead.join(", ")}`;
+      if (measure.reason === "not applicable") return "対象なし (not applicable)";
+      return measure.notRead.every(id => toChange.has(id))
+        ? `計測しない (not measured, to be changed first): ${named(measure.notRead)}`
+        : `計測不能 (not measured); 読めないdecision: ${named(measure.notRead)}`;
   }
+}
+
+function formatStops(stops: AdequacyReport["stops"]): string[] {
+  const shown = stops.filter(stop => stop.status !== "never stops");
+  if (shown.length === 0) return [];
+  const count = (status: string) => stops.filter(stop => stop.status === status).length;
+  return [
+    `  停止                 止まりうる ${count("may stop")}   未解決 ${count("not resolved")}`,
+    ...shown.map(stop => stop.status === "may stop"
+      ? `    ! 実行が止まりうる: ${stop.decision}: ${stop.at} — 入力 ${formatTypeScriptValue(stop.input)}${stop.keeping === undefined ? "" : `。${stop.keeping}`}`
+      : `    ? 停止が未解決: ${stop.decision}: ${stop.at} — ${stop.reason}`),
+  ];
+}
+
+function formatWalks(walks: AdequacyReport["walks"]): string[] {
+  if (walks.length === 0) return [];
+  const told = walks.filter(walk => walk.status === "told" || walk.status === "no row owed").length;
+  return [
+    `  foldの書き換え       ${told}/${walks.length}`,
+    ...walks.filter(walk => walk.status === "not told" || walk.status === "undecided").map(walk =>
+      walk.status === "not told"
+        ? `    ! ${describeWalk(walk)}${walk.reason === undefined ? "" : ` — ${walk.reason}`}`
+        : `    ? ${walk.decision}: ${walk.walk}の書き換え（${walk.rewrite}）を見分けられたか決められない${walk.reason === undefined ? "" : ` — ${walk.reason}`}`),
+  ];
+}
+
+// What to change in the model, printed before the measurement starts.
+function formatChanges(changes: readonly ModelChange[]): string {
+  return [
+    "計測の前に:",
+    ...changes.map(change => `  ↻ ${change.message}`),
+    "  ここに述べたことは計測の結果で変わらない。計測を待たずにモデルを変更し、変更してから計測できる。",
+  ].join("\n");
 }
 
 function formatCoverage(
@@ -819,7 +873,9 @@ function formatGeneratedExamples(
     return `${binding}: 未網羅の入力variantはありません`;
   }
 
-  const rows = generated.map(row => `${formatGeneratedExample(row)},\n`).join("");
+  const suggested = generated.filter(row => row.suggested === true).length;
+  const header = suggested === 0 ? "" : `// 義務のある行 ${generated.length - suggested}件、提案する行 ${suggested}件（義務はない）\n`;
+  const rows = header + generated.map(row => `${formatGeneratedExample(row)},\n`).join("");
   if (!target.synthesized) {
     return target.specification.implementation === undefined
       ? `${rows.trimEnd()}\n\n${formatImplementationScaffold(target)}`
@@ -895,10 +951,16 @@ if (!isMainThread && workerData?.chisel === true) {
   const at = argv.indexOf("--timeout");
   const assigned = argv.find(arg => arg.startsWith("--timeout="));
   const timeout = Number(assigned?.slice("--timeout=".length) ?? (at >= 0 ? argv[at + 1] : 30000));
-  const result = await runIsolated(argv, Number.isSafeInteger(timeout) && timeout > 0 ? timeout : 30000);
+  const result = await runIsolated(argv, Number.isSafeInteger(timeout) && timeout > 0 ? timeout : 30000, { early: line => console.log(line) });
   for (const entry of result.logs) (entry.stream === "stderr" ? console.error : console.log)(entry.message);
   if (result.error) console.error(`Error: ${result.error}`);
   process.exitCode = result.exitCode;
+}
+
+// In the worker, each phase is posted to the parent, which says it on stderr
+// once the run has gone on a while; run in process, nothing is said.
+function postProgress(phase: string): void {
+  if (!isMainThread && workerData?.chisel === true) parentPort!.postMessage({ kind: "progress", message: phase });
 }
 
 function feasibilityOptions(args: {

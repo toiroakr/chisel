@@ -1,4 +1,4 @@
-import { Rational, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Rational, isRational, INT64_MIN, INT64_MAX, decimalOf, fractionOf, isOutOfRoom } from "./exact.js";
 import { Decimal } from "decimal.js";
 import { deepEqual } from "./equal.js";
 import type { AnySchema, AnyVariantsSchema, ArraySchema, EnumSchema, LiteralSchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, DecimalSchema } from "./schema.js";
@@ -12,14 +12,9 @@ export interface Domain {
   readonly exhaustive: boolean;
 }
 
-export function constantsOf(rules: readonly Rule[]): unknown[] {
-  return rules.flatMap((rule): unknown[] => {
-    if (rule.kind === "and" || rule.kind === "or") return constantsOf(rule.rules);
-    if (rule.kind === "not") return constantsOf([rule.rule]);
-    if (rule.kind === "all" || rule.kind === "any") return constantsOf([rule.each]);
-    return [rule.left, rule.right].flatMap(value => !isTerm(value) ? [value] : termData(value).kind === "linear" ? [(termData(value) as { constant: unknown }).constant] : []);
-  });
-}
+// What the rules write as values, read by the domain and the placeholders.
+export { constantsOf } from "./rule.js";
+import { constantsOf } from "./rule.js";
 
 export function domainOf(schema: AnySchema, limit: number, constants: readonly unknown[] = []): Domain {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Domain limit must be a positive safe integer");
@@ -86,7 +81,12 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
       }
       case "record": {
         const child = nested((current as RecordSchema<unknown>).value);
-        return finish([{}, ...child.values.map(value => ({ key: value }))], integralBounds(current, "length").upper === 0);
+        // The keys the rules write ($hasKey) are tried as keys, as `key` is.
+        const keys = [...new Set(["key", ...[...constants, ...constantsOf(current.invariants)].filter((value): value is string => typeof value === "string")])];
+        const first = child.values[0];
+        // A record held to no entry is the empty record alone, however many keys were written.
+        if (integralBounds(current, "length").upper === 0) return finish([{}], true);
+        return finish([{}, ...keys.flatMap(key => child.values.map(value => ({ [key]: value }))), ...(first === undefined ? [] : [Object.fromEntries(keys.map(key => [key, first]))])], false);
       }
     }
     const local = [...constants, ...constantsOf(current.invariants)];
@@ -127,10 +127,19 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
       for (const value of local) if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < limit) values.push("_".repeat(value), "_".repeat(Math.max(0, value - 1)), "_".repeat(value + 1));
       exhaustive = integralBounds(current, "length").upper === 0;
     } else if (current.kind === "decimal") {
-      const step = new Decimal(10).pow(-(current as DecimalSchema).scale);
-      for (const value of local) if (Decimal.isDecimal(value) || typeof value === "number") {
-        const decimal = new Decimal(value);
-        values.push(decimal, decimal.plus(step), decimal.minus(step));
+      const { scale } = current as DecimalSchema;
+      values.push(new Decimal(0), new Decimal(1), new Decimal(-1));
+      // Neighbours worked out exactly, as decimal.js rounds a sum to 20 digits.
+      for (const value of local) if ((Decimal.isDecimal(value) && value.isFinite()) || (typeof value === "number" && Number.isFinite(value))) {
+        values.push(new Decimal(value));
+        // A constant past the digits exact arithmetic has room for gives no neighbours.
+        try {
+          const exact = fractionOf(new Decimal(value));
+          const step = scale === undefined ? new Rational(1n, 10n ** BigInt(Math.max(1, new Decimal(value).decimalPlaces() + 1))) : new Rational(1n, 10n ** BigInt(scale));
+          values.push(decimalOf(exact.plus(step)), decimalOf(exact.minus(step)));
+        } catch (error) {
+          if (!isOutOfRoom(error)) throw error;
+        }
       }
     }
     for (const border of bordersOf(current.invariants.flatMap(conjuncts), measure => carrierOf(current, measure))) {

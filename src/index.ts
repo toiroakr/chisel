@@ -122,8 +122,10 @@ export {
   evaluate,
   generate,
   isSpecification,
+  modelChanges,
   test,
 } from "./specification.js";
+export type { ModelChange, ModelChangePart } from "./changes.js";
 export type {
   AdequacyReport,
   CheckOptions,
@@ -185,7 +187,10 @@ export type { JsonValue } from "./codec.js";
 export { PAIR_LIMIT } from "./pairs.js";
 export type { PairObligation, PairMeasure } from "./pairs.js";
 
-export { model, bind, matchValue, map, fold, call, choose, construct, concat, arithmetic, quotient, plus, minus, between } from "./model.js";
+export { model, bind, matchValue, map, fold, step, call, choose, construct, concat, arithmetic, quotient, round, divide, plus, minus, between } from "./model.js";
+export type { StepValue } from "./model.js";
+export { OutOfRoom } from "./exact.js";
+export type { Rounding } from "./exact.js";
 export type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
 export type { Expression, Template } from "./model.js";
 

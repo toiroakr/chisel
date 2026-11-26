@@ -9,6 +9,7 @@ export interface Outcome {
 export function* outcomesOf(rule: Rule): Generator<Outcome> {
   switch (rule.kind) {
     case "compare":
+    case "relation":
     case "all":
     case "any":
       yield { steps: [{ distinction: rule, outcome: true }], result: true };

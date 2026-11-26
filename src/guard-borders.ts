@@ -3,15 +3,17 @@ import { deepEqual } from "./equal.js";
 import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision } from "./behavior.js";
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
-import { bordersOf, decimalUnitsCarrier, integerCarrier, nanosecondCarrier, normalize, numberCarrier } from "./border.js";
+import { bordersOf, decimalCarrier, decimalUnitsCarrier, integerCarrier, nanosecondCarrier, normalize, numberCarrier } from "./border.js";
+import { decimalOf, fractionOf } from "./exact.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf, writeExactly } from "./partition.js";
-import type { CompareRule, Rule, Term } from "./rule.js";
-import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
+import type { CompareRule, RelationRule, Rule, Term } from "./rule.js";
+import { DEPS, boundTermPath, conjuncts, describeRule, holds, isDecimal, isTerm, readOperand, selfTerm, shiftTerms, termData, termPaths, positionData, positionOf, positionTerm, differenceOf, sameElement, withDeps, decimalOfUnits, decimalUnits, counts, measured, measureLabel } from "./rule.js";
 import { enumOf, int, isVariantsSchema, object, variants } from "./schema.js";
 import type { AnySchema, DecimalSchema, ObjectSchema, ObjectShape } from "./schema.js";
-import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
+import { casesOnTrail, enter, everyStepsOf, framesAt, framesFor, guardScope, inheritedAt, labelsOf, locate, onTrail, pathOf, relationThresholdsIn, schemaAlong, schemaAt, segmentsOf, thresholdsIn } from "./guard-scope.js";
+import { RELATION_LIMIT, relationClasses } from "./relations.js";
 import type { Frame, Frames, Threshold } from "./guard-scope.js";
 export interface GuardBorder {
   readonly path: string;
@@ -38,6 +40,9 @@ export interface GuardBorder {
 export interface BorderForm {
   readonly parts: readonly {
     readonly path: string;
+    // The position as segments and measure, which the rendered path cannot
+    // tell apart: the key "a.b" renders as the path a.b does.
+    readonly identity: string;
     readonly coefficient: number;
     valueOf(scope: unknown): number | undefined;
     write(given: unknown, value: number): unknown;
@@ -322,17 +327,27 @@ export function guardPartitionsOf(implementation: AnyImplementation): readonly G
           ),
         ),
   );
-  const trails = [...new Set(thresholds.map(threshold => JSON.stringify(threshold.segments)))];
+  const relations = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+    decision.kind !== "rules"
+      ? []
+      : decision.guards.flatMap(candidate => relationThresholdsIn(candidate.condition, framesFor(implementation.behavior, tag, decision))),
+  );
+  const trails = [...new Set([...thresholds, ...relations].map(threshold => JSON.stringify(threshold.segments)))];
   return trails.flatMap(trail => {
     const atPath = thresholds.filter(threshold => JSON.stringify(threshold.segments) === trail);
-    const partition = partitionAt(
-      atPath[0]!.path,
-      atPath[0]!.segments,
-      atPath[0]!.schema,
-      atPath[0]!.inherited,
+    const related = relations.filter(threshold => JSON.stringify(threshold.segments) === trail);
+    const first = atPath[0] ?? related[0]!;
+    const partition = atPath.length === 0 ? undefined : partitionAt(
+      first.path,
+      first.segments,
+      first.schema,
+      first.inherited,
       atPath.map(threshold => threshold.rule),
     );
-    return partition === undefined ? [] : [partition];
+    if (related.length === 0) return partition === undefined ? [] : [partition];
+    // The relations divide the place within each class the comparisons divide it into.
+    const { classes, excluded } = relationClasses(related.map(threshold => threshold.rule), first.schema, partition?.classes ?? [], first.inherited);
+    return [{ path: first.path, segments: first.segments, classes, excluded: [...(partition?.excluded ?? []), ...excluded] }];
   });
 }
 
@@ -475,6 +490,11 @@ function walk(rule: Rule, frames: Frames, at: PositionAt, reading: Reading): Gua
   if (rule.kind === "all" || rule.kind === "any") {
     const inner = enter(rule, frames);
     return inner === undefined ? [] : walk(rule.each, inner, at, reading);
+  }
+  // A relation draws no line: its classes divide the place it reads, and its
+  // arms ask a row on each side of it.
+  if (rule.kind === "relation") {
+    return [];
   }
   if ([rule.left, rule.right].some(operand => isTerm(operand) && positionData(operand as Term<unknown>) === undefined)) {
     return betweenExpression(rule, frames, at, reading);
@@ -619,6 +639,7 @@ function betweenExpressionOn(
       ? {
           parts: parts.map(part => ({
             path: part.path,
+            identity: JSON.stringify([part.segments, part.measure]),
             coefficient: part.coefficient,
             valueOf: scope => valueOf(part, scope),
             write: (given, value) => at(part.segments)?.write(given, part.measure, value),
@@ -736,8 +757,12 @@ function betweenOn(
   if (carrier === undefined || rule.operator === "==" || rule.operator === "!=") {
     return [];
   }
+  // Two decimals one of which has no scale differ by an exact decimal, on no
+  // grid of units (ADR-0128): the border is drawn on that difference itself.
+  const exact = first.kind === "decimal" && second.kind === "decimal" && (first.scale === undefined || second.scale === undefined);
   const moment =
-    first.kind === "decimal" || second.kind === "decimal"
+    exact ? undefined
+    : first.kind === "decimal" || second.kind === "decimal"
       ? decimalMoment(first, second)
       : first.kind === second.kind
         ? MOMENTS[first.kind ?? ""]
@@ -747,7 +772,7 @@ function betweenOn(
     kind: "compare",
     operator: rule.operator,
     left: selfTerm<number>(),
-    right: carrier === nanosecondCarrier || first.kind === "decimal" || second.kind === "decimal" ? 0n : 0,
+    right: exact ? decimalOf(fractionOf(0)) : carrier === nanosecondCarrier || first.kind === "decimal" || second.kind === "decimal" ? 0n : 0,
   };
   const borders = bordersOf([difference], () => carrier, {
     source: reading.source,
@@ -767,6 +792,7 @@ function betweenOn(
     ? {
         parts: sides.map((side, index) => ({
           path: side.path,
+          identity: JSON.stringify([side.segments, side.measure]),
           coefficient: index === 0 ? 1 : -1,
           valueOf: scope => read(side, scope) as number | undefined,
           write: (given, value) => at(side.segments)?.write(given, side.measure, value),
@@ -783,6 +809,10 @@ function betweenOn(
     cases: [...options[0].cases, ...options[1].cases.filter(other => !options[0].cases.some(one => one.at.join("\u0000") === other.at.join("\u0000")))],
     coordinateOf: reached => {
       if (!first.onTrail(reached.scope) || !second.onTrail(reached.scope)) return undefined;
+      if (exact) {
+        const [a, b] = [readOperand(first.term, reached.scope), readOperand(second.term, reached.scope)];
+        return a === undefined || b === undefined ? undefined : decimalOf(fractionOf(a as Decimal).minus(fractionOf(b as Decimal)));
+      }
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
       return a === undefined || b === undefined ? undefined : (a as number) - (b as number);
@@ -791,8 +821,10 @@ function betweenOn(
       const otherSide = side === 1;
       // Move the side that can take every value of the difference: the finer of
       // a decimal and an integer, and never a stand-in, which a row writes as given.
-      const preferred = first.standsIn || (!second.standsIn && second.scale > first.scale);
-      const swappable = !first.standsIn && !second.standsIn && first.scale === second.scale;
+      // A decimal of any scale is the finest of all: it takes every difference.
+      const fineness = (side: Side) => (side.kind === "decimal" && side.scale === undefined ? Infinity : side.scale ?? 0);
+      const preferred = first.standsIn || (!second.standsIn && fineness(second) > fineness(first));
+      const swappable = !first.standsIn && !second.standsIn && fineness(first) === fineness(second);
       const moveSecond = otherSide === true && swappable ? !preferred : preferred;
       const [moving, fixed, sign] = moveSecond ? [second, first, -1] : [first, second, 1];
       const moved = moving.standsIn ? undefined : at(moving.segments);
@@ -801,6 +833,15 @@ function betweenOn(
         : at(fixed.segments)?.valuesIn(given)[0];
       if (moved === undefined || other === undefined) {
         return undefined;
+      }
+      if (exact) {
+        const shifted = fractionOf(other as Decimal).plus(fractionOf(coordinate as Decimal).times(fractionOf(sign)));
+        const written = moved.write(given, moving.measure, decimalOf(shifted));
+        if (written === undefined || fixed.standsIn || !deepEqual(fixed.segments, moving.segments)) return written;
+        // Both sides read the one place moved, so the row is kept only where it
+        // stands at the point.
+        const [a, b] = [first, second].map(side => at(side.segments)?.valuesIn(written)[0]);
+        return isDecimal(a) && isDecimal(b) && fractionOf(a).minus(fractionOf(b)).comparedTo(fractionOf(coordinate as Decimal)) === 0 ? written : undefined;
       }
       if (moment?.write !== undefined) {
         const units = (moment.read(other, fixed) as bigint) + BigInt(sign) * (coordinate as bigint);
@@ -846,15 +887,17 @@ interface Moment {
 
 // Reads two decimals as whole numbers of units of the finer scale of the two, so
 // their difference is exact, and writes one back where the other side's value
-// plus the difference lands on its own scale.
+// plus the difference lands on its own scale. Only two decimals of a scale
+// have such units: differenceCarrier draws no border between others.
 function decimalMoment(first: Side, second: Side): Moment {
-  const scale = Math.max(first.scale, second.scale);
+  const scale = Math.max(first.scale ?? 0, second.scale ?? 0);
   return {
     read: value => decimalUnits(value as Decimal, scale, "floor"),
     shift: () => undefined,
     write: (units, side, like) => {
-      const coarser = 10n ** BigInt(scale - side.scale);
-      return units % coarser === 0n ? decimalOfUnits(like as Decimal, units / coarser, side.scale) : undefined;
+      const own = side.scale ?? 0;
+      const coarser = 10n ** BigInt(scale - own);
+      return units % coarser === 0n ? decimalOfUnits(like as Decimal, units / coarser, own) : undefined;
     },
   };
 }
@@ -900,8 +943,9 @@ const MOMENTS: Readonly<Record<string, Moment>> = {
 
 interface Side {
   readonly kind: string | undefined;
-  // Digits after the decimal point, for a decimal; 0 for anything else.
-  readonly scale: number;
+  // Digits after the decimal point, for a decimal; 0 for anything else, and
+  // undefined for a decimal of any scale, whose difference has no unit.
+  readonly scale: number | undefined;
 }
 
 function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: second, scale: secondScale }: Side): Carrier | undefined {
@@ -912,7 +956,9 @@ function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: sec
   // Two decimals count their difference in units of the finer scale; a decimal
   // is not ordered against any other kind.
   if (first === "decimal" && second === "decimal") {
-    return decimalUnitsCarrier(Math.max(firstScale, secondScale));
+    // A decimal of any scale has no unit to count the difference in: it is
+    // the exact decimal difference, with no value next to another.
+    return firstScale === undefined || secondScale === undefined ? decimalCarrier(undefined) : decimalUnitsCarrier(Math.max(firstScale, secondScale));
   }
   if (first === "decimal" || second === "decimal") {
     return undefined;
@@ -927,8 +973,7 @@ function differenceCarrier({ kind: first, scale: firstScale }: Side, { kind: sec
 }
 
 export function comparisonsNotReadOf(implementation: AnyImplementation): readonly string[] {
-  const input = implementation.behavior.input;
-  return Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+  const unread = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
     decision.kind !== "rules"
       ? []
       : decision.guards.flatMap(candidate =>
@@ -937,6 +982,24 @@ export function comparisonsNotReadOf(implementation: AnyImplementation): readonl
           ),
         ),
   );
+  // A place more relations are written against than their combinations are
+  // drawn for is divided into no partition.
+  const relations = Object.entries(implementation.cases).flatMap(([tag, decision]) =>
+    decision.kind !== "rules" ? [] : decision.guards.flatMap(candidate => relationThresholdsIn(candidate.condition, framesFor(implementation.behavior, tag, decision))),
+  );
+  // Relations counted as relationClasses counts them: one per relation and
+  // operand, operands compared by value rather than by how they render.
+  const places = new Map<string, { path: string; rules: RelationRule[] }>();
+  for (const threshold of relations) {
+    const key = JSON.stringify(threshold.segments);
+    const place = places.get(key) ?? { path: threshold.path, rules: [] };
+    if (!place.rules.some(other => other.relation === threshold.rule.relation && sameElement(other.other, threshold.rule.other))) place.rules.push(threshold.rule);
+    places.set(key, place);
+  }
+  const crowded = [...places.values()]
+    .filter(place => place.rules.length > RELATION_LIMIT)
+    .map(place => `${place.path}: 関係が${place.rules.length}個あり、上限の${RELATION_LIMIT}個を超えるため組み合わせを引かない`);
+  return [...unread, ...crowded];
 }
 
 function unreadIn(rule: Rule, frames: Frames): string[] {
@@ -953,6 +1016,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
         ? [describeRule(rule, frames.root.label, labelsOf(frames))]
         : unreadIn(rule.each, inner);
     }
+    // Read by the classes it divides the place into and the arms on each side.
+    case "relation":
+      return [];
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       // Two constants settle without reading anything.
