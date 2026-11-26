@@ -124,6 +124,10 @@ export function feasibilityOf(
   const finiteEqualities: Equality[] = [];
   const stringEqualities: Equality[] = [];
   const outcomes = new Map<string, { identity: unknown; outcome: boolean | string }[]>();
+  // What the way holds of quantified conditions, each written with its negation pushed in, so a
+  // condition and the same one written negated (`any(xs, x => all(ys, y => y != x))` failing and
+  // `all(xs, x => any(ys, y => y == x))` failing) are told to contradict each other.
+  const quantified = new Set<string>();
   const groupFor = (path: readonly string[], measure: Measure): string => {
     const key = JSON.stringify([path, measure]);
     if (!groups.has(key)) {
@@ -217,6 +221,10 @@ export function feasibilityOf(
     }
     const { distinction, outcome } = step;
     if (distinction.kind === "all" || distinction.kind === "any") {
+      const held = identityKey(outcome === true ? distinction : negatedRule(distinction));
+      const refused = identityKey(outcome === true ? negatedRule(distinction) : distinction);
+      if (quantified.has(refused)) return { kind: "infeasible", reason: contradicts };
+      quantified.add(held);
       opaque.push(termPaths(distinction));
       continue;
     }
@@ -415,6 +423,12 @@ function stepIdentity(step: Step): unknown {
     ? ["match", termData(step.distinction.on)]
     : ruleIdentity(step.distinction);
 }
+// The identity of a rule as one string, told apart by the paths it reads rather than by how it is
+// written, since the key "a.b" is written as the path a.b is.
+function identityKey(rule: Rule): string {
+  return JSON.stringify(ruleIdentity(rule), (_, value: unknown) => typeof value === "bigint" ? `${value}n` : value);
+}
+
 function ruleIdentity(rule: Rule): unknown {
   const operand = (value: unknown): unknown => isTerm(value) ? ["term", termData(value)] : ["constant", value];
   switch (rule.kind) {
@@ -512,6 +526,21 @@ function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | u
     !form.parts.some(part => leftOutAlong(scope, part.path))
     ? form
     : undefined;
+}
+
+// The rule with its negation pushed in through quantifiers and connectives, which every way of
+// reading it the analyses use agrees with: what a way reads is never absent, since a comparison
+// reading a value that may be left out is refused where it is written.
+function negatedRule(rule: Rule): Rule {
+  switch (rule.kind) {
+    case "compare": return { ...rule, operator: negated[rule.operator] };
+    case "all": return { kind: "any", of: rule.of, element: rule.element, each: negatedRule(rule.each) };
+    case "any": return { kind: "all", of: rule.of, element: rule.element, each: negatedRule(rule.each) };
+    case "and": return { kind: "or", rules: rule.rules.map(negatedRule) } as Rule;
+    case "or": return { kind: "and", rules: rule.rules.map(negatedRule) } as Rule;
+    case "not": return rule.rule;
+    case "relation": return { kind: "not", rule };
+  }
 }
 
 interface Equality {

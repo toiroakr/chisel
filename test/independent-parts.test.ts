@@ -129,5 +129,19 @@ describe("independent parts of a model", () => {
     const modified = c.verify(broken).decisions.find(decision => decision.decision === "forgets to loosen");
     expect(modified?.status).not.toBe("verified");
   });
-});
 
+  it("proves a guarantee the model meets by the same quantified condition written negated", () => {
+    const Lists = c.variants("kind", { request: c.object({ before: c.array(c.string()), after: c.array(c.string()), note: c.string() }) });
+    const keeps = c.behavior("keeps", {
+      input: Lists, result: c.object({ widen: c.boolean() }), effects: emptyEffects,
+      ensures: clause => [clause.always("every value before is kept or widened", (input, value) =>
+        value.widen.$eq(true).$or(input.before.$all(item => input.after.$any(kept => kept.$eq(item)))))],
+    });
+    const impl = c.implement(keeps, {
+      cases: { request: c.model("keeps", input => ({
+        result: { widen: c.choose(input.before.$any(item => input.after.$all(kept => kept.$ne(item))), true, false) }, effects: [],
+      })) },
+    });
+    expect(c.verify(impl).status).toBe("verified");
+  });
+});
