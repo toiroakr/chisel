@@ -504,17 +504,15 @@ A command without effects has no point to die at, and a command that stopped by 
 
 ### Running a machine in production
 
-`runMachine` only follows the machine; `driveMachine` runs it. The transition that `checkMachine`, `model-check` and `prove-machine` read decides each next effect, and the `perform` you pass carries it out, so production code holds no second copy of the order of calls or of what a failure leaves:
+`runMachine` only follows the machine; `driveMachine` runs it. The transition that `checkMachine`, `model-check` and `prove-machine` read decides each next effect, and the `perform` you pass makes the outside world reach the state the effect names, so production code holds no second copy of the order of the steps or of what a failure leaves:
 
 ```ts
-c.effect("createType", { ...state, created: true }, { request: { name: command.name }, failure: { ...state, failed: true } });
-
 const { state, failures } = await c.driveMachine(deploy, current, { type: "create", name: "User" }, {
-  perform: async effect => { await client[effect.name](effect.request); },
+  perform: async effect => { await reconcile(effect.before, effect.after); },
 });
 ```
 
-`request` is what the effect sends; nothing the checks read depends on it, and the TLA+ translation leaves it out. `perform` gets the effect's name, request, index and command and the states before and after it. When it returns, the effect succeeded; when it throws or rejects, the effect failed, and the command ends in the effect's failure state and drops the commands it would have emitted, exactly the outcome `checkMachine` explored. The error is listed in `failures` instead of thrown. `perform` may return `{ commands }`: what it observed, such as state read back from the remote side, run as commands after those the transition emitted. Every command of the domain is explored in every reachable state, so these are checked like any other. A transition still cannot call a dependency; what reaches outside the machine is an effect.
+`perform` gets the effect's name, its index and command, the state before it and the state it is to leave. When it returns, the effect succeeded; when it throws or rejects, the effect failed, and the command ends in the effect's failure state and drops the commands it would have emitted, exactly the outcome `checkMachine` explored. The error is listed in `failures` instead of thrown. `perform` may return `{ commands }`: what it observed, run as commands after those the transition emitted. Every command of the domain is explored in every reachable state, so these are checked like any other. A transition still cannot call a dependency; what reaches outside the machine is an effect.
 
 Two runs of one flow can also work on the same state at once. `checkInterleavings(specification, { copies: [commandA, commandB] })` runs one copy per command against a single shared state. A copy reads the state when it starts a command, then performs that command's effects one step at a time, and every order in which the steps of the copies interleave is explored. An effect writes only the fields it changes from what its copy last saw (or the fields `writes: ["stock", "a"]` names, which must be fields of the state) onto the state as it is by then, so a write computed from a stale read overwrites what another copy wrote since, and `c.effect(name, after, { ifUnchanged: true })` applies only if nothing was written since the copy read the state, otherwise the copy ends `refused` with the shared state unchanged. Take two customers buying the last unit of a stock, each copy reading the stock and then writing it with its own flag:
 

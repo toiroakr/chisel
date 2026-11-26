@@ -405,7 +405,7 @@ class Compiler {
     if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
     if (Array.isArray(value)) return `<<${value.map(item => this.value(item, names)).join(", ")}>>`;
     if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
-      const fields = Object.entries(value).filter(([key]) => !((value as { kind?: unknown }).kind === "effect" && key === "request"));
+      const fields = Object.entries(value);
       if ((value as { kind?: unknown }).kind === "effect") {
         const hasFailure = fields.some(([key]) => key === "failure");
         if (!hasFailure) fields.push(["failure", 0]);

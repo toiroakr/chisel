@@ -23,21 +23,17 @@ export interface Effect<State> {
   readonly failure?: State;
   readonly ifUnchanged?: boolean;
   readonly writes?: readonly string[];
-  // What the effect sends, for whoever performs it. Nothing the machine checks reads it.
-  readonly request?: unknown;
 }
 
 export function effect<State>(name: string, state: Template<NoInfer<State>>, options: {
   readonly failure?: Template<NoInfer<State>>;
   readonly ifUnchanged?: boolean;
   readonly writes?: readonly string[];
-  readonly request?: unknown;
 } = {}): Template<Effect<State>> {
   return { kind: "effect", name, state,
     ...(Object.hasOwn(options, "failure") ? { failure: options.failure } : {}),
     ...(options.ifUnchanged === undefined ? {} : { ifUnchanged: options.ifUnchanged }),
-    ...(options.writes === undefined ? {} : { writes: options.writes }),
-    ...(Object.hasOwn(options, "request") ? { request: options.request } : {}) } as Template<Effect<State>>;
+    ...(options.writes === undefined ? {} : { writes: options.writes }) } as Template<Effect<State>>;
 }
 
 export type MachineCommand<State, Command> = Template<{
@@ -145,11 +141,10 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
   return next.value;
 }
 
-// An effect as `driveMachine` hands it to `perform`: its name and request as the transition wrote
-// them, its place among the command's effects, the command, and the state before it and after it.
+// An effect as `driveMachine` hands it to `perform`: its name, its place among the command's
+// effects, the command, and the state before it and the state it is to leave.
 export interface EffectToPerform<State, Command> {
   readonly name: string;
-  readonly request: unknown;
   readonly index: number;
   readonly command: Command;
   readonly before: State;
@@ -186,7 +181,7 @@ export async function driveMachine<State, Command>(definition: Machine<State, Co
     if (point.kind === "dies") { next = run.next(false); continue; }
     let answer: EffectAnswer;
     try {
-      const performed = await options.perform({ name: point.name, request: point.request, index: point.index, command: point.command, before: point.before, after: point.after });
+      const performed = await options.perform({ name: point.name, index: point.index, command: point.command, before: point.before, after: point.after });
       answer = { failed: false, ...(performed && performed.commands !== undefined ? { commands: performed.commands } : {}) };
     } catch (error) {
       failures.push({ name: point.name, index: point.index, command: point.command, error });
@@ -204,7 +199,7 @@ interface EffectAnswer {
 
 type Point<State, Command> =
   | { readonly kind: "dies"; readonly completed: number; readonly command: Command }
-  | { readonly kind: "effect"; readonly name: string; readonly request: unknown; readonly index: number; readonly command: Command; readonly before: State; readonly after: State };
+  | { readonly kind: "effect"; readonly name: string; readonly index: number; readonly command: Command; readonly before: State; readonly after: State };
 
 // The one loop every way of running a machine shares: it stops at each point where the process
 // may die and at each effect, and the caller answers whether it died or the effect failed.
@@ -233,10 +228,10 @@ function* follow<State, Command>(definition: Machine<State, Command>, state: Sta
         const declaredEffects = output.effects as unknown[];
         for (const [index, item] of declaredEffects.entries()) {
           if ((yield { kind: "dies", completed: index, command: input }) === true) { died = { after: index }; stopped = true; break; }
-          const declared = item as { name?: unknown; state?: unknown; failure?: unknown; request?: unknown } | null;
+          const declared = item as { name?: unknown; state?: unknown; failure?: unknown } | null;
           if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
           const after = parse(definition.state, declared.state, `Effect ${declared.name} state`);
-          const answer = (yield { kind: "effect", name: declared.name, request: declared.request, index, command: input, before: next, after }) as EffectAnswer;
+          const answer = (yield { kind: "effect", name: declared.name, index, command: input, before: next, after }) as EffectAnswer;
           if (answer.failed) {
             performed.push({ name: declared.name, outcome: "failed" });
             if (Object.hasOwn(declared, "failure")) next = parse(definition.state, declared.failure, `Effect ${declared.name} failure state`);

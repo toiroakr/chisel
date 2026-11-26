@@ -14,23 +14,23 @@ const deploy = c.machine("deploy", {
   update: (state, command) => c.matchValue<typeof Command, never>(Command, command, {
     create: (create: c.TermOf<{ type: "create"; name: string }>) => ({
       effects: [c.effect("createType", { step: "created" as const, name: create.name },
-        { request: { name: create.name, kind: "type" }, failure: { step: "failed" as const, name: create.name } })],
+        { failure: { step: "failed" as const, name: create.name } })],
       commands: [{ type: "label" as const }],
     }),
-    label: () => ({ effects: [c.effect("writeLabel", { step: "labelled" as const, name: state.name }, { request: { trn: state.name } })] }),
+    label: () => ({ effects: [c.effect("writeLabel", { step: "labelled" as const, name: state.name })] }),
     observed: (observed: c.TermOf<{ type: "observed"; name: string }>) => ({ state: { step: state.step, name: observed.name } }),
   } as never),
 });
 
 describe("driveMachine", () => {
-  it("performs each effect with the request the transition wrote, in the order runMachine follows", async () => {
+  it("performs each effect with the states around it, in the order runMachine follows", async () => {
     const performed: unknown[] = [];
     const result = await c.driveMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }, {
-      perform: async effect => { performed.push([effect.name, effect.request, effect.before.step, effect.after.step]); },
+      perform: async effect => { performed.push([effect.name, effect.before, effect.after]); },
     });
     expect(performed).toStrictEqual([
-      ["createType", { name: "User", kind: "type" }, "start", "created"],
-      ["writeLabel", { trn: "User" }, "created", "labelled"],
+      ["createType", { step: "start", name: "" }, { step: "created", name: "User" }],
+      ["writeLabel", { step: "created", name: "User" }, { step: "labelled", name: "User" }],
     ]);
     expect(result.state).toStrictEqual({ step: "labelled", name: "User" });
     expect(result.failures).toStrictEqual([]);
@@ -62,13 +62,5 @@ describe("driveMachine", () => {
     await expect(c.driveMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }, {
       perform: () => ({ commands: [{ type: "unknown" } as never] }),
     })).rejects.toThrow(c.SpecificationError);
-  });
-
-  it("leaves the request out of the TLA+ translation", () => {
-    const counter = c.machine("counter", {
-      state: c.object({ n: c.int().min(0).max(1) }), command: c.enum(["go"] as const), initial: [{ n: 0 }],
-      update: () => ({ effects: [c.effect<{ n: number }>("write", { n: 1 }, { request: { anything: "goes" } })] }),
-    });
-    expect(c.toTla(c.specifyMachine(counter, {}))).not.toContain("anything");
   });
 });
