@@ -1,6 +1,6 @@
 import { invokeDependency } from "./dependency.js";
 import { DATA, isPromiseLike, snapshotValue } from "./data.js";
-import { interpret, childrenOf, guardsOf, inlineInputBindings, modelDependencyIssue, nodeOf, translationOf } from "./model.js";
+import { interpret, childrenOf, independentParts, guardsOf, inlineInputBindings, modelDependencyIssue, nodeOf, translationOf } from "./model.js";
 import type { Translation } from "./model.js";
 import type { DeclaredDependencies, Resolved, Supplied } from "./dependency.js";
 import type {
@@ -947,7 +947,10 @@ function decide<Result, Effect>(
       observe: (written, value) => observe(rule(written), value),
       distinguish: (distinction, outcome) => distinguish(rule(distinction), outcome),
       ...(onPending === undefined ? {} : { onPending }),
-      ...(iterate === undefined ? {} : { iterate: (within, steps) => iterate(node(within), steps.map(step => ({ ...step, distinction: rule(step.distinction) }))) }),
+      ...(iterate === undefined ? {} : {
+        iterate: (within, steps) => iterate(node(within), steps.map(step => ({ ...step, distinction: rule(step.distinction) }))),
+        parts: new Set(independentParts(decision.runs ?? decision.expression) ?? []),
+      }),
       invoke: (name, argument) => invokeDependency(name, Object.hasOwn(definition.dependencies, name) ? definition.dependencies[name] : undefined, (resolved as Record<string, unknown> | undefined)?.[name], argument),
       arm: (guard, outcome) => arms.push({ decision: decision.id, guard, arm: outcome ? "holds" : "else" }),
     }) as Execution<Result, Effect> | Promise<Execution<Result, Effect>>;

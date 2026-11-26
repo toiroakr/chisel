@@ -8,7 +8,8 @@ import { DEPS, depsTerm, describeTerm, holds, rebaseRule, rebaseTerm, pathsRead 
 import { array, isVariantsSchema } from "./schema.js";
 import type { Schema, AnyVariantsSchema, Infer, Tags, VariantOf } from "./schema.js";
 import type { Step } from "./ways.js";
-import { outcomesOf } from "./outcomes.js";
+import { NO_FACTS, outcomesOf } from "./outcomes.js";
+import type { Facts } from "./outcomes.js";
 import type { Temporal as TemporalTypes } from "temporal-spec";
 import type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
 import { countBetween, moveTemporal } from "./temporal.js";
@@ -413,6 +414,9 @@ export function interpret(template: unknown, scope: unknown, options: {
   // The steps one element of a map or a fold took through its body, which are
   // not steps of the way through the model around it.
   readonly iterate?: (iteration: Node, steps: readonly Step[]) => void;
+  // The independent parts of the model (`independentParts`), whose steps are handed to `iterate`
+  // as an iteration's are, apart from the way around them.
+  readonly parts?: ReadonlySet<Node>;
   // A caller that cannot await abandons the evaluation at the first pending
   // call instead of resuming it, so no later call is made behind its back.
   readonly onPending?: (pending: PromiseLike<unknown>) => never;
@@ -425,10 +429,24 @@ export function interpret(template: unknown, scope: unknown, options: {
     if (!result.success) throw new Error(`Invalid local construction: ${result.issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`);
     return snapshotValue(result.value);
   }
+  const inPart = new Set<Node>();
   function* read(value: unknown, current: unknown = scope): Evaluation {
     if (--remaining < 0) throw new EvaluationLimit("Model evaluation step budget exceeded");
     if (isTerm(value)) return readOperand(value, current);
     const node = nodeOf(value);
+    if (node !== undefined && options.parts?.has(node) && !inPart.has(node)) {
+      const around = distinguishing;
+      const steps: Step[] = [];
+      distinguishing = (distinction, outcome) => steps.push({ distinction, outcome });
+      inPart.add(node);
+      try {
+        return yield* read(value, current);
+      } finally {
+        inPart.delete(node);
+        distinguishing = around;
+        options.iterate?.(node, steps);
+      }
+    }
     if (node?.kind === "bind") return yield* read(node.body, withLocal(current, node.name, parsed(node.schema, yield* read(node.value, current))));
     if (node?.kind === "map" || node?.kind === "fold") {
       const values = yield* read(node.values, current);
@@ -558,28 +576,78 @@ async function resume(evaluation: Evaluation, pending: PromiseLike<unknown>): Pr
     pending = step.value;
   }
 }
+// The parts of a model whose values meet only in its answer: each field of the answer (and each
+// element of a list in it), through plain objects and lists and the bodies of binds of a value
+// that chooses nothing, that holds a choice. No part reads what another computes, so the way a run
+// takes through one never turns on the way it takes through another, and each part's ways are
+// listed on their own rather than combined with every way of every other part. Undefined where
+// fewer than two parts hold a choice, which leaves the model one part, as it always was.
+const partLabels = new WeakMap<object, string>();
+const partTemplates = new WeakMap<object, unknown>();
+const partsCache = new WeakMap<object, readonly Node[] | null>();
+export function independentParts(template: unknown): readonly Node[] | undefined {
+  if (template === null || typeof template !== "object") return undefined;
+  const cached = partsCache.get(template);
+  if (cached !== undefined) return cached ?? undefined;
+  const parts: Node[] = [];
+  const collect = (value: unknown, at: string): void => {
+    const node = nodeOf(value);
+    if (node === undefined) {
+      if (isTerm(value) || value === null || typeof value !== "object") return;
+      if (Array.isArray(value)) value.forEach((child, index) => collect(child, `${at}[${index}]`));
+      else for (const [key, child] of Object.entries(value)) collect(child, at === "" ? key : `${at}.${key}`);
+      return;
+    }
+    if (choicesOf(value).length === 0) return;
+    if (node.kind === "bind" && choicesOf(node.value).length === 0) { collect(node.body, at); return; }
+    if (!parts.includes(node)) {
+      parts.push(node);
+      partTemplates.set(node, value);
+      if (!partLabels.has(node)) partLabels.set(node, at === "" ? "答え" : at);
+    }
+  };
+  collect(template, "");
+  const found = parts.length >= 2 ? parts : undefined;
+  partsCache.set(template, found ?? null);
+  return found;
+}
+
+export function partTemplate(node: object): unknown {
+  return partTemplates.get(node);
+}
+
+export function partLabel(node: unknown): string | undefined {
+  return node !== null && typeof node === "object" ? partLabels.get(node) : undefined;
+}
+
+export function isIteration(node: unknown): node is Extract<Node, { kind: "map" | "fold" }> {
+  const kind = (node as { readonly kind?: unknown } | undefined)?.kind;
+  return kind === "map" || kind === "fold";
+}
+
 export interface ModelPath {
   readonly value: unknown;
   readonly steps: readonly Step[];
   readonly choices: readonly { readonly condition: Rule; readonly outcome: boolean }[];
 }
-export function* modelPaths(template: unknown): Generator<ModelPath> {
+export function* modelPaths(template: unknown, facts: Facts = NO_FACTS): Generator<ModelPath & { readonly facts: Facts }> {
   const node = nodeOf(template);
   if (node?.kind === "choose") {
-    for (const outcome of outcomesOf(node.condition)) for (const branch of modelPaths(outcome.result ? node.yes : node.no)) {
-      yield { value: branch.value, steps: [...outcome.steps, ...branch.steps], choices: [{ condition: node.condition, outcome: outcome.result }, ...branch.choices] };
+    for (const outcome of outcomesOf(node.condition, facts)) for (const branch of modelPaths(outcome.result ? node.yes : node.no, outcome.facts)) {
+      yield { value: branch.value, steps: [...outcome.steps, ...branch.steps], choices: [{ condition: node.condition, outcome: outcome.result }, ...branch.choices], facts: branch.facts };
     }
     return;
   }
   const children = node?.kind === "map" ? [node.values] : node?.kind === "fold" ? [node.values, node.initial] : childrenOf(template);
-  if (children.length === 0) { yield { value: template, steps: [], choices: [] }; return; }
-  function* product(index: number, before: ModelPath & { values: unknown[] }): Generator<ModelPath & { values: unknown[] }> {
+  if (children.length === 0) { yield { value: template, steps: [], choices: [], facts }; return; }
+  type Partial = ModelPath & { values: unknown[]; facts: Facts };
+  function* product(index: number, before: Partial): Generator<Partial> {
     if (index === children.length) { yield before; return; }
-    for (const child of modelPaths(children[index])) yield* product(index + 1, { value: undefined, values: [...before.values, child.value], steps: [...before.steps, ...child.steps], choices: [...before.choices, ...child.choices] });
+    for (const child of modelPaths(children[index], before.facts)) yield* product(index + 1, { value: undefined, values: [...before.values, child.value], steps: [...before.steps, ...child.steps], choices: [...before.choices, ...child.choices], facts: child.facts });
   }
-  for (const path of product(0, { value: undefined, values: [], steps: [], choices: [] })) {
+  for (const path of product(0, { value: undefined, values: [], steps: [], choices: [], facts })) {
     const value = replaceChildren(template, path.values);
-    yield { value, steps: path.steps, choices: path.choices };
+    yield { value, steps: path.steps, choices: path.choices, facts: path.facts };
   }
 }
 
@@ -775,16 +843,16 @@ function deepEqualValue(left: unknown, right: unknown): boolean {
 // Every map and fold in a model with the steps the choices around it take to
 // reach it, one entry per way of reaching it.
 export interface IterationEntry { readonly node: Extract<Node, { kind: "map" | "fold" }>; readonly steps: readonly Step[] }
-export function* iterationEntries(template: unknown, steps: readonly Step[] = []): Generator<IterationEntry> {
+export function* iterationEntries(template: unknown, steps: readonly Step[] = [], facts: Facts = NO_FACTS): Generator<IterationEntry> {
   const node = nodeOf(template);
   if (node?.kind === "choose") {
     // A choice whose branches hold no iteration is not expanded: its outcomes may be far more than any iteration needs.
     if (iterationsOf(node.yes).length === 0 && iterationsOf(node.no).length === 0) return;
-    for (const outcome of outcomesOf(node.condition)) yield* iterationEntries(outcome.result ? node.yes : node.no, [...steps, ...outcome.steps]);
+    for (const outcome of outcomesOf(node.condition, facts)) yield* iterationEntries(outcome.result ? node.yes : node.no, [...steps, ...outcome.steps], outcome.facts);
     return;
   }
   if (node?.kind === "map" || node?.kind === "fold") yield { node, steps };
-  for (const child of childrenOf(template)) yield* iterationEntries(child, steps);
+  for (const child of childrenOf(template)) yield* iterationEntries(child, steps, facts);
 }
 
 // Every map and fold in a model, each with the body one element is read in.

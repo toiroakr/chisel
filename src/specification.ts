@@ -1,4 +1,4 @@
-import { answersOf, callsIn, childrenOf, fieldsTurnedOn, iterationsOf, nodeOf, localRoots, localsOf, writtenArgument } from "./model.js";
+import { answersOf, callsIn, childrenOf, fieldsTurnedOn, isIteration, iterationsOf, nodeOf, localRoots, localsOf, writtenArgument } from "./model.js";
 import { rangeOf } from "./interval.js";
 import { fractionOf } from "./exact.js";
 import type { Rational } from "./exact.js";
@@ -1464,7 +1464,7 @@ export function generate(
     // holds that one element, taken from what the rows hold or moved into each
     // class of the element's positions.
     function composeElement(way: Way): { readonly given: unknown; readonly origin: unknown } | undefined {
-      const values = way.within?.values;
+      const values = isIteration(way.within) ? way.within.values : undefined;
       const position = isTerm(values) ? positionData(values) : undefined;
       if (position === undefined || position.measure !== "value" || position.path.some(key => key.startsWith("#"))) return undefined;
       const read = (given: unknown) => position.path.reduce<unknown>((at, key) => (at !== null && typeof at === "object" ? (at as Record<string, unknown>)[key] : undefined), given);
@@ -2281,7 +2281,7 @@ function askingTogether(input: unknown, calls: readonly { readonly dependency: s
 // A way through the body of an iteration over a field is taken only by an input
 // whose array holds an element, so the way also asks for one.
 function withEntry(way: Way, entered: readonly Step[] = []): Way {
-  const values = way.within?.values;
+  const values = isIteration(way.within) ? way.within.values : undefined;
   const position = isTerm(values) ? positionData(values) : undefined;
   if (position === undefined || position.measure !== "value") return entered.length === 0 ? way : { ...way, steps: [...way.steps, ...entered] };
   const holdsOne: Rule = { kind: "compare", operator: ">=", left: positionTerm(position.path, "length"), right: 1 };

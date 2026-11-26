@@ -9,7 +9,7 @@ const 結果 = c.variants("結果", { 受付: c.object({}), 却下: c.object({})
 const 却下 = () => ({ result: { 結果: "却下" as const }, effects: [] });
 const 受付 = () => ({ result: { 結果: "受付" as const }, effects: [] });
 
-// Three fields each chosen on a value of its own: the ways multiply, 2 × 2 × 4.
+// Three fields each chosen on a value of its own, none reading another: their ways add up, 2 + 2 + 4.
 const 見積 = c.behavior("見積", {
   input: c.variants("kind", { request: c.object({ a: c.int(), b: c.int(), d: c.int() }) }),
   result: c.object({ 甲: c.int(), 乙: c.int(), 丙: c.int() }),
@@ -58,7 +58,7 @@ describe("what to change in a model before measuring it", () => {
       cases: { request: c.model("多数", ((input: unknown) => ({ result: Object.fromEntries(keys.map(key => [key, c.choose((input as Record<string, c.TermOf<number>>)[key]!.$gt(0), 1, 0)])), effects: [] })) as never) },
     } as never);
     const [change] = c.modelChanges(c.spec("多数", { examples: c.examples(多数 as never, {}), implementation } as never), { feasibility: { ways: 16 } });
-    expect({ kind: change?.kind, ways: change?.ways, parts: change?.parts.length, remaining: change?.remaining }).toStrictEqual({ kind: "behavior", ways: "8192", parts: 9, remaining: "16" });
+    expect({ kind: change?.kind, ways: change?.ways, parts: change?.parts.length, remaining: change?.remaining }).toStrictEqual({ kind: "behavior", ways: "26", parts: 5, remaining: "16" });
   });
 
   it("names the part of a model that, declared as a behavior, leaves the rest within the limit", async () => {
@@ -70,16 +70,16 @@ describe("what to change in a model before measuring it", () => {
         decision: "見積る",
         figure: "ways",
         limit: 4,
-        ways: "16",
+        ways: "8",
         kind: "behavior",
         parts: [{ at: "result.丙", conditions: ["$.d > 10", "$.d > 5", "$.d > 0"], ways: "4" }],
         remaining: "4",
       },
     ]);
     expect(report.toBeChangedFirst[0]!.message).toBe(
-      "見積る: 道筋が16本あり、上限の4本を超えるため計測しない。道筋はresult.甲（2本）、result.乙（2本）、result.丙（4本）の掛け算で増える。" +
+      "見積る: 道筋が8本あり、上限の4本を超えるため計測しない。道筋はresult.甲（2本）、result.乙（2本）、result.丙（4本）を足した数になる（互いの値を読まない部分なので、別々に数える）。" +
         "result.丙（「$.d > 10」「$.d > 5」「$.d > 0」で選ぶ、4本）をbehaviorとして宣言し、dependencyとしてcall(deps.…)で呼べば、その選択はそのbehaviorのレポートで一度ずつ計測され、ここでは答えを値として読むので、このdecisionの道筋は4本になる。" +
-        "いまのまま計測するには上限（--feasibility-ways）を16以上にする。",
+        "いまのまま計測するには上限（--feasibility-ways）を8以上にする。",
     );
     expect(report.measures.rules).toStrictEqual({ status: "unavailable", reason: "not measured", notRead: ["見積る"] });
     expect(report.adequate).toBe(false);

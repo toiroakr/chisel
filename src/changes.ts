@@ -7,7 +7,7 @@
 // before anything is measured and does not change with what the measurement
 // finds.
 import type { RulesDecision } from "./behavior.js";
-import { childrenOf, nodeOf } from "./model.js";
+import { childrenOf, choicesOf, independentParts, nodeOf } from "./model.js";
 import { describeRule, isTerm } from "./rule.js";
 import type { Rule } from "./rule.js";
 
@@ -134,6 +134,10 @@ interface TreeNode {
   readonly at: string;
   readonly parent: number | undefined;
   readonly choose: boolean;
+  // A plain object or list, or the body of a bind of a value that chooses nothing, standing in the
+  // answer where its children are independent parts (`independentParts`): their ways add up
+  // rather than multiply.
+  readonly independent: boolean;
   readonly children: number[];
   // For a choice, how many of its outcomes go to each branch.
   readonly weights: bigint[];
@@ -149,10 +153,12 @@ interface TreeNode {
 // for each walk's body, whose ways are listed apart.
 function treeOf(expression: unknown): TreeNode[] {
   const nodes: TreeNode[] = [];
-  const build = (template: unknown, at: string, parent: number | undefined, root: number | undefined, owner?: number): number => {
+  const parted = independentParts(expression) !== undefined;
+  const build = (template: unknown, at: string, parent: number | undefined, root: number | undefined, owner?: number, outer = parted): number => {
     const id = nodes.length;
     const node = nodeOf(template);
-    const entry: TreeNode = { template, at, parent, choose: node?.kind === "choose", children: [], weights: [], root: root ?? id, bodies: [], ...(owner === undefined ? {} : { owner }), size: 1 };
+    const passes = outer && (node === undefined || (node.kind === "bind" && choicesOf(node.value).length === 0));
+    const entry: TreeNode = { template, at, parent, choose: node?.kind === "choose", independent: passes, children: [], weights: [], root: root ?? id, bodies: [], ...(owner === undefined ? {} : { owner }), size: 1 };
     nodes.push(entry);
     const { paths, body } = labelled(template, at);
     const followed = new Set(pathChildren(template));
@@ -161,7 +167,7 @@ function treeOf(expression: unknown): TreeNode[] {
       entry.children.push(build(node.yes, paths[0]![1], id, entry.root), build(node.no, paths[1]![1], id, entry.root));
       entry.weights.push(holds, fails);
     } else {
-      for (const [child, label] of paths) if (followed.has(child)) entry.children.push(build(child, label, id, entry.root));
+      for (const [child, label] of paths) if (followed.has(child)) entry.children.push(build(child, label, id, entry.root, undefined, passes));
     }
     if (body !== undefined) entry.bodies.push(build(body[0], body[1], undefined, undefined, id));
     entry.size = 1 + entry.children.reduce((sum, child) => sum + nodes[child]!.size, 0) + entry.bodies.reduce((sum, child) => sum + nodes[child]!.size, 0);
@@ -187,7 +193,9 @@ function counted(nodes: readonly TreeNode[], cut: ReadonlySet<number>): Counted 
     if (cut.has(id)) { count[id] = 1n; within[id] = 0n; continue; }
     count[id] = node.choose
       ? node.children.reduce((sum, child, index) => sum + node.weights[index]! * count[child]!, 0n)
-      : node.children.reduce((product, child) => product * count[child]!, 1n);
+      : node.independent
+        ? [node.children.reduce((sum, child) => sum + (count[child]! > 1n ? count[child]! : 0n), 0n)].map(sum => sum === 0n ? 1n : sum)[0]!
+        : node.children.reduce((product, child) => product * count[child]!, 1n);
     within[id] = node.children.reduce((sum, child) => sum + within[child]!, 0n) +
       node.bodies.reduce((sum, body) => sum + contribution(count[body]!, true) + within[body]!, 0n);
   }
@@ -243,7 +251,12 @@ function expressionChange(decision: string, expression: unknown, limit: number):
         const parent = nodes[nodes[at]!.parent!]!;
         const index = parent.children.indexOf(at);
         const old = now.count[nodes[at]!.parent!]!;
-        value = parent.choose ? old - parent.weights[index]! * now.count[at]! + parent.weights[index]! * value : (old / now.count[at]!) * value;
+        const child = at;
+        value = parent.choose
+          ? old - parent.weights[index]! * now.count[at]! + parent.weights[index]! * value
+          : parent.independent
+            ? [parent.children.reduce((sum, other) => { const ways = other === child ? value : now.count[other]!; return sum + (ways > 1n ? ways : 0n); }, 0n)].map(sum => sum === 0n ? 1n : sum)[0]!
+            : (old / now.count[at]!) * value;
         at = nodes[at]!.parent!;
       }
       const root = nodes[at]!;
@@ -262,7 +275,10 @@ function expressionChange(decision: string, expression: unknown, limit: number):
   }
   const remaining = counted(nodes, cut).total;
   const factors = factorsOf(expression).filter(item => item.ways > 1n);
-  const product = factors.length > 1 ? `道筋は${factors.map(item => `${item.at}（${format(item.ways)}本）`).join("、")}の掛け算で増える。` : "";
+  const listed = factors.map(item => `${item.at}（${format(item.ways)}本）`).join("、");
+  const product = factors.length <= 1 ? "" : independentParts(expression) !== undefined
+    ? `道筋は${listed}を足した数になる（互いの値を読まない部分なので、別々に数える）。`
+    : `道筋は${listed}の掛け算で増える。`;
   const head = `${decision}: 道筋が${format(ways)}本あり、上限の${format(bound)}本を超えるため計測しない。${product}`;
   const tail = `いまのまま計測するには上限（--feasibility-ways）を${format(ways)}以上にする。`;
   if (cut.size === 0 || remaining > bound) {
