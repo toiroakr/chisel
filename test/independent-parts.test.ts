@@ -5,7 +5,7 @@ import { feasibilityOf } from "../src/feasibility.js";
 import { feasibilityScope } from "../src/guard-borders.js";
 import { positionTerm } from "../src/rule.js";
 import type { Rule } from "../src/rule.js";
-import { fieldChange, fieldChangeRules } from "./fixtures/field-change.js";
+import { planChange, planChangeRules } from "./fixtures/plan-change.js";
 
 const emptyEffects = c.variants("kind", {});
 const Flags = c.variants("kind", { request: c.object({ a: c.int(), b: c.int(), d: c.int(), note: c.string() }) });
@@ -103,8 +103,8 @@ describe("independent parts of a model", () => {
   });
 
   it("measures, settles and proves a model of many independent verdicts part by part", async () => {
-    expect([...eachWayOf(fieldChangeRules.cases.modified as never)].length).toBeLessThan(200);
-    const report = await c.check(c.spec("field change", { implementation: fieldChangeRules, examples: c.examples(fieldChange, {}) }));
+    expect([...eachWayOf(planChangeRules.cases.changed as never)].length).toBeLessThan(200);
+    const report = await c.check(c.spec("plan change", { implementation: planChangeRules, examples: c.examples(planChange, {}) }));
     expect(report.measures.rules.status).toBe("complete");
     const rules = report.measures.rules.status === "complete" ? report.measures.rules.rules : [];
     expect(rules.filter(rule => rule.status === "undecided")).toStrictEqual([]);
@@ -112,34 +112,34 @@ describe("independent parts of a model", () => {
   }, 60_000);
 
   it("proves no part of a model that breaks a guarantee", () => {
-    const broken = c.implement(fieldChange, {
+    const broken = c.implement(planChange, {
       cases: {
-        added: fieldChangeRules.cases.added,
-        modified: c.model("forgets to loosen", change => ({
+        started: planChangeRules.cases.started,
+        changed: c.model("forgets to keep", change => ({
           result: {
-            breaks: { typeChanged: "none" as const, arrayChanged: "none" as const, targetMoved: "none" as const, targetAdded: "none" as const,
-              requiredAdded: "none" as const, madeRequired: "none" as const, scaleChanged: "none" as const, uniqueAdded: "none" as const,
-              valuesRemoved: c.choose(change.before.type.$eq("enum"), "holds" as const, "none" as const) },
-            relax: { optional: false, notUnique: false, withoutTarget: false, previousValues: c.choose(change.before.type.$eq("enum"), true, false) },
+            sets: { tierChanged: "none" as const, teamChanged: "none" as const, billingMoved: "none" as const, billingAdded: "none" as const,
+              invoiceStarted: "none" as const, madeInvoiced: "none" as const, discountChanged: "none" as const, dedicatedAdded: "none" as const,
+              featuresRemoved: c.choose(change.before.tier.$eq("pro"), "holds" as const, "none" as const) },
+            keeps: { uninvoiced: false, shared: false, billing: false, features: c.choose(change.before.tier.$eq("pro"), true, false) },
           },
           effects: [],
         })),
       },
     });
-    const modified = c.verify(broken).decisions.find(decision => decision.decision === "forgets to loosen");
-    expect(modified?.status).not.toBe("verified");
+    const changed = c.verify(broken).decisions.find(decision => decision.decision === "forgets to keep");
+    expect(changed?.status).not.toBe("verified");
   });
 
   it("proves a guarantee the model meets by the same quantified condition written negated", () => {
     const Lists = c.variants("kind", { request: c.object({ before: c.array(c.string()), after: c.array(c.string()), note: c.string() }) });
-    const keeps = c.behavior("keeps", {
-      input: Lists, result: c.object({ widen: c.boolean() }), effects: emptyEffects,
-      ensures: clause => [clause.always("every value before is kept or widened", (input, value) =>
-        value.widen.$eq(true).$or(input.before.$all(item => input.after.$any(kept => kept.$eq(item)))))],
+    const archive = c.behavior("archive", {
+      input: Lists, result: c.object({ archive: c.boolean() }), effects: emptyEffects,
+      ensures: clause => [clause.always("every tag before is kept or archived", (input, value) =>
+        value.archive.$eq(true).$or(input.before.$all(item => input.after.$any(kept => kept.$eq(item)))))],
     });
-    const impl = c.implement(keeps, {
-      cases: { request: c.model("keeps", input => ({
-        result: { widen: c.choose(input.before.$any(item => input.after.$all(kept => kept.$ne(item))), true, false) }, effects: [],
+    const impl = c.implement(archive, {
+      cases: { request: c.model("archive", input => ({
+        result: { archive: c.choose(input.before.$any(item => input.after.$all(kept => kept.$ne(item))), true, false) }, effects: [],
       })) },
     });
     expect(c.verify(impl).status).toBe("verified");

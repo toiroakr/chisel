@@ -1,23 +1,23 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 
-const Step = c.enum(["start", "created", "labelled", "failed"] as const);
+const Step = c.enum(["start", "reserved", "shipped", "failed"] as const);
 const State = c.object({ step: Step, name: c.string() });
 const Command = c.variants("type", {
-  create: c.object({ name: c.string() }),
-  label: c.object({}),
+  place: c.object({ name: c.string() }),
+  ship: c.object({}),
   observed: c.object({ name: c.string() }),
 });
 
-const deploy = c.machine("deploy", {
+const order = c.machine("order", {
   state: State, command: Command, initial: [{ step: "start", name: "" }],
   update: (state, command) => c.matchValue<typeof Command, never>(Command, command, {
-    create: (create: c.TermOf<{ type: "create"; name: string }>) => ({
-      effects: [c.effect("createType", { step: "created" as const, name: create.name },
-        { failure: { step: "failed" as const, name: create.name } })],
-      commands: [{ type: "label" as const }],
+    place: (place: c.TermOf<{ type: "place"; name: string }>) => ({
+      effects: [c.effect("reserve", { step: "reserved" as const, name: place.name },
+        { failure: { step: "failed" as const, name: place.name } })],
+      commands: [{ type: "ship" as const }],
     }),
-    label: () => ({ effects: [c.effect("writeLabel", { step: "labelled" as const, name: state.name })] }),
+    ship: () => ({ effects: [c.effect("ship", { step: "shipped" as const, name: state.name })] }),
     observed: (observed: c.TermOf<{ type: "observed"; name: string }>) => ({ state: { step: state.step, name: observed.name } }),
   } as never),
 });
@@ -25,41 +25,41 @@ const deploy = c.machine("deploy", {
 describe("driveMachine", () => {
   it("performs each effect with the states around it, in the order runMachine follows", async () => {
     const performed: unknown[] = [];
-    const result = await c.driveMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }, {
+    const result = await c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
       perform: async effect => { performed.push([effect.name, effect.before, effect.after]); },
     });
     expect(performed).toStrictEqual([
-      ["createType", { step: "start", name: "" }, { step: "created", name: "User" }],
-      ["writeLabel", { step: "created", name: "User" }, { step: "labelled", name: "User" }],
+      ["reserve", { step: "start", name: "" }, { step: "reserved", name: "A-100" }],
+      ["ship", { step: "reserved", name: "A-100" }, { step: "shipped", name: "A-100" }],
     ]);
-    expect(result.state).toStrictEqual({ step: "labelled", name: "User" });
+    expect(result.state).toStrictEqual({ step: "shipped", name: "A-100" });
     expect(result.failures).toStrictEqual([]);
-    expect(result.steps).toStrictEqual(c.runMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }).steps);
+    expect(result.steps).toStrictEqual(c.runMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }).steps);
   });
 
   it("ends the command in its failure state and drops what it emits when perform rejects", async () => {
     const error = new Error("unavailable");
-    const result = await c.driveMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }, {
-      perform: effect => { if (effect.name === "createType") throw error; },
+    const result = await c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
+      perform: effect => { if (effect.name === "reserve") throw error; },
     });
-    expect(result.state).toStrictEqual({ step: "failed", name: "User" });
-    expect(result.failures).toStrictEqual([{ name: "createType", index: 0, command: { type: "create", name: "User" }, error }]);
-    expect(result.steps).toStrictEqual(c.runMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" },
-      { fails: effect => effect.name === "createType" }).steps);
+    expect(result.state).toStrictEqual({ step: "failed", name: "A-100" });
+    expect(result.failures).toStrictEqual([{ name: "reserve", index: 0, command: { type: "place", name: "A-100" }, error }]);
+    expect(result.steps).toStrictEqual(c.runMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" },
+      { fails: effect => effect.name === "reserve" }).steps);
   });
 
   it("runs a command an effect observed after the commands the transition emitted", async () => {
-    const result = await c.driveMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }, {
-      perform: effect => effect.name === "createType" ? { commands: [{ type: "observed" as const, name: "Renamed" }] } : undefined,
+    const result = await c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
+      perform: effect => effect.name === "reserve" ? { commands: [{ type: "observed" as const, name: "B-200" }] } : undefined,
     });
     expect(result.steps.map(step => step.command)).toStrictEqual([
-      { type: "create", name: "User" }, { type: "label" }, { type: "observed", name: "Renamed" },
+      { type: "place", name: "A-100" }, { type: "ship" }, { type: "observed", name: "B-200" },
     ]);
-    expect(result.state).toStrictEqual({ step: "labelled", name: "Renamed" });
+    expect(result.state).toStrictEqual({ step: "shipped", name: "B-200" });
   });
 
   it("refuses an observed command the command schema refuses", async () => {
-    await expect(c.driveMachine(deploy, { step: "start", name: "" }, { type: "create", name: "User" }, {
+    await expect(c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
       perform: () => ({ commands: [{ type: "unknown" } as never] }),
     })).rejects.toThrow(c.SpecificationError);
   });
