@@ -3,6 +3,51 @@ import * as c from "../src/index.js";
 import { orderSpecification } from "../examples/order-machine.spec.js";
 
 describe("TLA+ translation of executable machines", () => {
+  it("matches a nested variant with its own schema", async () => {
+    const Inner = c.variants("tag", { off: c.object({}), on: c.object({}) });
+    const State = c.object({ inner: Inner, flag: c.boolean() });
+    const machine = c.machine("nested match", { state: State, command: c.boolean(), initial: [{ inner: { tag: "off" }, flag: false }],
+      update: state => ({ state: { inner: state.inner,
+        flag: c.matchValue<typeof Inner, boolean>(Inner, state.inner, { off: () => true, on: () => false }) } }) });
+    const spec = c.specifyMachine(machine, { invariants: [c.invariant<c.Infer<typeof State>>("off", state => state.flag.$eq(false))] });
+    expect(c.checkMachine(spec)).toMatchObject({ status: "broken" });
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
+  });
+  it("represents null apart from an empty object", async () => {
+    const State = c.object({ value: c.literal(null), empty: c.object({}) });
+    const machine = c.machine("null", { state: State, command: c.boolean(), initial: [{ value: null, empty: {} }], update: state => ({ state }) });
+    expect(await c.checkMachineTla(c.specifyMachine(machine))).toMatchObject({ status: "held" });
+  });
+  it("maps an array nested inside the state", async () => {
+    const Item = c.boolean();
+    const State = c.object({ items: c.array(Item).max(1) });
+    const machine = c.machine("nested map", { state: State, command: c.boolean(), initial: [{ items: [false] }],
+      update: state => ({ state: { items: c.map(Item, Item, state.items, item => c.choose(item.$eq(false), true, item)) } }) });
+    const spec = c.specifyMachine(machine, { invariants: [c.invariant<c.Infer<typeof State>>("off", state => state.items.$all(item => item.$eq(false)))] });
+    expect(c.checkMachine(spec)).toMatchObject({ status: "broken" });
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
+  });
+  it("keeps field names that are not TLA+ identifiers", async () => {
+    const State = c.object({ "foo-bar": c.boolean() });
+    const machine = c.machine("field names", { state: State, command: c.boolean(), initial: [{ "foo-bar": false }],
+      update: (_state, command) => ({ state: { "foo-bar": command } }) });
+    const spec = c.specifyMachine(machine, { invariants: [c.invariant<c.Infer<typeof State>>("off", state => state["foo-bar"].$eq(false))] });
+    expect(c.checkMachine(spec)).toMatchObject({ status: "broken" });
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
+  });
+  it("represents an empty object apart from an empty array", async () => {
+    const machine = c.machine("empty", { state: c.object({}), command: c.boolean(), initial: [{}], update: state => ({ state }) });
+    expect(await c.checkMachineTla(c.specifyMachine(machine))).toMatchObject({ status: "held" });
+  });
+  it("reads an array's length as the runtime does", async () => {
+    const State = c.object({ items: c.array(c.boolean()).max(1), count: c.int().min(0).max(1) });
+    const declaration = c.machine("length", { state: State, command: c.boolean(), initial: [{ items: [], count: 0 }],
+      update: state => ({ state: { items: state.items, count: c.choose(state.items.$length().$eq(0), 1, 0) } }),
+    });
+    const spec = c.specifyMachine(declaration, { invariants: [c.invariant<c.Infer<typeof State>>("zero", state => state.count.$eq(0))] });
+    expect(c.checkMachine(spec)).toMatchObject({ status: "broken" });
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
+  });
   it("checks the same business reducer and invariant with tla-ts", async () => {
     const translation = c.toTla(orderSpecification);
     expect(translation.source).toContain("Step(s, c) ==");
