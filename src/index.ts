@@ -167,8 +167,8 @@ export { compose, isComposition } from "./composition.js";
 
 export { explore, invariant, transition, world } from "./world.js";
 export type { Draw, ExploredStep, ExploreReport, Invariant, Operation, Transition, World } from "./world.js";
-export { machine, effect, isMachine, runMachine } from "./machine.js";
-export type { Effect, Machine, MachineCommand, MachineExecution, MachineStep, PerformedEffect } from "./machine.js";
+export { machine, effect, isMachine, runMachine, driveMachine } from "./machine.js";
+export type { DrivenExecution, Effect, EffectFailure, EffectToPerform, Machine, MachineCommand, MachineExecution, MachineStep, PerformedEffect } from "./machine.js";
 export { specifyMachine, isMachineSpecification, checkMachine } from "./machine-check.js";
 export { checkInterleavings } from "./interleave.js";
 export type { InterleavingReport, InterleavingStep, InterleavingTrace } from "./interleave.js";
