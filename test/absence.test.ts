@@ -39,6 +39,11 @@ describe("a comparison reading a value that may be left out", () => {
       .toThrow("refine compares with undefined, which no value is: write the absence as a case of a sum");
   });
 
+  it("names the subject a relation reads that may be left out before the undefined it is compared with", () => {
+    expect(() => c.object({ s: c.string().optional() }).refine(v => v.s.$contains(undefined as never)))
+      .toThrow("refine reads $.s, which may be left out");
+  });
+
   it("is refused in a model unless a choice around it settles the case", () => {
     expect(() => c.implement(owner, { cases: { ask: c.model("unsettled", input => ({
       result: c.choose(input.name.value.$eq("x"), { verdict: "none" }, { verdict: "none" }), effects: [],

@@ -227,6 +227,10 @@
         },
         "reason": {
           "type": "string"
+        },
+        "through": {
+          "type": "string",
+          "description": "The border of the same computation whose rows told its weights (ADR-0124)."
         }
       },
       "required": [
@@ -337,7 +341,8 @@
                 "enum": [
                   "row not run",
                   "row did not come back",
-                  "disregards not checked"
+                  "disregards not checked",
+                  "out of room"
                 ]
               },
               "subject": {
@@ -553,6 +558,24 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "toBeChangedFirst": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/modelChange"
+          }
+        },
+        "walks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/walk"
+          }
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stop"
           }
         },
         "evidence": {
@@ -1055,6 +1078,151 @@
         "measures",
         "adequate",
         "verdict"
+      ],
+      "additionalProperties": false
+    },
+    "modelChangePart": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ways": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        }
+      },
+      "required": [
+        "at",
+        "conditions",
+        "ways"
+      ],
+      "additionalProperties": false
+    },
+    "modelChange": {
+      "type": "object",
+      "description": "A decision left unmeasured for having more ways than the limit, with what to change in the model so that it is measured.",
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "figure": {
+          "const": "ways"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "ways": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "kind": {
+          "enum": [
+            "behavior",
+            "stages",
+            "none"
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/modelChangePart"
+          }
+        },
+        "remaining": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "figure",
+        "limit",
+        "ways",
+        "kind",
+        "parts",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "walk": {
+      "type": "object",
+      "description": "A fold put to one of Souther's rewrites (ADR-0126).",
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "walk": {
+          "type": "string"
+        },
+        "rewrite": {
+          "enum": [
+            "after one step",
+            "from the seed"
+          ]
+        },
+        "status": {
+          "enum": [
+            "told",
+            "not told",
+            "no row owed",
+            "undecided"
+          ]
+        },
+        "row": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "walk",
+        "rewrite",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "stop": {
+      "type": "object",
+      "description": "A step of a model a run may stop at (Souther 0.5.0).",
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "may stop",
+            "never stops",
+            "not resolved"
+          ]
+        },
+        "input": {},
+        "with": {},
+        "reason": {
+          "type": "string"
+        },
+        "keeping": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "at",
+        "status"
       ],
       "additionalProperties": false
     }

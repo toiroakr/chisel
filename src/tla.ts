@@ -64,13 +64,13 @@ export function toTla<State, Command>(specification: MachineSpecification<State,
     formula: transition.each
       ? compiler.paired(transition.holds, transition.each, schemaAtPath(machine.state as never, transition.each.path)?.kind)
       : compiler.condition(transition.holds, new Map([["before", "previous"], ["after", "state"]]), "state") }));
-  const discriminant = (machine.command as unknown as Partial<AnyVariantsSchema>).discriminant === undefined ? "" : identifier((machine.command as unknown as AnyVariantsSchema).discriminant);
+  const discriminant = (machine.command as unknown as Partial<AnyVariantsSchema>).discriminant === undefined ? "" : access((machine.command as unknown as AnyVariantsSchema).discriminant);
   const effectful = hasEffect(machine.update);
   const preconditions = Object.entries(specification.requires).map(([tag, holds], index) => {
     const precondition = `(${compiler.condition(holds, new Map([["state", "previous"], ["command", "last"]]), "previous")})`;
     // A command that stopped (at a failed effect, or by the process dying) may have written nothing yet, so only the other direction holds of it.
     const agrees = effectful ? `IF stopped THEN (~${precondition} => previous = state) ELSE (${precondition} <=> previous # state)` : `${precondition} <=> previous # state`;
-    return { name: `Req${index}`, formula: `IF depth = 0 THEN TRUE ELSE IF last.${discriminant} = ${JSON.stringify(tag)} THEN ${agrees} ELSE TRUE` };
+    return { name: `Req${index}`, formula: `IF depth = 0 THEN TRUE ELSE IF last${discriminant} = ${JSON.stringify(tag)} THEN ${agrees} ELSE TRUE` };
   });
   const last = (command: string) => preconditions.length > 0 ? ` /\\ last' = ${command}` : "";
   const next = effectful ? [
@@ -286,7 +286,7 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
       ...transitions.map(formula => over(`(s = ${output}.state \\/ (${formula}))`)),
       ...requiredTags.flatMap(tag => {
         const pre = compiler.condition(specification.requires[tag], new Map([["state", "s"], ["command", "c"]]), "s");
-        const isTag = `c.${identifier((machine.command as unknown as AnyVariantsSchema).discriminant)} = ${JSON.stringify(tag)}`;
+        const isTag = `c${access((machine.command as unknown as AnyVariantsSchema).discriminant)} = ${JSON.stringify(tag)}`;
         const unchanged = unchangedFormula(machine.state as AnySchema, "s", `${output}.state`);
         return [over(`(${isTag} => (${unchanged} \\/ (${pre})))`),
           over(`(${isTag} => (${effectful ? `${output}.stopped \\/ ` : ""}~(${pre}) \\/ ~(${unchanged})))`)];
@@ -339,7 +339,7 @@ export async function proveMachine<State, Command>(specification: MachineSpecifi
 function unchangedFormula(schema: AnySchema, before: string, after: string): string {
   if (schema.kind !== "object") return `${before} = ${after}`;
   const fields = Object.entries((schema as ObjectSchema<ObjectShape>).shape);
-  return `(${fields.map(([field, child]) => unchangedFormula(child, `${before}.${identifier(field)}`, `${after}.${identifier(field)}`)).join(" /\\ ") || "TRUE"})`;
+  return `(${fields.map(([field, child]) => unchangedFormula(child, `${before}${access(field)}`, `${after}${access(field)}`)).join(" /\\ ") || "TRUE"})`;
 }
 
 function hasEffect(value: unknown): boolean {
@@ -366,14 +366,14 @@ class Compiler {
   constructor(private readonly stateSchema: AnySchema, private readonly commandSchema: AnySchema) {}
 
   value(value: unknown, names: Names, result = false): string {
+    // No value a machine holds is a TLA+ set, so the empty set stands for null apart from every other value.
+    if (value === null) return "{}";
     if (isTerm(value)) return this.term(termData(value), names);
     const node = nodeOf(value);
     if (node?.kind === "choose") return `(IF ${this.rule(node.condition, names, names.get("") ?? "s")} THEN ${this.value(node.yes, names, result)} ELSE ${this.value(node.no, names, result)})`;
     if (node?.kind === "bind") {
       const data = isTerm(node.value) ? termData(node.value) : undefined;
-      const source = data?.kind === "position" && data.path.length === 1 ? data.path[0] : undefined;
-      if ((source !== "state" || node.schema !== this.stateSchema) &&
-          (source !== "command" || node.schema !== this.commandSchema)) {
+      if (data?.kind !== "position" || data.measure !== "value" || this.schemaAt(data.path) !== node.schema || this.mayBeLeftOut(data.path)) {
         throw new SpecificationError("TLA+ translation cannot preserve bind schema validation");
       }
       const local = `local${this.next++}`;
@@ -381,8 +381,8 @@ class Compiler {
     }
     if (node?.kind === "map") {
       const data = isTerm(node.values) ? termData(node.values) : undefined;
-      if (data?.kind !== "position" || data.path.length !== 1 || data.path[0] !== "state" ||
-          this.stateSchema.kind !== "array" || (this.stateSchema as ArraySchema<unknown>).element !== node.element ||
+      const array = data?.kind === "position" && data.measure === "value" && !this.mayBeLeftOut(data.path) ? this.schemaAt(data.path) : undefined;
+      if (array?.kind !== "array" || (array as ArraySchema<unknown>).element !== node.element ||
           node.element !== node.output || !this.safeMappedBody(node.body, node.element as AnySchema, node.name)) {
         throw new SpecificationError("TLA+ translation cannot preserve map element and output schema validation");
       }
@@ -416,10 +416,27 @@ class Compiler {
         fields.push(["hasWrites", hasWrites]);
       }
       if (result && !fields.some(([key]) => key === "commands")) fields.push(["commands", []]);
-      if (!fields.length) throw new SpecificationError("TLA+ translation cannot represent an empty record");
-      return `[${fields.map(([key, child]) => `${identifier(key)} |-> ${this.value(child, names)}`).join(", ")}]`;
+      if (!fields.length) return "{{}}";
+      if (fields.every(([key]) => isIdentifier(key))) return `[${fields.map(([key, child]) => `${key} |-> ${this.value(child, names)}`).join(", ")}]`;
+      const key = `field${this.next++}`;
+      return `[${key} \\in ${set(fields.map(([field]) => JSON.stringify(field)))} |-> CASE ${fields.map(([field, child]) => `${key} = ${JSON.stringify(field)} -> ${this.value(child, names)}`).join(" [] ")}]`;
     }
     throw new SpecificationError(`TLA+ translation cannot represent ${String(value)}`);
+  }
+
+  // Whether the field at the path, or an object on the way to it, is optional: a bind of it fails on its absence, which the translation does not model.
+  private mayBeLeftOut(path: readonly string[]): boolean {
+    let schema: AnySchema | undefined = path[0] === "state" ? this.stateSchema : path[0] === "command" ? this.commandSchema : undefined;
+    for (const key of path.slice(1)) {
+      if (schema?.kind === "optional") return true;
+      schema = schema?.kind === "object" ? (schema as ObjectSchema<ObjectShape>).shape[key] : undefined;
+    }
+    return schema?.kind === "optional";
+  }
+
+  private schemaAt(path: readonly string[]): AnySchema | undefined {
+    const root = path[0] === "state" ? this.stateSchema : path[0] === "command" ? this.commandSchema : undefined;
+    return root && schemaAtPath(root, path.slice(1));
   }
 
   private safeMappedBody(value: unknown, schema: AnySchema, element: string): boolean {
@@ -436,25 +453,25 @@ class Compiler {
 
   condition(value: unknown, names: Names, self: string): string {
     if (value !== null && typeof value === "object" && "kind" in value &&
-      ["compare", "all", "any", "and", "or", "not"].includes(String(value.kind))) return this.rule(value as Rule, names, self);
+      ["compare", "relation", "all", "any", "and", "or", "not"].includes(String(value.kind))) return this.rule(value as Rule, names, self);
     return this.value(value, new Map([...names, ["", self]]));
   }
 
   paired(condition: unknown, each: { readonly path: readonly string[]; readonly by?: string }, kind: string | undefined,
     beforeRoot = "previous", afterRoot = "state"): string {
-    const before = each.path.reduce((root, field) => `${root}.${identifier(field)}`, `(${beforeRoot})`);
-    const after = each.path.reduce((root, field) => `${root}.${identifier(field)}`, `(${afterRoot})`);
+    const before = each.path.reduce((root, field) => `${root}${access(field)}`, `(${beforeRoot})`);
+    const after = each.path.reduce((root, field) => `${root}${access(field)}`, `(${afterRoot})`);
     if (kind === "record") {
       const earlier = `${before}[key]`, later = `${after}[key]`;
       const rule = this.condition(condition, new Map([["before", earlier], ["after", later]]), later);
       return `(\\A key \\in (DOMAIN ${before} \\cap DOMAIN ${after}): ${earlier} = ${later} \\/ (${rule}))`;
     }
     if (kind !== "array" || each.by === undefined) throw new SpecificationError("TLA+ translation cannot pair this collection");
-    const key = identifier(each.by);
+    const key = access(each.by);
     const bi = `${before}[i]`, aj = `${after}[j]`;
     const rule = this.condition(condition, new Map([["before", bi], ["after", aj]]), aj);
-    const unique = (collection: string) => `(\\A x, y \\in 1..Len(${collection}): x = y \\/ ${collection}[x].${key} # ${collection}[y].${key})`;
-    return `(${unique(before)} /\\ ${unique(after)} /\\ \\A i \\in 1..Len(${before}): \\A j \\in 1..Len(${after}): ${bi}.${key} # ${aj}.${key} \\/ ${bi} = ${aj} \\/ (${rule}))`;
+    const unique = (collection: string) => `(\\A x, y \\in 1..Len(${collection}): x = y \\/ ${collection}[x]${key} # ${collection}[y]${key})`;
+    return `(${unique(before)} /\\ ${unique(after)} /\\ \\A i \\in 1..Len(${before}): \\A j \\in 1..Len(${after}): ${bi}${key} # ${aj}${key} \\/ ${bi} = ${aj} \\/ (${rule}))`;
   }
 
   schema(schema: AnySchema, value: string): string {
@@ -468,14 +485,14 @@ class Compiler {
       case "literal": type = `${value} = ${this.value((schema as LiteralSchema<string | number | boolean | null>).value, new Map())}`; break;
       case "object": {
         const fields = Object.entries((schema as ObjectSchema<ObjectShape>).shape);
-        type = `(DOMAIN ${value} = ${set(fields.map(([field]) => JSON.stringify(field)))} /\\ ${fields.map(([field, child]) => this.schema(child, `${value}.${identifier(field)}`)).join(" /\\ ") || "TRUE"})`;
+        type = fields.length === 0 ? `${value} = {{}}` : `(DOMAIN ${value} = ${set(fields.map(([field]) => JSON.stringify(field)))} /\\ ${fields.map(([field, child]) => this.schema(child, `${value}${access(field)}`)).join(" /\\ ")})`;
         break;
       }
       case "variants": {
         const sum = schema as AnyVariantsSchema;
         type = `(${sum.variantTags.map(tag => {
           const fields = sum.variants[tag]!.shape as ObjectShape;
-          return `(${value}.${identifier(sum.discriminant)} = ${JSON.stringify(tag)} /\\ DOMAIN ${value} = ${set([sum.discriminant, ...Object.keys(fields)].map(field => JSON.stringify(field)))}${Object.entries(fields).map(([field, child]) => ` /\\ ${this.schema(child, `${value}.${identifier(field)}`)}`).join("")})`;
+          return `(${value}${access(sum.discriminant)} = ${JSON.stringify(tag)} /\\ DOMAIN ${value} = ${set([sum.discriminant, ...Object.keys(fields)].map(field => JSON.stringify(field)))}${Object.entries(fields).map(([field, child]) => ` /\\ ${this.schema(child, `${value}${access(field)}`)}`).join("")})`;
         }).join(" \\/ ")})`;
         break;
       }
@@ -506,6 +523,17 @@ class Compiler {
       const operator = rule.operator === "==" ? "=" : rule.operator === "!=" ? "#" : rule.operator;
       return `(${this.value(rule.left, operands)} ${operator} ${this.value(rule.right, operands)})`;
     }
+    if (rule.kind === "relation") {
+      const operands = new Map([...names, ["", self]]);
+      const subject = this.value(rule.subject, operands), other = this.value(rule.other, operands);
+      if (rule.relation === "hasKey") return `(${other} \\in DOMAIN ${subject})`;
+      if (rule.relation === "includes") {
+        // A fresh index: an enclosing quantifier of a paired transition may already bind i.
+        const index = `element${this.next++}`;
+        return `(\\E ${index} \\in 1..Len(${subject}): ${subject}[${index}] = ${other})`;
+      }
+      throw new SpecificationError(`TLA+ translation does not read ${rule.relation}: strings are no sequences there`);
+    }
     if (rule.kind === "not") return `~(${this.rule(rule.rule, names, self)})`;
     if (rule.kind === "and" || rule.kind === "or") return `(${rule.rules.map(child => this.rule(child, names, self)).join(rule.kind === "and" ? " /\\ " : " \\/ ")})`;
     const variable = `element${this.next++}`;
@@ -529,15 +557,21 @@ class Compiler {
   }
 
   position(path: readonly string[], measure: string, names: Names): string {
-    if (measure !== "value") throw new SpecificationError(`TLA+ translation does not support measure ${measure}`);
+    if (measure !== "value" && measure !== "length") throw new SpecificationError(`TLA+ translation does not support measure ${measure}`);
     const named = names.get(path[0] ?? "");
     const root = named ?? names.get("");
     if (root === undefined) throw new SpecificationError(`TLA+ translation cannot resolve term ${path.join(".")}`);
-    return path.slice(named === undefined ? 0 : 1).reduce((current, part) => `${current}.${identifier(part)}`, root);
+    const read = path.slice(named === undefined ? 0 : 1).reduce((current, part) => `${current}${access(part)}`, root);
+    return measure === "length" ? `Len(${read})` : read;
   }
 }
 
-function identifier(value: string): string {
-  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) throw new SpecificationError(`TLA+ translation cannot represent field ${value}`);
-  return value;
+function isIdentifier(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(value);
 }
+
+// A record is a function on its field names, so a field TLA+ cannot name is read by its name as a string.
+function access(field: string): string {
+  return isIdentifier(field) ? `.${field}` : `[${JSON.stringify(field)}]`;
+}
+

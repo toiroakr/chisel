@@ -111,6 +111,22 @@ interface Transformable {
 interface Quantified<E> {
   $all(each: (element: TermOf<E>) => Rule): Rule & Condition;
   $any(each: (element: TermOf<E>) => Rule): Rule & Condition;
+  // Whether some element is the value (Souther's List.contains): a value the
+  // source writes or one a position holds.
+  $includes(value: Operand<E>): Rule & Condition;
+}
+
+// How a string stands to another (Souther's String.startsWith and the rest),
+// read over strings of any length (ADR-0130).
+interface Related {
+  $startsWith(other: Operand<string>): Rule & Condition;
+  $endsWith(other: Operand<string>): Rule & Condition;
+  $contains(other: Operand<string>): Rule & Condition;
+}
+
+// Whether a record holds an entry under the key (Souther's Map.containsKey).
+interface Keyed {
+  $hasKey(key: Operand<string>): Rule & Condition;
 }
 
 // Operators carry the `$` prefix rather than fields, so a field reads as it does
@@ -128,6 +144,11 @@ type TermOperator =
   | "$uppercase"
   | "$all"
   | "$any"
+  | "$includes"
+  | "$startsWith"
+  | "$endsWith"
+  | "$contains"
+  | "$hasKey"
   | "$plus"
   | "$minus";
 
@@ -151,14 +172,14 @@ export type TermOf<T> = Term<T> &
       : [T] extends [Moment]
       ? Ordered<T>
       : [T] extends [string]
-        ? Ordered<T> & Measured & Transformable
+        ? Ordered<T> & Measured & Transformable & Related
         : [T] extends [readonly (infer E)[]]
           ? Measured & Quantified<E>
           : [T] extends [object]
             ? string extends keyof T
               ? unknown extends T[string & keyof T]
                 ? { readonly [key: string]: any }
-                : Measured & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
+                : Measured & Keyed & { readonly [key: string]: TermOf<Exclude<T[string & keyof T], undefined>> }
               : Fields<T>
             : unknown);
 
@@ -187,6 +208,18 @@ export interface AnyRule {
   readonly each: Rule;
 }
 
+// A relation of a string to another, of a record to a key, or of an array to
+// an element: the other side is a value the source writes or one at a place
+// (ADR-0129), and the subject is always a place.
+export type Relation = "startsWith" | "endsWith" | "contains" | "hasKey" | "includes";
+
+export interface RelationRule {
+  readonly kind: "relation";
+  readonly relation: Relation;
+  readonly subject: Term<unknown>;
+  readonly other: Operand<unknown>;
+}
+
 export interface AndRule {
   readonly kind: "and";
   readonly rules: readonly Rule[];
@@ -203,9 +236,9 @@ export interface NotRule {
 }
 
 // An invariant may carry the name refine() was given for it.
-export type Rule = (CompareRule | AllRule | AnyRule | AndRule | OrRule | NotRule) & { readonly name?: string };
+export type Rule = (CompareRule | AllRule | AnyRule | RelationRule | AndRule | OrRule | NotRule) & { readonly name?: string };
 
-export type Distinction = CompareRule | AllRule | AnyRule;
+export type Distinction = CompareRule | AllRule | AnyRule | RelationRule;
 
 // Each part of a named invariant keeps its name.
 export function conjuncts(rule: Rule): readonly Rule[] {
@@ -287,6 +320,8 @@ export function termPaths(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
     case "compare":
       return [rule.left, rule.right].filter(isTerm).flatMap(term => pathsOf(termData(term)));
+    case "relation":
+      return [rule.subject, rule.other].filter(isTerm).flatMap(term => pathsOf(termData(term)));
     case "all":
     case "any":
       return [positionOf(rule.of).path];
@@ -303,6 +338,7 @@ export function termPaths(rule: Rule): readonly (readonly string[])[] {
 export function pathsRead(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
     case "compare":
+    case "relation":
       return termPaths(rule);
     case "all":
     case "any":
@@ -363,6 +399,12 @@ export function shiftTerms(rule: CompareRule): CompareRule {
 }
 
 export function stepInto(rule: Rule, key: string): Rule | undefined {
+  // A relation of a field to a written value is one of the field itself.
+  if (rule.kind === "relation") {
+    const subject = positionData(rule.subject);
+    if (subject === undefined || isTerm(rule.other) || subject.path[0] !== key) return undefined;
+    return { ...rule, subject: shiftedTerm(termData(rule.subject)) as Term<unknown> };
+  }
   const path = boundTermPath(rule);
   if (rule.kind !== "compare" || path === undefined || path[0] !== key) {
     return undefined;
@@ -406,6 +448,46 @@ export function holds(
       decide?.(rule, outcome);
       return outcome;
     }
+    case "relation": {
+      const outcome = relates(rule, value);
+      decide?.(rule, outcome);
+      return outcome;
+    }
+  }
+}
+
+// Read as a comparison is: where either side is absent it holds, since the
+// analyses read rules over partial values and no declared rule reaches one.
+export function relates(rule: RelationRule, value: unknown): boolean {
+  const subject = read(rule.subject, value);
+  const other = read(rule.other, value);
+  if (subject === undefined || other === undefined) {
+    return true;
+  }
+  return relationHolds(rule.relation, subject, other);
+}
+
+// One element as $includes reads it: decimals by their value, however written,
+// and numbers as $eq and Array.prototype.includes read them (0 and -0 one value),
+// anything else as deepEqual does.
+export function sameElement(left: unknown, right: unknown): boolean {
+  if (isDecimal(left) && isDecimal(right)) return left.equals(right);
+  if (typeof left === "number" && typeof right === "number") return left === right || (Number.isNaN(left) && Number.isNaN(right));
+  return deepEqual(left, right);
+}
+
+export function relationHolds(relation: Relation, subject: unknown, other: unknown): boolean {
+  switch (relation) {
+    case "startsWith":
+      return typeof subject === "string" && typeof other === "string" && subject.startsWith(other);
+    case "endsWith":
+      return typeof subject === "string" && typeof other === "string" && subject.endsWith(other);
+    case "contains":
+      return typeof subject === "string" && typeof other === "string" && subject.includes(other);
+    case "hasKey":
+      return typeof subject === "object" && subject !== null && !Array.isArray(subject) && typeof other === "string" && Object.hasOwn(subject, other);
+    case "includes":
+      return Array.isArray(subject) && subject.some(element => sameElement(element, other));
   }
 }
 
@@ -454,9 +536,32 @@ export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
     }
     case "compare":
       return satisfyComparison(rule, value, stepAt);
+    case "relation":
+      return satisfyRelation(rule, value);
     default:
       return value;
   }
+}
+
+// A placeholder made to keep a relation to a written value: the value is written into the string, the record or the array, and where the container holds nothing to give it the shape of an entry, it is left as it was.
+function satisfyRelation(rule: RelationRule, value: unknown): unknown {
+  const position = isTerm(rule.other) ? undefined : positionData(rule.subject as Term<unknown>);
+  if (position === undefined || position.measure !== "value") return value;
+  const { other } = rule;
+  const written = writeAt(value, position.path, current => {
+    switch (rule.relation) {
+      case "startsWith": return typeof current === "string" && typeof other === "string" ? other + current : current;
+      case "endsWith":
+      case "contains": return typeof current === "string" && typeof other === "string" ? current + other : current;
+      case "hasKey": {
+        if (typeof current !== "object" || current === null || Array.isArray(current) || typeof other !== "string") return current;
+        const [first] = Object.values(current);
+        return first === undefined ? current : { ...current, [other]: first };
+      }
+      case "includes": return Array.isArray(current) ? (current.length === 0 ? [other] : [other, ...current.slice(1)]) : current;
+    }
+  });
+  return holds(rule, written) ? written : value;
 }
 
 function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | undefined): unknown {
@@ -522,6 +627,8 @@ export function describeRule(rule: Rule, path = "$", elements: ElementLabels = {
       return `${rule.kind}(${rule.rules.map(part => describeRule(part, path, elements)).join(", ")})`;
     case "not":
       return `not(${describeRule(rule.rule, path, elements)})`;
+    case "relation":
+      return `${rule.relation}(${describeOperand(rule.subject, path, elements)}, ${describeOperand(rule.other, path, elements)})`;
     case "compare":
       break;
   }
@@ -552,6 +659,20 @@ export function isDecimal(value: unknown): value is Decimal {
     typeof (value as Partial<Decimal>).toFixed === "function" &&
     typeof (value as Partial<Decimal>).decimalPlaces === "function"
   );
+}
+
+// A copy of a state whose objects and arrays can be changed without touching
+// the original. A Decimal keeps its digits in an array a callback can change,
+// so it is copied with them, through its own constructor so that another copy
+// of decimal.js is kept; Rational and Temporal values cannot be changed in
+// place, so they are shared.
+export function copyOf<V>(value: V): V {
+  if (isDecimal(value)) return new (value.constructor as new (from: unknown) => V)(value);
+  if (Array.isArray(value)) return value.map(copyOf) as V;
+  if (value !== null && typeof value === "object" && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copyOf(child)])) as V;
+  }
+  return value;
 }
 
 // A decimal of `scale` digits after the point, as a whole number of units of its
@@ -741,6 +862,12 @@ function termAt(path: readonly string[], measure: Measure): Term<unknown> {
         case "all":
         case "any":
           return (each: (element: TermOf<unknown>) => Rule) => quantified(name, self, each);
+        case "includes":
+        case "startsWith":
+        case "endsWith":
+        case "contains":
+        case "hasKey":
+          return (other: unknown) => condition({ kind: "relation", relation: name, subject: self, other });
         default:
           return termAt([...path, key], "value");
       }
@@ -1008,6 +1135,8 @@ export function rebaseRule(rule: Rule, move: (path: readonly string[]) => readon
   switch (rule.kind) {
     case "compare":
       return named({ kind: "compare", operator: rule.operator, left: term(rule.left), right: term(rule.right) });
+    case "relation":
+      return named({ kind: "relation", relation: rule.relation, subject: term(rule.subject) as Term<unknown>, other: term(rule.other) });
     case "all":
     case "any":
       return named({ ...rule, of: term(rule.of) as Term<readonly unknown[]>, each: rebaseRule(rule.each, path => (path[0] === rule.element ? path : move(path))) });
@@ -1116,6 +1245,11 @@ export function substitutedRule(rule: Rule, replace: (path: readonly string[]) =
         ? named({ kind: "compare", operator, left: left.with, right: multiplied })
         : named({ kind: "compare", operator, left: multiplied, right: right.with });
     }
+    case "relation": {
+      const subject = operand(rule.subject), other = operand(rule.other);
+      if (subject === undefined || other === undefined || subject.over !== undefined || other.over !== undefined || !isTerm(subject.with)) return undefined;
+      return named({ kind: "relation", relation: rule.relation, subject: subject.with as Term<unknown>, other: other.with });
+    }
     case "all":
     case "any": {
       const of = operand(rule.of);
@@ -1160,4 +1294,15 @@ export function normalize(
     return { operator: mirrored[rule.operator], bound: rule.left, measure: right.measure };
   }
   return undefined;
+}
+
+// The values rules write, constants of comparisons, relations and expressions.
+export function constantsOf(rules: readonly Rule[]): unknown[] {
+  return rules.flatMap((rule): unknown[] => {
+    if (rule.kind === "and" || rule.kind === "or") return constantsOf(rule.rules);
+    if (rule.kind === "not") return constantsOf([rule.rule]);
+    if (rule.kind === "all" || rule.kind === "any") return constantsOf([rule.each]);
+    if (rule.kind === "relation") return isTerm(rule.other) ? [] : [rule.other];
+    return [rule.left, rule.right].flatMap(value => !isTerm(value) ? [value] : termData(value).kind === "linear" ? [(termData(value) as { constant: unknown }).constant] : []);
+  });
 }

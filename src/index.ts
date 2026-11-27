@@ -122,8 +122,10 @@ export {
   evaluate,
   generate,
   isSpecification,
+  modelChanges,
   test,
 } from "./specification.js";
+export type { ModelChange, ModelChangePart } from "./changes.js";
 export type {
   AdequacyReport,
   CheckOptions,
@@ -167,8 +169,8 @@ export { compose, isComposition } from "./composition.js";
 
 export { explore, invariant, transition, world } from "./world.js";
 export type { Draw, ExploredStep, ExploreReport, Invariant, Operation, Transition, World } from "./world.js";
-export { machine, effect, isMachine, runMachine } from "./machine.js";
-export type { Effect, Machine, MachineCommand, MachineExecution, MachineStep, PerformedEffect } from "./machine.js";
+export { machine, effect, isMachine, runMachine, driveMachine } from "./machine.js";
+export type { DrivenExecution, Effect, EffectFailure, EffectToPerform, Machine, MachineCommand, MachineExecution, MachineStep, PerformedEffect } from "./machine.js";
 export { specifyMachine, isMachineSpecification, checkMachine } from "./machine-check.js";
 export { checkInterleavings } from "./interleave.js";
 export type { InterleavingReport, InterleavingStep, InterleavingTrace } from "./interleave.js";
@@ -185,7 +187,10 @@ export type { JsonValue } from "./codec.js";
 export { PAIR_LIMIT } from "./pairs.js";
 export type { PairObligation, PairMeasure } from "./pairs.js";
 
-export { model, bind, matchValue, map, fold, call, choose, construct, concat, arithmetic, quotient, plus, minus, between } from "./model.js";
+export { model, bind, matchValue, map, fold, step, call, choose, construct, concat, arithmetic, quotient, round, divide, plus, minus, between } from "./model.js";
+export type { StepValue } from "./model.js";
+export { OutOfRoom } from "./exact.js";
+export type { Rounding } from "./exact.js";
 export type { CalendarUnit, ClockUnit, Overflow } from "./temporal.js";
 export type { Expression, Template } from "./model.js";
 

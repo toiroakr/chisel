@@ -5,13 +5,14 @@ import { brokenEnsures } from "./behavior.js";
 import { constantsOf, domainOf } from "./domain.js";
 import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
-import { childrenOf, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, replaceChildren } from "./model.js";
+import { childrenOf, choicesOf, independentParts, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, partTemplate, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, describeRule, holds, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isDecimal, isTerm, positionData, positionOf, positionTerm, pathsRead, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
 import { outcomesOf } from "./ways.js";
+import { NO_FACTS, withSteps } from "./outcomes.js";
 
 export interface ConstructionProof {
   readonly decision: string;
@@ -23,6 +24,82 @@ export interface ProofReport {
   readonly status: "verified" | "refuted" | "undetermined";
   readonly decisions: readonly ConstructionProof[];
 }
+// What a proof over the ways of a template holds them to: the answer to a schema, where given, with
+// the effects to theirs, and the clauses named.
+interface PathChecks {
+  readonly answer?: AnySchema;
+  readonly clauses: readonly AnyBehavior["ensures"][number][];
+}
+
+// A model whose answer holds independent parts (`independentParts`), each a field the answer
+// reaches through plain objects and lists, is proved part by part rather than over every way
+// through all of them together: the answer's frame with each part standing as any value of the
+// schema at its place (so a part's own schema is all the frame is proved from); each part's ways
+// against that schema; and each clause over the ways of the parts it reads only, the rest standing
+// as any value of their schemas. Undefined where the model is not split this way or the frame is
+// not proved so, which leaves it to be proved over every way together.
+function partedProof(
+  written: unknown,
+  definition: AnyBehavior,
+  scope: AnySchema,
+  provesPaths: (template: unknown, checks: PathChecks, scope: AnySchema) => boolean,
+): boolean | undefined {
+  const parts = independentParts(written);
+  if (parts === undefined || isVariantsSchema(definition.result)) return undefined;
+  const places = new Map<unknown, readonly string[]>();
+  const locate = (value: unknown, path: readonly string[]): void => {
+    const node = nodeOf(value);
+    if (node !== undefined) { if (parts.includes(node)) places.set(node, path); return; }
+    if (isTerm(value) || value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) value.forEach((child, index) => locate(child, [...path, String(index)]));
+    else for (const [key, child] of Object.entries(value)) locate(child, [...path, key]);
+  };
+  locate(written, []);
+  if (places.size !== parts.length) return undefined;
+  const schemaOfPlace = (path: readonly string[]): AnySchema | undefined =>
+    path[0] === "result" ? schemaAtPath(definition.result, path.slice(1)) : path[0] === "effects" && path.length === 2 ? definition.effects : undefined;
+  const names = new Map<unknown, string>();
+  let shape = (scope as ObjectSchema<ObjectShape>).shape;
+  for (const [index, part] of parts.entries()) {
+    const schema = schemaOfPlace(places.get(part)!);
+    if (schema === undefined) return undefined;
+    let name = `#part${index}`;
+    while (Object.hasOwn(shape, name)) name = `#${name}`;
+    names.set(part, name);
+    shape = { ...shape, [name]: schema };
+  }
+  const framed = { ...(scope as ObjectSchema<ObjectShape>), shape } as AnySchema;
+  // The template with every part but those kept standing as the value of its place in the scope.
+  const standing = (value: unknown, kept: ReadonlySet<unknown>): unknown => {
+    const node = nodeOf(value);
+    if (node !== undefined) return parts.includes(node) && !kept.has(node) ? positionTerm([names.get(node)!], "value") : value;
+    if (isTerm(value) || value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(child => standing(child, kept));
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, standing(child, kept)]));
+  };
+  const nothing = new Set<unknown>();
+  const frame = standing(written, nothing);
+  if (choicesOf(frame).length > 0) return undefined;
+  const readsOf = (clause: AnyBehavior["ensures"][number]): Set<unknown> | undefined => {
+    const rule = substitute(clause.rule, { input: positionTerm([], "value"), value: (frame as { result?: unknown }).result });
+    if (!rule) return undefined;
+    const read = new Set(pathsRead(rule).map(path => path[0]));
+    return new Set(parts.filter(part => read.has(names.get(part))));
+  };
+  const clauseParts = definition.ensures.map(clause => ({ clause, reads: readsOf(clause) }));
+  if (clauseParts.some(item => item.reads === undefined)) return undefined;
+  // The frame first: the answer's schema with every part any value of its place, and the clauses that read no part.
+  if (!provesPaths(frame, { answer: definition.result, clauses: clauseParts.filter(item => item.reads!.size === 0).map(item => item.clause) }, framed)) return undefined;
+  for (const part of parts) {
+    if (!provesPaths({ result: partTemplate(part), effects: [] }, { answer: schemaOfPlace(places.get(part)!)!, clauses: [] }, framed)) return false;
+  }
+  for (const { clause, reads } of clauseParts) {
+    if (reads!.size === 0) continue;
+    if (!provesPaths(standing(written, reads!), { clauses: [clause] }, framed)) return false;
+  }
+  return true;
+}
+
 export function verify(implementation: AnyImplementation, options: { readonly candidates?: number; readonly ways?: number } = {}): ProofReport {
   const candidates = options.candidates ?? 4096, ways = options.ways ?? 10000;
   for (const limit of [candidates, ways]) if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Proof budgets must be positive safe integers");
@@ -69,23 +146,32 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
     if (!calls && domain.exhaustive) { decisions.push({ ...base, status: "verified", reason: "Every valid input was checked, including intermediate constructions" }); continue; }
     const scope = feasibilityScope(definition, tag);
     const budget = { remaining: ways };
-    let proven = true;
-    for (const path of modelPaths(written)) {
-      if (--budget.remaining < 0) { proven = false; break; }
-      if (feasibilityOf({ steps: availableSteps(path.steps, scope) }, scope, undefined, candidates).kind === "infeasible") continue;
-      const prepared = prepareExpression(path.value, definition, tag, scope, path.steps, candidates, budget);
-      if (!prepared) { proven = false; break; }
-      const execution = prepared.value as { result?: unknown; effects?: unknown };
-      const prove = (schema: AnySchema, value: unknown): boolean => provesValue(schema, value, prepared.scope, path.steps, candidates);
-      if (!intermediates(prepared.value, prove) || !prove(definition.result, execution.result) || !Array.isArray(execution.effects) || !execution.effects.every(effect => prove(definition.effects, effect))) { proven = false; break; }
-      for (const clause of definition.ensures) {
-        const resultTag = isVariantsSchema(definition.result) ? tagOf(definition.result, execution.result) : undefined;
-        if (clause.cases && resultTag !== undefined && !clause.cases.includes(resultTag)) continue;
-        const rule = substitute(clause.rule, { input: positionTerm([], "value"), value: execution.result });
-        if (!rule || !provesRule(rule, prepared.scope, path.steps, candidates)) { proven = false; break; }
+    // Whether every way through `template` constructs what `checks` asks of it: the answer and the
+    // effects with their schemas, and the clauses named.
+    const provesPaths = (template: unknown, checks: PathChecks, pathScope: AnySchema): boolean => {
+      for (const path of modelPaths(template)) {
+        if (--budget.remaining < 0) return false;
+        if (feasibilityOf({ steps: availableSteps(path.steps, pathScope) }, pathScope, undefined, candidates).kind === "infeasible") continue;
+        const prepared = prepareExpression(path.value, definition, tag, pathScope, path.steps, candidates, budget);
+        if (!prepared) return false;
+        const execution = prepared.value as { result?: unknown; effects?: unknown };
+        const prove = (schema: AnySchema, value: unknown): boolean => provesValue(schema, value, prepared.scope, path.steps, candidates);
+        if (checks.answer !== undefined && (!intermediates(prepared.value, prove) || !prove(checks.answer, execution.result) || !Array.isArray(execution.effects) || !execution.effects.every(effect => prove(definition.effects, effect)))) return false;
+        for (const clause of checks.clauses) {
+          const resultTag = isVariantsSchema(definition.result) ? tagOf(definition.result, execution.result) : undefined;
+          if (clause.cases && resultTag !== undefined && !clause.cases.includes(resultTag)) continue;
+          const rule = substitute(clause.rule, { input: positionTerm([], "value"), value: execution.result });
+          if (!rule || !provesRule(rule, prepared.scope, path.steps, candidates)) return false;
+        }
       }
-      if (!proven) break;
-    }
+      return true;
+    };
+    const remaining = budget.remaining;
+    const factored = partedProof(written, definition, scope, provesPaths);
+    // The paths a factored proof that fell back spent are not the full proof's to lose, nor are those it ran out of: the full proof may fit within them.
+    const exhausted = factored === false && budget.remaining < 0;
+    if (factored === undefined || exhausted) budget.remaining = remaining;
+    const proven = (exhausted ? undefined : factored) ?? provesPaths(written, { answer: definition.result, clauses: definition.ensures }, scope);
     decisions.push({ ...base, status: proven ? "verified" : "undetermined", reason: proven ? "Every construction and postcondition follows from the input, path conditions, and dependency contracts" : budget.remaining < 0 ? `Proof exceeds ${ways} paths` : "Universal construction safety could not be proved from the available contracts and conditions" });
   }
   return summarize(decisions);
@@ -305,6 +391,7 @@ export function identityOf(rule: Rule): string {
 function constantsWithin(rule: Rule): readonly string[] {
   switch (rule.kind) {
     case "compare": return [rule.left, rule.right].filter(operand => !isTerm(operand)).map(value => `${typeof value}:${(value as { constructor?: { name?: string } } | null)?.constructor?.name ?? ""}:${String(value)}`);
+    case "relation": return isTerm(rule.other) ? [] : [structuralOf(rule.other)];
     case "all":
     case "any": return constantsWithin(rule.each);
     case "and":
@@ -312,10 +399,27 @@ function constantsWithin(rule: Rule): readonly string[] {
     case "not": return constantsWithin(rule.rule);
   }
 }
+// A written value as it is told apart: a property holding undefined is not a
+// property left out, and a bigint, a decimal and a rational are each their own.
+function structuralOf(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (typeof value === "bigint") return `${value}n`;
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value === null || typeof value !== "object") return `${typeof value}:${String(value)}`;
+  if (isDecimal(value)) return `decimal:${value.toString()}`;
+  if (Array.isArray(value)) return `[${value.map(structuralOf).join(",")}]`;
+  const named = (value as { constructor?: { name?: string } }).constructor?.name;
+  const fields = `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${structuralOf((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  // A named object reads as its constructor and text, and its own fields too,
+  // so two that render alike but hold other fields are told apart.
+  if (named !== undefined && named !== "Object") return `${named}:${String(value)}${fields}`;
+  return fields;
+}
 // Every path the rule reads, those under a quantifier's element too, which pathsRead leaves out.
 function pathsWithin(rule: Rule): readonly (readonly string[])[] {
   switch (rule.kind) {
-    case "compare": return termPaths(rule);
+    case "compare":
+    case "relation": return termPaths(rule);
     case "all":
     case "any": return [positionOf(rule.of).path, ...pathsWithin(rule.each)];
     case "and":
@@ -358,7 +462,10 @@ function sameShape(target: AnySchema, source: AnySchema, limit: number): boolean
     Object.hasOwn(target.variants, tag) && includesSchema(target.variants[tag]!, source.variants[tag]!, limit));
   if (target.kind === "literal") return (target as LiteralSchema<any>).value === (source as LiteralSchema<any>).value;
   if (target.kind === "enum") return (source as EnumSchema<string>).values.every(value => (target as EnumSchema<string>).values.includes(value));
-  if (target.kind === "decimal") return (source as DecimalSchema).scale <= (target as DecimalSchema).scale;
+  if (target.kind === "decimal") {
+    const [from, into] = [(source as DecimalSchema).scale, (target as DecimalSchema).scale];
+    return into === undefined || (from !== undefined && from <= into);
+  }
   if (["string", "number", "integer", "boolean", "instant", "date", "time", "datetime", "int64", "rational"].includes(target.kind)) return true;
   return false;
 }
@@ -375,8 +482,10 @@ function containsSymbolic(value: unknown): boolean {
 function provesRule(rule: Rule, scope: AnySchema, steps: readonly Step[], limit: number): boolean {
   if (termPaths(rule).length === 0) return holds(rule, {});
   const facts = scopeFacts(scope);
+  const known = withSteps(NO_FACTS, steps);
+  if (known === undefined) return true;
   let remaining = limit;
-  for (const outcome of outcomesOf(rule)) {
+  for (const outcome of outcomesOf(rule, known, true)) {
     if (--remaining < 0) return false;
     if (!outcome.result && feasibilityOf({ steps: [...facts, ...steps, ...outcome.steps] }, scope, undefined, limit).kind !== "infeasible") return false;
   }

@@ -1,6 +1,6 @@
 import { requireTemporal } from "./temporal-global.js";
 import { temporalNeighbor } from "./temporal.js";
-import { Rational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Rational, INT64_MIN, INT64_MAX, decimalOf, fractionOf, isOutOfRoom } from "./exact.js";
 import { compareText } from "./text.js";
 import type { Measure, Operator, Rule, Term } from "./rule.js";
 import { Decimal } from "decimal.js";
@@ -31,6 +31,8 @@ export interface Carrier {
   readonly compare: (left: unknown, right: unknown) => number;
   readonly step?: (value: unknown, direction: 1 | -1) => unknown;
   readonly past?: (value: unknown, direction: 1 | -1) => unknown;
+  // A value strictly between two, where the carrier has no step to name one beside a bound.
+  readonly between?: (low: unknown, high: unknown) => unknown;
   readonly format: (value: unknown) => string;
   readonly floor?: { readonly value: unknown; readonly reason: string };
   readonly ceiling?: { readonly value: unknown; readonly reason: string };
@@ -68,8 +70,38 @@ export const lengthCarrier: Carrier = {
 // Steps by one unit of the last digit and compares exactly. A bound written off
 // that grid is moved onto it first, so `>= 0.004` in cents draws the border of
 // `>= 0.01`, whose points are values a row can hold.
-export function decimalCarrier(scale: number): Carrier {
+// Without a scale, any finite decimal: no value is next to another, so no
+// point is named as the neighbour of a bound (an OFF point beside a strict
+// one, as for a number), and a run past a bound is taken one whole unit away,
+// worked out exactly.
+export function decimalCarrier(scale: number | undefined): Carrier {
   const asDecimal = (value: unknown): Decimal => isDecimal(value) ? value : new Decimal(value as Decimal.Value);
+  if (scale === undefined) {
+    return {
+      compare: (left, right) => asDecimal(left).comparedTo(asDecimal(right)),
+      // A bound past the digits exact arithmetic has room for names no run past it.
+      past: (value, direction) => {
+        try {
+          return decimalOf(fractionOf(asDecimal(value)).plus(fractionOf(direction)));
+        } catch (error) {
+          if (isOutOfRoom(error)) return undefined;
+          throw error;
+        }
+      },
+      between: (low, high) => {
+        try {
+          const middle = decimalOf(fractionOf(asDecimal(low)).plus(fractionOf(asDecimal(high))).dividedBy(new Rational(2n)));
+          // Half of two bounds may need a digit more than there is room for, which no later run could read.
+          fractionOf(asDecimal(middle));
+          return middle;
+        } catch (error) {
+          if (isOutOfRoom(error)) return undefined;
+          throw error;
+        }
+      },
+      format: String,
+    };
+  }
   const next = decimalStep(scale);
   const step = (value: unknown, direction: 1 | -1) => next(asDecimal(value), direction);
   return {

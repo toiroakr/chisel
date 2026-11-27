@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { Rational, fractionOf, isRational, INT64_MIN, INT64_MAX } from "./exact.js";
+import { Rational, fractionOf, isOutOfRoom, isRational, INT64_MIN, INT64_MAX, roundedAt } from "./exact.js";
 import { nodeOf } from "./model.js";
 import type { Rule, Operator } from "./rule.js";
 import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData, counts } from "./rule.js";
@@ -80,7 +80,8 @@ export function provesNumeric(schema: AnySchema, value: unknown, scope: AnySchem
   if (schema.kind === "number" && range.kind !== "number") return false;
   if (schema.kind === "int64" && (range.kind !== "bigint" || range.low.comparedTo(new Rational(INT64_MIN)) < 0 || range.high.comparedTo(new Rational(INT64_MAX)) > 0)) return false;
   if (schema.kind === "rational" && range.kind !== "rational") return false;
-  if (schema.kind === "decimal" && (range.kind !== "decimal" || range.scale === undefined || range.scale > (schema as DecimalSchema).scale)) return false;
+  const declared = (schema as DecimalSchema).scale;
+  if (schema.kind === "decimal" && (range.kind !== "decimal" || (declared !== undefined && (range.scale === undefined || range.scale > declared)))) return false;
   if (!["integer", "number", "int64", "rational", "decimal"].includes(schema.kind)) return false;
   return schema.invariants.every(rule => satisfied(rule, range));
 }
@@ -107,12 +108,14 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     const term = termData(value);
     if (term.kind === "linear") {
       let total = interval(term.constant, scope, steps);
+      // A decimal part of no declared scale leaves the sum's scale unknown,
+      // whatever the parts after it declare.
       for (const part of term.parts) {
         const found = interval(positionTerm(part.path, part.measure), scope, steps);
         if (!total || !found || onTimeline(found.kind) || total.kind !== found.kind && total.kind !== "number") return undefined;
         const coefficient = fractionOf(part.coefficient);
         const a = found.low.times(coefficient), b = found.high.times(coefficient);
-        total = { kind: found.kind, scale: found.scale === undefined ? undefined : Math.max(total.scale ?? 0, found.scale), integral: total.integral && found.integral && Number.isInteger(part.coefficient), low: total.low.plus(min(a, b)), high: total.high.plus(max(a, b)) };
+        total = { kind: found.kind, scale: found.scale === undefined || (total.kind === "decimal" && total.scale === undefined) ? undefined : Math.max(total.scale ?? 0, found.scale), integral: total.integral && found.integral && Number.isInteger(part.coefficient), low: total.low.plus(min(a, b)), high: total.high.plus(max(a, b)) };
       }
       return exactNumber(total);
     }
@@ -143,6 +146,8 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     }
     if (!low || !high || low.comparedTo(high) > 0) return undefined;
     if (timeline) return { low, high, integral, kind: schema.kind as "date" | "datetime" | "instant" };
+    // A value of a scale past the room exact arithmetic has is one a run may be out of room at, whatever the range says.
+    if (schema.kind === "decimal" && ((schema as DecimalSchema).scale ?? 0) > 10000) return undefined;
     return { low, high, integral, scale: schema.kind === "decimal" ? (schema as DecimalSchema).scale : undefined, kind: schema.kind === "int64" ? "bigint" : schema.kind === "rational" ? "rational" : schema.kind === "decimal" ? "decimal" : "number" };
   }
   const node = nodeOf(value);
@@ -172,6 +177,23 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     if (low.comparedTo(held.low) < 0 || high.comparedTo(held.high) > 0) return undefined;
     return { kind: left.kind, integral: true, low, high };
   }
+  if (node?.kind === "operation" && node.operator === "round") {
+    // Rounding keeps order, so the range rounds at its ends.
+    const inner = interval(node.left, scope, steps);
+    if (!inner || onTimeline(inner.kind) || typeof node.right !== "number") return undefined;
+    // A number is rounded only where it is a whole one: round refuses any other.
+    if (inner.kind === "number" && !(inner.integral && safeInteger(inner))) return undefined;
+    // A decimal with no scale holds any number of digits, among them more than exact arithmetic has room for, so a run may be out of room where its range says it completes.
+    if (inner.kind === "decimal" && inner.scale === undefined) return undefined;
+    const mode = node.mode ?? "half-even";
+    try {
+      return { kind: "decimal", integral: node.right === 0, scale: node.right, low: roundedAt(inner.low, node.right, mode), high: roundedAt(inner.high, node.right, mode) };
+    } catch (error) {
+      // A scale past the room exact arithmetic has completes to no range.
+      if (isOutOfRoom(error)) return undefined;
+      throw error;
+    }
+  }
   if (node?.kind === "operation") {
     if (node.operator === "concat") return undefined;
     const left = interval(node.left, scope, steps), right = interval(node.right, scope, steps);
@@ -197,6 +219,8 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
   } catch { return undefined; }
 }
 function exactNumber(range: Interval | undefined): Interval | undefined {
+  // A signed 64-bit result past its ends is an operation that stops, however exactly the range is worked out.
+  if (range?.kind === "bigint") return range.low.comparedTo(fractionOf(INT64_MIN)) >= 0 && range.high.comparedTo(fractionOf(INT64_MAX)) <= 0 ? range : undefined;
   if (range?.kind !== "number") return range;
   return range.integral && range.low.comparedTo(fractionOf(Number.MIN_SAFE_INTEGER)) >= 0 && range.high.comparedTo(fractionOf(Number.MAX_SAFE_INTEGER)) <= 0 ? range : undefined;
 }
@@ -248,4 +272,14 @@ function measuredRange(value: unknown, scope: AnySchema, steps: readonly Step[])
   if (found === undefined || onTimeline(found.kind)) return undefined;
   const floating = found.kind === "number";
   return floating && !found.integral ? undefined : { low: found.low, high: found.high, floating };
+}
+
+// Whether working out an operation completes wherever its operands do: an
+// exact range of its answer exists, read from the bounds of what it reads, so
+// no division by nought and no number past the exact range is in it. Undefined
+// ranges say nothing either way.
+export function completes(value: unknown, scope: AnySchema, steps: readonly Step[]): boolean {
+  const range = interval(value, scope, steps);
+  // A decimal of no scale holds any number of digits, among them more than exact arithmetic has room for, which a range cannot tell: its sum has no scale either.
+  return range !== undefined && !(range.kind === "decimal" && range.scale === undefined);
 }

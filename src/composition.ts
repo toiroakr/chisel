@@ -15,7 +15,7 @@ import type {
   VariantsSchema,
   VariantTable,
 } from "./schema.js";
-import { isVariantsSchema, literal, variants } from "./schema.js";
+import { decimalLabel, isVariantsSchema, literal, variants } from "./schema.js";
 
 type Stages = readonly [AnyBehavior, AnyBehavior, ...AnyBehavior[]];
 
@@ -208,7 +208,8 @@ function takes(answered: AnySchema, taken: AnySchema): boolean {
   // A decimal is a Decimal, not a number, so it goes only into a decimal keeping
   // at least as many digits.
   if (answered.kind === "decimal" && taken.kind === "decimal") {
-    return (answered as DecimalSchema).scale <= (taken as DecimalSchema).scale;
+    const [from, into] = [(answered as DecimalSchema).scale, (taken as DecimalSchema).scale];
+    return into === undefined || (from !== undefined && from <= into);
   }
   return answered.kind === taken.kind || (answered.kind === "integer" && taken.kind === "number");
 }
@@ -218,7 +219,7 @@ function kindOf(schema: AnySchema): string {
     return `enum ${(schema as EnumSchema<string>).values.map(value => JSON.stringify(value)).join(" | ")}`;
   }
   if (schema.kind === "decimal") {
-    return `decimal(${(schema as DecimalSchema).scale})`;
+    return decimalLabel(schema as DecimalSchema);
   }
   if (schema.kind !== "literal") {
     return schema.kind;

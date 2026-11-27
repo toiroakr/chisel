@@ -79,6 +79,12 @@ export function leftOutReadIn(rule: Rule, roots: Roots, facts: readonly Fact[] =
         if (found !== undefined) return found;
       }
       return undefined;
+    case "relation":
+      // The subject is read first, as the comparison above reads its left side, so a missing read on it is not masked by an undefined other.
+      return leftOutOperand(rule.subject, roots, facts, label)
+        ?? (rule.other === undefined
+          ? `$${rule.relation} with undefined, which no value is: write the absence as a case of a sum`
+          : leftOutOperand(rule.other, roots, facts, label));
   }
 }
 

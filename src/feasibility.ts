@@ -10,6 +10,8 @@ import type { AnySchema, AnyVariantsSchema, EnumSchema, ObjectSchema, ObjectShap
 import { isVariantsSchema, schemaAtPath } from "./schema.js";
 import type { RulesDecision } from "./behavior.js";
 import type { Step, Way } from "./ways.js";
+import { relationsVerdict } from "./relations.js";
+import type { RelationStep } from "./relations.js";
 
 export type Feasibility =
   | { readonly kind: "feasible" }
@@ -116,7 +118,16 @@ export function feasibilityOf(
   const groups = new Map<string, Group>();
   const relations: Relation[] = [];
   const opaque: (readonly (readonly string[])[])[] = [];
+  const relationSteps: RelationStep[] = [];
+  // `==`/`!=` between two finite positions, settled with them by the joint search, and between two
+  // strings free of invariants, settled by which values the way makes equal.
+  const finiteEqualities: Equality[] = [];
+  const stringEqualities: Equality[] = [];
   const outcomes = new Map<string, { identity: unknown; outcome: boolean | string }[]>();
+  // What the way holds of quantified conditions, each written with its negation pushed in, so a
+  // condition and the same one written negated (`any(xs, x => all(ys, y => y != x))` failing and
+  // `all(xs, x => any(ys, y => y == x))` failing) are told to contradict each other.
+  const quantified = new Set<string>();
   const groupFor = (path: readonly string[], measure: Measure): string => {
     const key = JSON.stringify([path, measure]);
     if (!groups.has(key)) {
@@ -210,7 +221,15 @@ export function feasibilityOf(
     }
     const { distinction, outcome } = step;
     if (distinction.kind === "all" || distinction.kind === "any") {
+      const held = identityKey(outcome === true ? distinction : negatedRule(distinction));
+      const refused = identityKey(outcome === true ? negatedRule(distinction) : distinction);
+      if (quantified.has(refused)) return { kind: "infeasible", reason: contradicts };
+      quantified.add(held);
       opaque.push(termPaths(distinction));
+      continue;
+    }
+    if (distinction.kind === "relation") {
+      relationSteps.push({ rule: distinction, outcome: outcome === true });
       continue;
     }
     if (distinction.kind !== "compare") {
@@ -220,6 +239,13 @@ export function feasibilityOf(
     const form = readableFormOf(distinction, scope);
     if (form !== undefined) {
       constrainForm(form, operator, 0);
+      continue;
+    }
+    const equality = equalityOf(distinction, operator, scope);
+    if (equality !== undefined) {
+      groupFor(equality.left, "value");
+      groupFor(equality.right, "value");
+      (equality.finite ? finiteEqualities : stringEqualities).push(equality);
       continue;
     }
     const relation = relationOf(distinction, operator, groupFor);
@@ -241,8 +267,23 @@ export function feasibilityOf(
     }
   }
 
-  const intervals = new Map<string, Interval | undefined>();
+  // Relations on a place no other step reads are settled among themselves; one
+  // whose place another step reads too is read with it as an opaque step.
   let unsettled = false;
+  // A place relations settled among themselves is still read: an opaque step
+  // on it (another relation read through a transform, an all/any, a
+  // comparison not read) leaves the way undecided.
+  const relationReads: (readonly string[])[] = [];
+  for (const verdict of relationsVerdict(relationSteps, scope)) {
+    if (verdict.kind === "infeasible") return { kind: "infeasible", reason: contradicts };
+    const shared = verdict.paths.some(path => [...groups.values()].some(group => sharesValue(path, group.path)) || opaque.flat().some(other => sharesValue(path, other)));
+    if (verdict.kind === "unknown" || shared) opaque.push(verdict.paths);
+    else relationReads.push(...verdict.paths);
+    // An unknown verdict is no settled way, searched or not: a transformed or quantified subject was never read, so an invariant of its place may refuse it.
+    if (verdict.kind === "unknown") unsettled = true;
+  }
+
+  const intervals = new Map<string, Interval | undefined>();
   for (const [key, group] of groups) {
     const settled = settle(group, scope);
     if (settled === false) {
@@ -251,7 +292,12 @@ export function feasibilityOf(
     intervals.set(key, typeof settled === "object" ? settled : undefined);
     unsettled ||= settled === undefined && group.constraints.length > 1;
   }
-  const joint = jointAssignment([...groups.values()], scope, combinations);
+  if (stringEqualities.length > 0) {
+    const verdict = equalitiesHold(stringEqualities, groups);
+    if (verdict === false) return { kind: "infeasible", reason: contradicts };
+    if (verdict === undefined) unsettled = true;
+  }
+  const joint = jointAssignment([...groups.values()], scope, combinations, undefined, finiteEqualities);
   if (joint === "none") {
     return { kind: "infeasible", reason: contradicts };
   }
@@ -323,7 +369,7 @@ export function feasibilityOf(
     }
   }
 
-  const readPaths = [...groups.values()].map(group => group.path);
+  const readPaths = [...[...groups.values()].map(group => group.path), ...relationReads];
   const overlaps = opaque.some((paths, index) =>
     paths.some(path =>
       [...readPaths, ...opaque.filter((_, other) => other !== index).flat()].some(other =>
@@ -378,10 +424,17 @@ function stepIdentity(step: Step): unknown {
     ? ["match", termData(step.distinction.on)]
     : ruleIdentity(step.distinction);
 }
+// The identity of a rule as one string, told apart by the paths it reads rather than by how it is
+// written, since the key "a.b" is written as the path a.b is.
+function identityKey(rule: Rule): string {
+  return JSON.stringify(ruleIdentity(rule), (_, value: unknown) => typeof value === "bigint" ? `${value}n` : value);
+}
+
 function ruleIdentity(rule: Rule): unknown {
   const operand = (value: unknown): unknown => isTerm(value) ? ["term", termData(value)] : ["constant", value];
   switch (rule.kind) {
     case "compare": return [rule.kind, rule.operator, operand(rule.left), operand(rule.right)];
+    case "relation": return [rule.kind, rule.relation, operand(rule.subject), operand(rule.other)];
     case "all":
     case "any": return [rule.kind, operand(rule.of), rule.element, ruleIdentity(rule.each)];
     case "not": return [rule.kind, ruleIdentity(rule.rule)];
@@ -445,7 +498,7 @@ function numericFormOf(rule: Rule, scope: AnySchema, prefix: readonly string[]):
     part =>
       part.measure === "value" &&
       !leftOutAlong(scope, part.path) &&
-      ["integer", "number"].includes(schemaAtPath(scope, part.path)?.kind ?? ""),
+      ["integer", "number"].includes(schemaThrough(scope, part.path)?.kind ?? ""),
   );
   return parts.length >= 2 && kept && typeof form.constant === "number" ? { ...form, parts } : undefined;
 }
@@ -466,7 +519,7 @@ function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | u
   }
   const form = differenceOf(rule);
   const kinds = form.parts.map(part =>
-    counts(part.measure) ? "integer" : schemaAtPath(scope, part.path)?.kind,
+    counts(part.measure) ? "integer" : schemaThrough(scope, part.path)?.kind,
   );
   // A part that may be left out is not one: the comparison holds without it.
   return typeof form.constant === "number" &&
@@ -474,6 +527,101 @@ function readableFormOf(rule: CompareRule, scope: AnySchema): LinearTermData | u
     !form.parts.some(part => leftOutAlong(scope, part.path))
     ? form
     : undefined;
+}
+
+// The rule with its negation pushed in through quantifiers and connectives, which every way of
+// reading it the analyses use agrees with: what a way reads is never absent, since a comparison
+// reading a value that may be left out is refused where it is written.
+function negatedRule(rule: Rule): Rule {
+  switch (rule.kind) {
+    case "compare": return { ...rule, operator: negated[rule.operator] };
+    case "all": return { kind: "any", of: rule.of, element: rule.element, each: negatedRule(rule.each) };
+    case "any": return { kind: "all", of: rule.of, element: rule.element, each: negatedRule(rule.each) };
+    case "and": return { kind: "or", rules: rule.rules.map(negatedRule) } as Rule;
+    case "or": return { kind: "and", rules: rule.rules.map(negatedRule) } as Rule;
+    case "not": return rule.rule;
+    case "relation": return { kind: "not", rule };
+  }
+}
+
+interface Equality {
+  readonly left: readonly string[];
+  readonly right: readonly string[];
+  readonly equal: boolean;
+  readonly finite: boolean;
+}
+
+// A comparison by `==` or `!=` of two values settled without an order: two finite positions, or
+// two strings no invariant of their own narrows.
+function equalityOf(rule: CompareRule, operator: Operator, scope: AnySchema): Equality | undefined {
+  if (operator !== "==" && operator !== "!=") return undefined;
+  if (!isTerm(rule.left) || !isTerm(rule.right)) return undefined;
+  const left = positionData(rule.left as Term<unknown>), right = positionData(rule.right as Term<unknown>);
+  if (left === undefined || right === undefined || left.measure !== "value" || right.measure !== "value") return undefined;
+  const equal = operator === "==";
+  if (finiteDomainThrough(scope, left.path) !== undefined && finiteDomainThrough(scope, right.path) !== undefined) return { left: left.path, right: right.path, equal, finite: true };
+  const free = (path: readonly string[]) => {
+    const schemas = declaredAt(scope, path);
+    return schemas.length > 0 && schemas.every(schema => schema.kind === "string" && schema.invariants.length === 0);
+  };
+  return free(left.path) && free(right.path) ? { left: left.path, right: right.path, equal, finite: false } : undefined;
+}
+
+// The schema at a path, or, inside a case of a sum field, the one schema every case declaring the
+// path gives it. A way reads such a field only where an earlier step settled the case (a read of
+// one that may be left out is refused where it is written), so it is read as present.
+function schemaThrough(scope: AnySchema, path: readonly string[]): AnySchema | undefined {
+  const direct = schemaAtPath(scope, path);
+  if (direct !== undefined) return direct;
+  const declared = declaredAt(scope, path);
+  return declared.length > 0 && declared.every(schema => schema === declared[0]) ? declared[0] : undefined;
+}
+
+// The schemas a path reaches through every case of a sum that declares its next key; none where a
+// key is declared nowhere, or the path passes an optional, whose absence no comparison settles.
+function declaredAt(schema: AnySchema, path: readonly string[]): readonly AnySchema[] {
+  const [key, ...rest] = path;
+  if (key === undefined) return [schema];
+  if (isVariantsSchema(schema)) {
+    return (Object.values(schema.variants) as ObjectSchema<ObjectShape>[])
+      .filter(variant => Object.hasOwn(variant.shape, key))
+      .flatMap(variant => declaredAt(variant.shape[key]!, rest));
+  }
+  if (schema.kind !== "object") return [];
+  const { shape } = schema as ObjectSchema<ObjectShape>;
+  return Object.hasOwn(shape, key) ? declaredAt(shape[key]!, rest) : [];
+}
+
+// Whether strings, each any value but the constants the way pins it to or keeps it from, can be
+// equal and unequal as the way asks: those it makes equal are one value, pinned to at most one
+// constant; two it makes unequal are neither one value nor pinned to one constant. A string has
+// values to spare, so nothing else can refute it. Undefined where a string is also ordered.
+function equalitiesHold(equalities: readonly Equality[], groups: ReadonlyMap<string, Group>): boolean | undefined {
+  const parent = new Map<string, string>();
+  const find = (key: string): string => { const up = parent.get(key) ?? key; if (up === key) return key; const root = find(up); parent.set(key, root); return root; };
+  const keyOf = (path: readonly string[]) => JSON.stringify([path, "value"]);
+  for (const { left, right, equal } of equalities) if (equal) parent.set(find(keyOf(left)), find(keyOf(right)));
+  const pinned = new Map<string, Set<string>>();
+  const excluded = new Map<string, Set<string>>();
+  for (const { left, right } of equalities) for (const key of [keyOf(left), keyOf(right)]) {
+    for (const constraint of groups.get(key)?.constraints ?? []) {
+      if ((constraint.operator !== "==" && constraint.operator !== "!=") || typeof constraint.bound !== "string") return undefined;
+      const into = constraint.operator === "==" ? pinned : excluded;
+      const root = find(key);
+      into.set(root, (into.get(root) ?? new Set()).add(constraint.bound.normalize("NFC")));
+    }
+  }
+  for (const [root, values] of pinned) {
+    if (values.size > 1 || [...values].some(value => excluded.get(root)?.has(value))) return false;
+  }
+  for (const { left, right, equal } of equalities) {
+    if (equal) continue;
+    const [a, b] = [find(keyOf(left)), find(keyOf(right))];
+    if (a === b) return false;
+    const [x, y] = [pinned.get(a), pinned.get(b)];
+    if (x?.size === 1 && y?.size === 1 && [...x][0] === [...y][0]) return false;
+  }
+  return true;
 }
 
 function relationOf(
@@ -501,7 +649,7 @@ function relationOf(
 // the steps of a way do not carry.
 function differenceCarrierOf(sides: readonly Group[], scope: AnySchema): Carrier | undefined {
   const kinds = sides.map(side =>
-    counts(side.measure) ? "integer" : schemaAtPath(scope, side.path)?.kind,
+    counts(side.measure) ? "integer" : schemaThrough(scope, side.path)?.kind,
   );
   if (kinds.every(kind => kind === "integer")) {
     return integerCarrier;
@@ -520,7 +668,7 @@ function settle(group: Group, scope: AnySchema): Interval | boolean | undefined 
   if (domain !== undefined) {
     return finite(domain, group.constraints);
   }
-  const schema = schemaAtPath(scope, path);
+  const schema = schemaThrough(scope, path);
   if (schema === undefined) {
     return undefined;
   }
@@ -559,7 +707,7 @@ function admittedBy(
 }
 
 function sumOwning(scope: AnySchema, path: readonly string[]): AnyVariantsSchema | undefined {
-  const owner = schemaAtPath(scope, path.slice(0, -1));
+  const owner = schemaThrough(scope, path.slice(0, -1));
   return owner !== undefined && isVariantsSchema(owner) && owner.discriminant === path[path.length - 1]
     ? owner
     : undefined;
@@ -797,6 +945,23 @@ export function witnessesOf(
   })();
 }
 
+// What finiteDomainAt answers, or, for a position inside a case of a sum field, the values it takes
+// in the one schema every case declaring it gives it.
+function finiteDomainThrough(scope: AnySchema, path: readonly string[]): readonly unknown[] | undefined {
+  const direct = finiteDomainAt(scope, path);
+  if (direct !== undefined) return direct;
+  const owners = declaredAt(scope, path.slice(0, -1));
+  const key = path[path.length - 1];
+  if (owners.length === 0 || key === undefined) return undefined;
+  if (owners.every(owner => isVariantsSchema(owner) && owner.discriminant === key)) {
+    return [...new Set(owners.flatMap(owner => (owner as AnyVariantsSchema).variantTags))];
+  }
+  const leaves = declaredAt(scope, path);
+  if (leaves.length === 0 || leaves.some(leaf => leaf !== leaves[0] || leaf.invariants.length > 0)) return undefined;
+  const leaf = leaves[0]!;
+  return leaf.kind === "boolean" ? [true, false] : leaf.kind === "enum" ? (leaf as EnumSchema<string>).values : undefined;
+}
+
 function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unknown[] | undefined {
   const discriminated = sumOwning(scope, path);
   if (discriminated !== undefined) {
@@ -809,12 +974,16 @@ function finiteDomainAt(scope: AnySchema, path: readonly string[]): readonly unk
       refusing.every(rule => holds(rule, { [discriminant]: tag })),
     );
   }
-  const schema = schemaAtPath(scope, path);
+  const schema = schemaThrough(scope, path);
   if (schema?.kind === "boolean") {
     return admittedBy([true, false], schema, scope, path);
   }
   if (schema?.kind === "enum") {
     return admittedBy((schema as EnumSchema<string>).values, schema, scope, path);
+  }
+  // A sum's discriminant read where the way settled its case is that case's tag alone.
+  if (schema?.kind === "literal") {
+    return admittedBy([(schema as unknown as { readonly value: unknown }).value], schema, scope, path);
   }
   return undefined;
 }
@@ -878,10 +1047,16 @@ function jointAssignments(
   combinations: number,
   prefer: (path: readonly string[]) => unknown = () => undefined,
   whole = false,
+  equalities: readonly Equality[] = [],
 ): Iterable<ReadonlyMap<string, unknown>> | "too many" {
-  const joint = jointInvariantsOf(scope);
+  const joint = [...jointInvariantsOf(scope), ...equalities.map((equality): JointInvariant => ({
+    prefix: [],
+    paths: [equality.left, equality.right],
+    rule: { kind: "compare", operator: equality.equal ? "==" : "!=", left: positionTerm(equality.left, "value"), right: positionTerm(equality.right, "value") } as Rule,
+  }))];
   const constrained = groups.filter(group => group.measure === "value" && finiteDomainAt(scope, group.path) !== undefined);
   const component = new Map(constrained.map(group => [JSON.stringify(group.path), group.path] as const));
+  for (const equality of equalities) for (const path of [equality.left, equality.right]) component.set(JSON.stringify(path), path);
   const involved: JointInvariant[] = [];
   for (let grew = true; grew; ) {
     grew = false;
@@ -902,9 +1077,9 @@ function jointAssignments(
   }
   const domains = positions.map(path => {
     const keeps = constrained.filter(group => JSON.stringify(group.path) === JSON.stringify(path));
-    const kept = finiteDomainAt(scope, path)!.filter(value =>
+    const kept = finiteDomainThrough(scope, path)!.filter(value =>
       keeps.every(group =>
-        group.constraints.every(item => (value === item.bound) === (item.operator === "==")),
+        group.constraints.every(item => holds({ kind: "compare", operator: item.operator, left: positionTerm([], "value"), right: item.bound } as Rule, value)),
       ),
     );
     const preferred = prefer(path);
@@ -934,8 +1109,9 @@ function jointAssignment(
   scope: AnySchema,
   combinations: number,
   prefer?: (path: readonly string[]) => unknown,
+  equalities: readonly Equality[] = [],
 ): ReadonlyMap<string, unknown> | "none" | "too many" {
-  const tried = jointAssignments(groups, scope, combinations, prefer);
+  const tried = jointAssignments(groups, scope, combinations, prefer, false, equalities);
   if (tried === "too many") {
     return "too many";
   }
@@ -1031,7 +1207,7 @@ export function keepingOrderings(scope: AnySchema, before: unknown, after: unkno
     const form = differenceOf(rule as CompareRule);
     const parts = form.parts.map(part => ({ ...part, path: [...prefix, ...part.path] }));
     const numeric = parts.every(
-      part => part.measure === "value" && ["integer", "number"].includes(schemaAtPath(scope, part.path)?.kind ?? ""),
+      part => part.measure === "value" && ["integer", "number"].includes(schemaThrough(scope, part.path)?.kind ?? ""),
     );
     return parts.length >= 2 && numeric && typeof form.constant === "number"
       ? [{ rule: rule as CompareRule, parts, constant: form.constant }]

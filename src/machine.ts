@@ -5,7 +5,7 @@ import { SpecificationError } from "./behavior.js";
 import { EvaluationLimit } from "./exact.js";
 import { childrenOf, interpret, nodeOf } from "./model.js";
 import type { Template } from "./model.js";
-import { rootTerm } from "./rule.js";
+import { copyOf, rootTerm } from "./rule.js";
 import type { TermOf } from "./rule.js";
 import type { Schema } from "./schema.js";
 
@@ -130,7 +130,89 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
     readonly fails?: (effect: { readonly name: string; readonly index: number; readonly command: Command }) => boolean;
     readonly dies?: (point: { readonly completed: number; readonly command: Command }) => boolean;
   } = {}): MachineExecution<State, Command> {
-  const maxCommands = positiveLimit(options.maxCommands, 1000, "maxCommands");
+  const run = follow(definition, state, command, positiveLimit(options.maxCommands, 1000, "maxCommands"));
+  let next = run.next();
+  while (!next.done) {
+    const point = next.value;
+    let answer: boolean | EffectAnswer;
+    try {
+      answer = point.kind === "dies"
+        ? options.dies?.({ completed: point.completed, command: point.command }) === true
+        : { failed: options.fails?.({ name: point.name, index: point.index, command: point.command }) === true };
+    } catch (error) {
+      // Thrown back into the run so it is read as any other failure of the command, with the steps already run.
+      next = run.throw(error);
+      continue;
+    }
+    next = run.next(answer);
+  }
+  return next.value;
+}
+
+// An effect as `driveMachine` hands it to `perform`: its name, its place among the command's
+// effects, the command, and the state before it and the state it is to leave.
+export interface EffectToPerform<State, Command> {
+  readonly name: string;
+  readonly index: number;
+  readonly command: Command;
+  readonly before: State;
+  readonly after: State;
+}
+
+export interface EffectFailure<Command> {
+  readonly name: string;
+  readonly index: number;
+  readonly command: Command;
+  readonly error: unknown;
+}
+
+export interface DrivenExecution<State, Command> extends MachineExecution<State, Command> {
+  // The effects whose `perform` threw or rejected, in order. Each one stopped its command.
+  readonly failures: readonly EffectFailure<Command>[];
+}
+
+// Runs the machine in production: the same transition expression `runMachine` and the checks
+// follow decides every next effect, and `perform` carries it out. An effect whose `perform`
+// returns succeeded (and may hand back commands it observed, which run after the commands the
+// transition emits, as every command does); one whose `perform` throws or rejects failed, which
+// ends its command in the effect's failure state exactly as `runMachine` with `fails` does.
+export async function driveMachine<State, Command>(definition: Machine<State, Command>, state: NoInfer<State>, command: NoInfer<Command>,
+  options: {
+    readonly perform: (effect: EffectToPerform<State, Command>) => Promise<void | { readonly commands?: readonly Command[] }> | void | { readonly commands?: readonly Command[] };
+    readonly maxCommands?: number;
+  }): Promise<DrivenExecution<State, Command>> {
+  const run = follow(definition, state, command, positiveLimit(options.maxCommands, 1000, "maxCommands"));
+  const failures: EffectFailure<Command>[] = [];
+  let next = run.next();
+  while (!next.done) {
+    const point = next.value;
+    if (point.kind === "dies") { next = run.next(false); continue; }
+    let answer: EffectAnswer;
+    try {
+      const performed = await options.perform({ name: point.name, index: point.index, command: copyOf(point.command), before: copyOf(point.before), after: copyOf(point.after) });
+      answer = { failed: false, ...(performed && performed.commands !== undefined ? { commands: performed.commands } : {}) };
+    } catch (error) {
+      failures.push({ name: point.name, index: point.index, command: point.command, error });
+      answer = { failed: true };
+    }
+    next = run.next(answer);
+  }
+  return { ...next.value, failures };
+}
+
+interface EffectAnswer {
+  readonly failed: boolean;
+  readonly commands?: readonly unknown[];
+}
+
+type Point<State, Command> =
+  | { readonly kind: "dies"; readonly completed: number; readonly command: Command }
+  | { readonly kind: "effect"; readonly name: string; readonly index: number; readonly command: Command; readonly before: State; readonly after: State };
+
+// The one loop every way of running a machine shares: it stops at each point where the process
+// may die and at each effect, and the caller answers whether it died or the effect failed.
+function* follow<State, Command>(definition: Machine<State, Command>, state: State, command: Command, maxCommands: number):
+  Generator<Point<State, Command>, MachineExecution<State, Command>, boolean | EffectAnswer> {
   let current = parse(definition.state, state, "Current state");
   const pending: unknown[] = [command];
   const steps: MachineStep<State, Command>[] = [];
@@ -146,31 +228,46 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
       let performed: PerformedEffect[] | undefined;
       let stopped = false;
       let died: { after: number } | undefined;
+      const observed: unknown[] = [];
+      const emittedBy = (): unknown[] => {
+        const emitted = output.commands === undefined ? [] : output.commands;
+        if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
+        return emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));
+      };
+      let emittedCommands: unknown[] = [];
       if (Object.hasOwn(output, "effects")) {
+        // The whole transition is read against the schemas before the first effect is performed, so
+        // a refused one never leaves an effect done behind a command or a later effect that fails.
+        emittedCommands = emittedBy();
         if (!Array.isArray(output.effects)) throw new SpecificationError("Effects must be an array");
         next = current;
         performed = [];
-        const declaredEffects = output.effects as unknown[];
-        for (const [index, item] of declaredEffects.entries()) {
-          if (options.dies?.({ completed: index, command: input })) { died = { after: index }; stopped = true; break; }
+        const declaredEffects = (output.effects as unknown[]).map(item => {
           const declared = item as { name?: unknown; state?: unknown; failure?: unknown } | null;
           if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
-          if (options.fails?.({ name: declared.name, index, command: input })) {
+          return { name: declared.name, after: parse(definition.state, declared.state, `Effect ${declared.name} state`),
+            ...(Object.hasOwn(declared, "failure") ? { failure: parse(definition.state, declared.failure, `Effect ${declared.name} failure state`) } : {}) };
+        });
+        for (const [index, declared] of declaredEffects.entries()) {
+          if ((yield { kind: "dies", completed: index, command: input }) === true) { died = { after: index }; stopped = true; break; }
+          const answer = (yield { kind: "effect", name: declared.name, index, command: input, before: next, after: declared.after }) as EffectAnswer;
+          if (answer.failed) {
             performed.push({ name: declared.name, outcome: "failed" });
-            if (Object.hasOwn(declared, "failure")) next = parse(definition.state, declared.failure, `Effect ${declared.name} failure state`);
+            if (Object.hasOwn(declared, "failure")) next = declared.failure as State;
             stopped = true;
             break;
           }
-          next = parse(definition.state, declared.state, `Effect ${declared.name} state`);
+          next = declared.after;
           performed.push({ name: declared.name, outcome: "succeeded" });
+          if (answer.commands !== undefined) observed.push(...answer.commands);
         }
-        if (!stopped && declaredEffects.length > 0 && options.dies?.({ completed: declaredEffects.length, command: input })) { died = { after: declaredEffects.length }; stopped = true; }
+        if (!stopped && declaredEffects.length > 0 && (yield { kind: "dies", completed: declaredEffects.length, command: input }) === true) { died = { after: declaredEffects.length }; stopped = true; }
       } else next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
       steps.push({ command: input, before: current, after: next, ...(performed === undefined ? {} : { performed }), ...(died === undefined ? {} : { died }) });
       if (died !== undefined) pending.length = 0;
-      const emitted = output.commands === undefined || stopped ? [] : output.commands;
-      if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
-      const validated = emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));
+      if (performed === undefined) emittedCommands = emittedBy();
+      const observedCommands = (died === undefined ? observed : []).map((value: unknown) => parse(definition.command, value, "Emitted command"));
+      const validated = [...(stopped ? [] : emittedCommands), ...observedCommands];
       current = next;
       pending.push(...validated);
     } catch (error) {

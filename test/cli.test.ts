@@ -333,13 +333,39 @@ describe("chisel check and generate with the limit of the ways listed", () => {
   it("leaves a decision with more ways than the limit unmeasured in check", async () => {
     const result = await run(["check", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "3"]);
 
-    expect(stdoutOf(result)).toMatch(/^  道筋 +計測不能 \(not measured\); 読めないdecision: 多い$/m);
+    expect(stdoutOf(result)).toMatch(/^  道筋 +計測しない \(not measured, to be changed first\): 多い（先に変更する）$/m);
+  });
+
+  it("says what to change in the model before the report", async () => {
+    const result = await run(["check", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "5"]);
+    const stdout = stdoutOf(result);
+
+    expect(stdout).toMatch(/^計測の前に:\n  ↻ 多い: 道筋が13本あり、上限の5本を超えるため計測しない。/);
+    expect(stdout).toContain("guard 1（4本）、guard 2（4本）をそれぞれbehaviorにしてcomposeでつなげば、各段は上限の内で計測される。");
+    expect(stdout.indexOf("計測の前に:")).toBeLessThan(stdout.indexOf("多さ (数える)"));
   });
 
   it("names such a decision instead of composing its ways in generate", async () => {
     const result = await run(["generate", fixture("test/fixtures/many-ways.ts"), "--feasibility-ways", "3"]);
 
     expect(stdoutOf(result)).toMatch(/^\/\/ 組み立てられなかった道筋: 多い: 道筋が上限の3本を超えるため組み立てない$/m);
+  });
+});
+
+describe("chisel generate with rows suggested from a called behavior", () => {
+  it("counts the suggested rows apart from the rows owed", async () => {
+    const result = await run(["generate", fixture("test/fixtures/suggested.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/^\/\/ 義務のある行 0件、提案する行 1件（義務はない）$/m);
+    expect(stdoutOf(result)).toContain("在庫()の記録行「商品-Bは0個」の入力を$.商品IDで尋ねる");
+  });
+});
+
+describe("chisel check with a step a run stops at under a stand-in", () => {
+  it("prints the stand-in the run stopped with beside its input", async () => {
+    const result = await run(["check", fixture("test/fixtures/stops-with.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/実行が止まりうる: 平均を出す: quotient\(\$\.合計, deps\.人数\) — 入力 \{(?=[^}]*種別: "入力済み")(?=[^}]*合計: 0)[^}]*\}、with \{(?=[^}]*人数: 0)[^}]*\}/s);
   });
 });
 
