@@ -71,7 +71,7 @@ export function describeStep(value: unknown): string {
   }
   const node = nodeOf(value);
   if (node?.kind === "operation") return `${node.operator}(${describeStep(node.left)}, ${describeStep(node.right)})`;
-  if (node?.kind === "temporal") return `${node.operator}(${describeStep(node.left)}, ${describeStep(node.right)}, ${JSON.stringify(node.unit)})`;
+  if (node?.kind === "temporal") return `${node.operator}(${describeStep(node.left)}, ${describeStep(node.right)}, ${JSON.stringify(node.unit)}${node.overflow === "reject" ? ", reject" : ""})`;
   if (node?.kind === "construct") return `construct(${describeStep(node.value)})`;
   if (node?.kind === "call") return `${dependencyName(node.dependency)}()`;
   if (node !== undefined) return node.kind;

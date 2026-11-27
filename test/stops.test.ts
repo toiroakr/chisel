@@ -46,6 +46,20 @@ describe("a stop is said of the step the run stops at", () => {
     expect(report.stops.map(stop => stop.at)).toStrictEqual(['plus($.d, $.n, "days")', 'plus($.d, $.n, "years")']);
   });
 
+  it("tells two temporal steps over the same operands apart by the overflow they reject", async () => {
+    const 月 = c.behavior("月", {
+      input: c.variants("kind", { request: c.object({ d: c.date(), n: c.int().min(0).max(2) }) }),
+      result: c.object({ a: c.date(), b: c.date() }),
+      effects: emptyEffects,
+    });
+    const 進める = c.implement(月, {
+      cases: { request: c.model("進める", (input: any) => ({ result: { a: c.plus(input.d, input.n, "months"), b: c.plus(input.d, input.n, "months", { overflow: "reject" }) }, effects: [] })) },
+    });
+    const report = await c.check(c.spec("月", { examples: c.examples(月, {}), implementation: 進める }));
+
+    expect(report.stops.map(stop => stop.at)).toStrictEqual(['plus($.d, $.n, "months")', 'plus($.d, $.n, "months", reject)']);
+  });
+
   it("shows a step never stops where every valid input was run", async () => {
     const 平均 = c.behavior("平均", {
       input: c.variants("kind", { request: c.object({ total: c.int().min(0).max(10), count: c.int().min(1).max(3) }) }),

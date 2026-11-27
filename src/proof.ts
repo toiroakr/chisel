@@ -168,9 +168,10 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
     };
     const remaining = budget.remaining;
     const factored = partedProof(written, definition, scope, provesPaths);
-    // The paths a factored proof that fell back spent are not the full proof's to lose.
-    if (factored === undefined) budget.remaining = remaining;
-    const proven = factored ?? provesPaths(written, { answer: definition.result, clauses: definition.ensures }, scope);
+    // The paths a factored proof that fell back spent are not the full proof's to lose, nor are those it ran out of: the full proof may fit within them.
+    const exhausted = factored === false && budget.remaining < 0;
+    if (factored === undefined || exhausted) budget.remaining = remaining;
+    const proven = (exhausted ? undefined : factored) ?? provesPaths(written, { answer: definition.result, clauses: definition.ensures }, scope);
     decisions.push({ ...base, status: proven ? "verified" : "undetermined", reason: proven ? "Every construction and postcondition follows from the input, path conditions, and dependency contracts" : budget.remaining < 0 ? `Proof exceeds ${ways} paths` : "Universal construction safety could not be proved from the available contracts and conditions" });
   }
   return summarize(decisions);

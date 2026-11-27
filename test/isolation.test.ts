@@ -30,6 +30,7 @@ it("says the phase at the default interval when every is zero, negative or NaN, 
     const lines: string[] = [];
     const result = await runIsolated(["check", fileURLToPath(new URL("../examples/verified.spec.ts", import.meta.url))], 30000, { after: 0, every, write: line => lines.push(line) });
     expect(result.exitCode).toBe(0);
+    expect(lines.length).toBeGreaterThan(0);
     expect(new Set(lines).size).toBe(lines.length);
   }
 });

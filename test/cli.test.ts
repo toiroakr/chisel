@@ -365,7 +365,7 @@ describe("chisel check with a step a run stops at under a stand-in", () => {
   it("prints the stand-in the run stopped with beside its input", async () => {
     const result = await run(["check", fixture("test/fixtures/stops-with.ts")]);
 
-    expect(stdoutOf(result)).toMatch(/実行が止まりうる: 平均を出す: quotient\(\$\.合計, deps\.人数\) — 入力 \{[^}]*\}、with \{[^}]*人数: 0/s);
+    expect(stdoutOf(result)).toMatch(/実行が止まりうる: 平均を出す: quotient\(\$\.合計, deps\.人数\) — 入力 \{(?=[^}]*種別: "入力済み")(?=[^}]*合計: 0)[^}]*\}、with \{(?=[^}]*人数: 0)[^}]*\}/s);
   });
 });
 

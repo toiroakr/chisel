@@ -90,6 +90,18 @@ describe("the records a domain holds", () => {
     expect(values.every(value => c.record(c.int().min(0).max(1)).min(2).parse(value).success || Object.keys(value as object).length < 2)).toBe(true);
   });
 
+  it("keeps the records of a child whose first value is undefined, as an optional's is", () => {
+    const { values } = domainOf(c.record(c.boolean().optional()).min(1), 50);
+    expect(values.some(value => (value as Record<string, unknown>).key === false)).toBe(true);
+    expect(values.some(value => (value as Record<string, unknown>).key === true)).toBe(true);
+  });
+
+  it("holds a record of the length an upper bound allows, though no rule writes its keys", () => {
+    const { values } = domainOf(c.record(c.int().min(0).max(1)).max(2), 50);
+    expect(values.some(value => Object.keys(value as object).length === 2)).toBe(true);
+    expect(values.every(value => Object.keys(value as object).length <= 2)).toBe(true);
+  });
+
   it("builds no more records than its limit, and still names each written key and the record of every one", () => {
     const keys = Array.from({ length: 1000 }, (_, index) => `k${index}`);
     const { values } = domainOf(c.record(c.int().min(0).max(4095)), 4096, keys);

@@ -135,6 +135,26 @@ describe("the values that stand for a class of relations", () => {
     expect(report.partitions.filter(partition => partition.kind === "divided").map(partition => partition.kind === "divided" ? [partition.missing, partition.excluded] : [])).toStrictEqual([[['¬startsWith("B")'], ['startsWith("B")']]]);
   });
 
+  it("takes the invariant the place's own schema writes into account, as an enclosing object's", async () => {
+    const definition = 値({ s: c.string().refine(v => (v as never as c.TermOf<string>).$startsWith("A")) });
+    const implementation = guarded(definition, ((v: c.TermOf<{ s: string }>) => v.s.$startsWith("B")) as never);
+    const report = await c.check(c.spec("値", { examples: c.examples(definition as never, {}), implementation: implementation as never }));
+    expect(report.partitions.filter(partition => partition.kind === "divided").map(partition => partition.kind === "divided" ? [partition.missing, partition.excluded] : [])).toStrictEqual([[['¬startsWith("B")'], ['startsWith("B")']]]);
+  });
+
+  it("settles a class that is one value by the value once parsed, NFC and all", async () => {
+    const definition = 値({ s: c.string() });
+    const implementation = c.implement(definition as never, {
+      cases: { request: c.action("判定", {
+        guards: ((v: c.TermOf<{ s: string }>) => [v.s.$eq("e\u0301").$else(() => ({ result: false, effects: [] })), v.s.$startsWith("é").$else(() => ({ result: false, effects: [] }))]) as never,
+        run: () => ({ result: true, effects: [] }),
+      }) },
+    } as never);
+    const report = await c.check(c.spec("値", { examples: c.examples(definition as never, {}), implementation: implementation as never }));
+    const divided = report.partitions.flatMap(partition => partition.kind === "divided" ? [partition] : []);
+    expect(divided.flatMap(partition => partition.excluded).filter(name => name.includes("startsWith") && !name.includes("¬"))).toStrictEqual([]);
+  });
+
   it("stands for a class with the value a row holds once parsed, NFC and all", async () => {
     const definition = 値({ tags: c.array(c.string()) });
     const implementation = guarded(definition, ((v: c.TermOf<{ tags: string[] }>) => v.tags.$includes("é")) as never);

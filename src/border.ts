@@ -90,7 +90,10 @@ export function decimalCarrier(scale: number | undefined): Carrier {
       },
       between: (low, high) => {
         try {
-          return decimalOf(fractionOf(asDecimal(low)).plus(fractionOf(asDecimal(high))).dividedBy(new Rational(2n)));
+          const middle = decimalOf(fractionOf(asDecimal(low)).plus(fractionOf(asDecimal(high))).dividedBy(new Rational(2n)));
+          // Half of two bounds may need a digit more than there is room for, which no later run could read.
+          fractionOf(asDecimal(middle));
+          return middle;
         } catch (error) {
           if (isOutOfRoom(error)) return undefined;
           throw error;

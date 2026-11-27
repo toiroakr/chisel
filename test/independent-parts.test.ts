@@ -164,6 +164,19 @@ describe("independent parts of a model", () => {
       expect([decision.status, decision.reason]).toStrictEqual(["verified", expect.any(String)]);
     });
   });
+  describe("the proof of parts that share a choice", () => {
+    it("falls back to the proof over every way together when the factored proof ran out of paths that proof fits within", () => {
+      const Request = c.variants("kind", { request: c.object({ x: c.string() }) });
+      const behavior = c.behavior("agree", {
+        input: Request,
+        result: c.object({ p: c.int(), q: c.int() }),
+        effects: emptyEffects,
+        ensures: (clause: any) => [clause.always("the two agree", (input: any, value: any) => value.p.$eq(value.q).$or(input.x.$eq("none")))],
+      } as never);
+      const implementation = c.implement(behavior, { cases: { request: c.model("agree", (input: any) => ({ result: { p: c.choose(input.x.$eq("A"), 1, 0), q: c.choose(input.x.$eq("A"), 1, 0) }, effects: [] })) } } as never);
+      expect(c.verify(implementation, { ways: 2 }).decisions[0]!.status).toBe("verified");
+    });
+  });
   describe("what the steps of a way settle of a value", () => {
     const compare = (operator: "==" | "!=", right: unknown) => ({ distinction: { kind: "compare", operator, left: positionTerm(["x"], "value"), right } as Rule as never, outcome: true });
 

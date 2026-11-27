@@ -6,9 +6,9 @@
 // neither. Strings are read as having no greatest length: the only length a
 // witness is held to is one the place's schema declares.
 import type { Relation, RelationRule, Term } from "./rule.js";
-import { holds, isTerm, positionData, relationHolds, sameElement } from "./rule.js";
+import { conjuncts, holds, isTerm, positionData, relationHolds, sameElement } from "./rule.js";
 import type { Rule } from "./rule.js";
-import type { AnySchema } from "./schema.js";
+import type { AnySchema, OptionalSchema } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
 import { inheritedAt } from "./guard-scope.js";
 import { integralBounds } from "./domain.js";
@@ -69,9 +69,10 @@ export function relationsVerdict(steps: readonly RelationStep[], scope: AnySchem
     if (kinds.size > 1) { verdicts.push({ kind: "unknown", paths: [path] }); continue; }
     const kind = [...kinds][0]!;
     const inherited = inheritedAt(scope, path);
-    if (refuted(kind, [...heldOf(inherited), ...group])) { verdicts.push({ kind: "infeasible" }); continue; }
+    const held = heldAt(schema, inherited);
+    if (refuted(kind, [...held, ...group])) { verdicts.push({ kind: "infeasible" }); continue; }
     const holdsAll = (value: unknown) => group.every(step => relationHolds(step.rule.relation, value, step.rule.other) === step.outcome);
-    const witness = witnessesOf(kind, [...heldOf(inherited), ...group], schema).map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && holdsAll(found.value));
+    const witness = witnessesOf(kind, [...held, ...group], schema).map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && holdsAll(found.value));
     verdicts.push(witness === undefined ? { kind: "unknown", paths: [path], searched: true } : { kind: "feasible", paths: [path] });
   }
   return verdicts;
@@ -88,6 +89,12 @@ function heldOf(inherited: readonly Rule[]): readonly RelationStep[] {
     const position = positionData(rule.subject as Term<unknown>);
     return position !== undefined && position.measure === "value" && position.path.length === 0 ? [{ rule, outcome: true }] : [];
   });
+}
+
+// What every value of the place holds of itself: the relations an enclosing object's invariants and the place's own schema write on it.
+function heldAt(schema: AnySchema | undefined, inherited: readonly Rule[]): readonly RelationStep[] {
+  const own = schema === undefined ? [] : [...schema.invariants, ...(schema.kind === "optional" ? (schema as OptionalSchema<unknown>).schema.invariants : [])].flatMap(conjuncts);
+  return heldOf([...inherited, ...own]);
 }
 
 // Shown by the laws of the relations alone, never by a search coming up empty.
@@ -217,18 +224,21 @@ export function relationClasses(
   } else {
     for (const rule of distinct) combos.push([{ rule, outcome: true }], [{ rule, outcome: false }]);
   }
+  const held = heldAt(schema, inherited);
   const universal: RelationClass = { name: "", witness: undefined, contains: () => true };
   const classes: RelationClass[] = [];
   const excluded: string[] = [];
   for (const outer of base.length === 0 ? [universal] : base) {
+    // The value a row holds is the one the schema parses the written one to, NFC and all.
+    const settledValue = outer.only === true ? taken(outer.witness, schema, [])?.value ?? outer.witness : outer.witness;
     for (const combo of combos) {
       const name = [outer.name, combo.map(item => label(item.rule, item.outcome)).join(" ∧ ")].filter(part => part !== "").join(" ∧ ");
       const steps = combo.map(item => ({ rule: item.rule, outcome: item.outcome }));
       // A class that is one value is settled by that value: no law is needed to say what it holds of each relation.
-      const settledAgainst = outer.only === true && !combo.every(item => relationHolds(item.rule.relation, outer.witness, item.rule.other) === item.outcome);
-      if (settledAgainst || refuted(kind, [...heldOf(inherited), ...steps])) { excluded.push(name); continue; }
+      const settledAgainst = outer.only === true && !combo.every(item => relationHolds(item.rule.relation, settledValue, item.rule.other) === item.outcome);
+      if (settledAgainst || refuted(kind, [...held, ...steps])) { excluded.push(name); continue; }
       const contains = (value: unknown) => outer.contains(value) && combo.every(item => relationHolds(item.rule.relation, value, item.rule.other) === item.outcome);
-      const candidates = [...(outer.witness === undefined ? [] : [outer.witness]), ...witnessesOf(kind, [...heldOf(inherited), ...steps], schema)];
+      const candidates = [...(outer.witness === undefined ? [] : [outer.witness]), ...witnessesOf(kind, [...held, ...steps], schema)];
       const witness = candidates.map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && contains(found.value))?.value;
       classes.push({ name, witness, contains, ...(outer.only === true ? { only: true as const } : {}) });
     }

@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
+import { decimalCarrier } from "../src/border.js";
 
 const emptyEffects = c.variants("kind", {});
 
@@ -220,5 +221,26 @@ describe("the classes a guard divides a decimal of any scale into", () => {
     const { rows } = c.generate(c.examples(狭い, {}), 判定);
     const written = rows.filter(row => row.name.includes("v")).map(row => String((row.given as { v: Decimal }).v));
     expect(written).toContain("0.10005");
+  });
+});
+
+describe("a decimal of a scale past the room exact arithmetic has", () => {
+  const 桁 = c.behavior("桁", {
+    input: c.variants("kind", { request: c.object({ v: c.decimal(10001).min(new Decimal(0)).max(new Decimal(1)) }) }),
+    result: c.decimal(),
+    effects: emptyEffects,
+  });
+  const 足す = c.implement(桁, {
+    cases: { request: c.model("足す", input => ({ result: c.arithmetic("add", input.v, new Decimal(1)), effects: [] })) },
+  });
+
+  it("is not said never to stop, since a value it admits is out of room where the range says it completes", async () => {
+    const report = await c.check(c.spec("桁", { examples: c.examples(桁, {}), implementation: 足す }));
+    expect(report.stops.map(stop => stop.status)).not.toContain("never stops");
+  });
+
+  it("names no midpoint of two bounds whose middle is out of room, as it names no value past them", () => {
+    expect(decimalCarrier(undefined).between?.(new Decimal(0), new Decimal("1e-10000"))).toBeUndefined();
+    expect(String(decimalCarrier(undefined).between?.(new Decimal(0), new Decimal("1e-10")))).toBe("5e-11");
   });
 });

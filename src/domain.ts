@@ -87,10 +87,11 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
         const bounds = integralBounds(current, "length");
         // A record held to no entry is the empty record alone, however many keys were written.
         if (bounds.upper === 0) return finish([{}], true);
-        // A record held to at least n entries needs n keys, which the rules may not write.
-        for (let index = 2; keys.length < Math.min(bounds.lower, limit); index++) if (!keys.includes(`key${index}`)) keys.push(`key${index}`);
+        // A record held to at least n and at most m entries needs as many keys as the longer of them asks, which the rules may not write.
+        for (let index = 2; keys.length < Math.min(Math.max(bounds.lower, bounds.upper ?? 0), limit); index++) if (!keys.includes(`key${index}`)) keys.push(`key${index}`);
         const values: unknown[] = [{}];
-        if (first !== undefined) {
+        // An optional's first value is undefined, a value of its own: only a child with none leaves no record to make.
+        if (child.values.length > 0) {
           // The first value of each key and the records the length bounds ask for come first, within the limit, so that the many singletons made of the other values never crowd them out.
           for (const key of keys) values.push({ [key]: first });
           for (const size of new Set([bounds.lower, bounds.upper, keys.length])) {

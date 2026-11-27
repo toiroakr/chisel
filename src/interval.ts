@@ -146,6 +146,8 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     }
     if (!low || !high || low.comparedTo(high) > 0) return undefined;
     if (timeline) return { low, high, integral, kind: schema.kind as "date" | "datetime" | "instant" };
+    // A value of a scale past the room exact arithmetic has is one a run may be out of room at, whatever the range says.
+    if (schema.kind === "decimal" && ((schema as DecimalSchema).scale ?? 0) > 10000) return undefined;
     return { low, high, integral, scale: schema.kind === "decimal" ? (schema as DecimalSchema).scale : undefined, kind: schema.kind === "int64" ? "bigint" : schema.kind === "rational" ? "rational" : schema.kind === "decimal" ? "decimal" : "number" };
   }
   const node = nodeOf(value);
