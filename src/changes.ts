@@ -164,12 +164,12 @@ function treeOf(expression: unknown): TreeNode[] {
     const followed = new Set(pathChildren(template));
     if (node?.kind === "choose") {
       const { holds, fails } = outcomeCounts(node.condition as Rule);
-      entry.children.push(build(node.yes, paths[0]![1], id, entry.root), build(node.no, paths[1]![1], id, entry.root));
+      entry.children.push(build(node.yes, paths[0]![1], id, entry.root, undefined, false), build(node.no, paths[1]![1], id, entry.root, undefined, false));
       entry.weights.push(holds, fails);
     } else {
       for (const [child, label] of paths) if (followed.has(child)) entry.children.push(build(child, label, id, entry.root, undefined, passes));
     }
-    if (body !== undefined) entry.bodies.push(build(body[0], body[1], undefined, undefined, id));
+    if (body !== undefined) entry.bodies.push(build(body[0], body[1], undefined, undefined, id, false));
     entry.size = 1 + entry.children.reduce((sum, child) => sum + nodes[child]!.size, 0) + entry.bodies.reduce((sum, child) => sum + nodes[child]!.size, 0);
     return id;
   };

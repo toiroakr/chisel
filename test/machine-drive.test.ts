@@ -63,4 +63,22 @@ describe("driveMachine", () => {
       perform: () => ({ commands: [{ type: "unknown" } as never] }),
     })).rejects.toThrow(c.SpecificationError);
   });
+  it("performs nothing when the transition declares a later effect or an emitted command the schemas refuse", async () => {
+    const refused = (update: () => unknown) => c.machine("refused", { state: State, command: Command, initial: [{ step: "start", name: "" }], update: update as never });
+    const performed: string[] = [];
+    const perform = (effect: { name: string }) => { performed.push(effect.name); };
+    const laterEffect = refused(() => ({ effects: [c.effect("charge", { step: "reserved", name: "" }), c.effect("bad", { step: "nowhere", name: "" })] }));
+    await expect(c.driveMachine(laterEffect, { step: "start", name: "" }, { type: "ship" }, { perform })).rejects.toThrow(c.SpecificationError);
+    const emitted = refused(() => ({ effects: [c.effect("charge", { step: "reserved", name: "" })], commands: [{ type: "unknown" }] }));
+    await expect(c.driveMachine(emitted, { step: "start", name: "" }, { type: "ship" }, { perform })).rejects.toThrow(c.SpecificationError);
+    expect(performed).toStrictEqual([]);
+  });
+
+  it("hands perform copies, so changing them reaches neither the machine's state nor its recorded steps", async () => {
+    const result = await c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
+      perform: effect => { effect.before.name = "TAMPERED"; effect.after.name = "TAMPERED"; },
+    });
+    expect(result.state).toStrictEqual({ step: "shipped", name: "A-100" });
+    expect(result.steps.map(step => step.after.name)).toStrictEqual(["A-100", "A-100"]);
+  });
 });

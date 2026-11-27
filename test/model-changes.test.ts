@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 import { reportDocument } from "../src/index.js";
+import { eachWayOf } from "../src/ways.js";
 import { validate } from "./support/json-schema.js";
 import schema from "../schema/report.schema.json" with { type: "json" };
 
@@ -204,5 +205,32 @@ describe("counting the ways without listing them", () => {
     });
     const [change] = c.modelChanges(c.spec("段", { examples: c.examples(段, {}), implementation }), { feasibility: { ways: 4 } });
     expect(change?.parts.map(part => [part.at, part.ways])).toStrictEqual([["guard 1", "4"], ["match", "3"]]);
+  });
+});
+
+describe("ways inside an independent part", () => {
+  const 入れ子 = c.behavior("入れ子", {
+    input: c.variants("kind", { request: c.object({ a: c.int(), b: c.int(), d: c.int(), e: c.int(), f: c.int() }) }),
+    result: c.object({ p: c.object({ x: c.int(), y: c.int(), z: c.int() }), q: c.int() }),
+    effects: emptyEffects,
+  });
+  const 入れ子にする = c.implement(入れ子, {
+    cases: {
+      request: c.model("入れ子にする", input => ({
+        result: {
+          p: c.choose(input.a.$gt(0),
+            { x: c.choose(input.b.$gt(0), 1, 0), y: c.choose(input.d.$gt(0), 1, 0), z: c.choose(input.e.$gt(0), 1, 0) },
+            { x: 0, y: 0, z: 0 }) as never,
+          q: c.choose(input.f.$gt(0), 1, 0),
+        },
+        effects: [],
+      })),
+    },
+  });
+
+  it("multiplies the fields of an object a choice answers, as the ways are listed, so a model past the limit is told what to change", () => {
+    const specification = c.spec("入れ子", { examples: c.examples(入れ子, {}), implementation: 入れ子にする });
+    expect([...eachWayOf(入れ子にする.cases.request as never)].length).toBe(11);
+    expect(c.modelChanges(specification, { feasibility: { ways: 10 } }).map(change => change.kind)).toStrictEqual(["behavior"]);
   });
 });

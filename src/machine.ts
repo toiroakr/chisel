@@ -5,7 +5,7 @@ import { SpecificationError } from "./behavior.js";
 import { EvaluationLimit } from "./exact.js";
 import { childrenOf, interpret, nodeOf } from "./model.js";
 import type { Template } from "./model.js";
-import { rootTerm } from "./rule.js";
+import { copyOf, rootTerm } from "./rule.js";
 import type { TermOf } from "./rule.js";
 import type { Schema } from "./schema.js";
 
@@ -181,7 +181,7 @@ export async function driveMachine<State, Command>(definition: Machine<State, Co
     if (point.kind === "dies") { next = run.next(false); continue; }
     let answer: EffectAnswer;
     try {
-      const performed = await options.perform({ name: point.name, index: point.index, command: point.command, before: point.before, after: point.after });
+      const performed = await options.perform({ name: point.name, index: point.index, command: point.command, before: copyOf(point.before), after: copyOf(point.after) });
       answer = { failed: false, ...(performed && performed.commands !== undefined ? { commands: performed.commands } : {}) };
     } catch (error) {
       failures.push({ name: point.name, index: point.index, command: point.command, error });
@@ -221,24 +221,35 @@ function* follow<State, Command>(definition: Machine<State, Command>, state: Sta
       let stopped = false;
       let died: { after: number } | undefined;
       const observed: unknown[] = [];
+      const emittedBy = (): unknown[] => {
+        const emitted = output.commands === undefined ? [] : output.commands;
+        if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
+        return emitted.map((value: unknown) => parse(definition.command, value, "Emitted command"));
+      };
+      let emittedCommands: unknown[] = [];
       if (Object.hasOwn(output, "effects")) {
+        // The whole transition is read against the schemas before the first effect is performed, so
+        // a refused one never leaves an effect done behind a command or a later effect that fails.
+        emittedCommands = emittedBy();
         if (!Array.isArray(output.effects)) throw new SpecificationError("Effects must be an array");
         next = current;
         performed = [];
-        const declaredEffects = output.effects as unknown[];
-        for (const [index, item] of declaredEffects.entries()) {
-          if ((yield { kind: "dies", completed: index, command: input }) === true) { died = { after: index }; stopped = true; break; }
+        const declaredEffects = (output.effects as unknown[]).map(item => {
           const declared = item as { name?: unknown; state?: unknown; failure?: unknown } | null;
           if (declared === null || typeof declared !== "object" || typeof declared.name !== "string") throw new SpecificationError("An effect must name itself");
-          const after = parse(definition.state, declared.state, `Effect ${declared.name} state`);
-          const answer = (yield { kind: "effect", name: declared.name, index, command: input, before: next, after }) as EffectAnswer;
+          return { name: declared.name, after: parse(definition.state, declared.state, `Effect ${declared.name} state`),
+            ...(Object.hasOwn(declared, "failure") ? { failure: parse(definition.state, declared.failure, `Effect ${declared.name} failure state`) } : {}) };
+        });
+        for (const [index, declared] of declaredEffects.entries()) {
+          if ((yield { kind: "dies", completed: index, command: input }) === true) { died = { after: index }; stopped = true; break; }
+          const answer = (yield { kind: "effect", name: declared.name, index, command: input, before: next, after: declared.after }) as EffectAnswer;
           if (answer.failed) {
             performed.push({ name: declared.name, outcome: "failed" });
-            if (Object.hasOwn(declared, "failure")) next = parse(definition.state, declared.failure, `Effect ${declared.name} failure state`);
+            if ("failure" in declared) next = declared.failure as State;
             stopped = true;
             break;
           }
-          next = after;
+          next = declared.after;
           performed.push({ name: declared.name, outcome: "succeeded" });
           if (answer.commands !== undefined) observed.push(...answer.commands);
         }
@@ -246,9 +257,9 @@ function* follow<State, Command>(definition: Machine<State, Command>, state: Sta
       } else next = parse(definition.state, output.state, `Command ${steps.length + 1} next state`);
       steps.push({ command: input, before: current, after: next, ...(performed === undefined ? {} : { performed }), ...(died === undefined ? {} : { died }) });
       if (died !== undefined) pending.length = 0;
-      const emitted = output.commands === undefined || stopped ? [] : output.commands;
-      if (!Array.isArray(emitted)) throw new SpecificationError("Emitted commands must be an array");
-      const validated = [...emitted, ...(died === undefined ? observed : [])].map((value: unknown) => parse(definition.command, value, "Emitted command"));
+      if (performed === undefined) emittedCommands = emittedBy();
+      const observedCommands = (died === undefined ? observed : []).map((value: unknown) => parse(definition.command, value, "Emitted command"));
+      const validated = [...(stopped ? [] : emittedCommands), ...observedCommands];
       current = next;
       pending.push(...validated);
     } catch (error) {

@@ -14,9 +14,11 @@ describe("TLA+ translation of executable machines", () => {
     expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
   });
   it("represents null apart from an empty object", async () => {
-    const State = c.object({ value: c.literal(null), empty: c.object({}) });
-    const machine = c.machine("null", { state: State, command: c.boolean(), initial: [{ value: null, empty: {} }], update: state => ({ state }) });
-    expect(await c.checkMachineTla(c.specifyMachine(machine))).toMatchObject({ status: "held" });
+    const State = c.object({ nothing: c.literal(null), empty: c.object({}) });
+    const machine = c.machine("null", { state: State, command: c.boolean(), initial: [{ nothing: null, empty: {} }], update: state => ({ state }) });
+    const spec = c.specifyMachine(machine, { invariants: [c.invariant<c.Infer<typeof State>>("apart", state => (state.nothing as never as { $ne(other: unknown): never }).$ne(state.empty))] });
+    expect(c.checkMachine(spec)).toMatchObject({ status: "held" });
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "held" });
   });
   it("maps an array nested inside the state", async () => {
     const Item = c.boolean();
@@ -35,9 +37,12 @@ describe("TLA+ translation of executable machines", () => {
     expect(c.checkMachine(spec)).toMatchObject({ status: "broken" });
     expect(await c.checkMachineTla(spec)).toMatchObject({ status: "broken" });
   });
-  it("represents an empty object apart from an empty array", async () => {
-    const machine = c.machine("empty", { state: c.object({}), command: c.boolean(), initial: [{}], update: state => ({ state }) });
-    expect(await c.checkMachineTla(c.specifyMachine(machine))).toMatchObject({ status: "held" });
+  it("writes an empty object as a set holding the empty set and an empty array as a sequence", async () => {
+    const State = c.object({ empty: c.object({}), none: c.array(c.boolean()).max(0) });
+    const machine = c.machine("empty", { state: State, command: c.boolean(), initial: [{ empty: {}, none: [] }], update: state => ({ state }) });
+    const spec = c.specifyMachine(machine);
+    expect(c.toTla(spec).source).toContain("[empty |-> {{}}, none |-> <<>>]");
+    expect(await c.checkMachineTla(spec)).toMatchObject({ status: "held" });
   });
   it("reads an array's length as the runtime does", async () => {
     const State = c.object({ items: c.array(c.boolean()).max(1), count: c.int().min(0).max(1) });
