@@ -134,9 +134,17 @@ export function runMachine<State, Command>(definition: Machine<State, Command>, 
   let next = run.next();
   while (!next.done) {
     const point = next.value;
-    next = point.kind === "dies"
-      ? run.next(options.dies?.({ completed: point.completed, command: point.command }) === true)
-      : run.next({ failed: options.fails?.({ name: point.name, index: point.index, command: point.command }) === true });
+    let answer: boolean | EffectAnswer;
+    try {
+      answer = point.kind === "dies"
+        ? options.dies?.({ completed: point.completed, command: point.command }) === true
+        : { failed: options.fails?.({ name: point.name, index: point.index, command: point.command }) === true };
+    } catch (error) {
+      // Thrown back into the run so it is read as any other failure of the command, with the steps already run.
+      next = run.throw(error);
+      continue;
+    }
+    next = run.next(answer);
   }
   return next.value;
 }

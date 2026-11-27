@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
+import { MachineFailure } from "../src/machine.js";
 
 const Step = c.enum(["start", "reserved", "shipped", "failed"] as const);
 const State = c.object({ step: Step, name: c.string() });
@@ -80,5 +81,21 @@ describe("driveMachine", () => {
     });
     expect(result.state).toStrictEqual({ step: "shipped", name: "A-100" });
     expect(result.steps.map(step => step.after.name)).toStrictEqual(["A-100", "A-100"]);
+  });
+  it("reports an exception from a fault-injection callback of runMachine as the machine's failure, with the steps already run", () => {
+    const error = new Error("probe");
+    const run = () => c.runMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, { fails: effect => { if (effect.name === "ship") throw error; return false; } });
+    expect(run).toThrow(MachineFailure);
+    expect(run).toThrow("probe");
+    try { run(); } catch (thrown) { expect((thrown as MachineFailure<unknown, unknown>).steps.map(step => step.command)).toStrictEqual([{ type: "place", name: "A-100" }]); }
+  });
+
+  it("fails an effect whose perform rejects its promise as it does one that throws", async () => {
+    const error = new Error("unavailable");
+    const result = await c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
+      perform: async effect => { if (effect.name === "reserve") throw error; },
+    });
+    expect(result.failures.map(failure => failure.error)).toStrictEqual([error]);
+    expect(result.state).toStrictEqual({ step: "failed", name: "A-100" });
   });
 });

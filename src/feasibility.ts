@@ -1078,7 +1078,7 @@ function jointAssignments(
     const keeps = constrained.filter(group => JSON.stringify(group.path) === JSON.stringify(path));
     const kept = finiteDomainThrough(scope, path)!.filter(value =>
       keeps.every(group =>
-        group.constraints.every(item => (value === item.bound) === (item.operator === "==")),
+        group.constraints.every(item => holds({ kind: "compare", operator: item.operator, left: positionTerm([], "value"), right: item.bound } as Rule, value)),
       ),
     );
     const preferred = prefer(path);

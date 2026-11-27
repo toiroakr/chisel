@@ -51,7 +51,8 @@ export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): 
   if (decision.expression !== undefined) {
     const parts = independentParts(decision.expression);
     if (parts === undefined) for (const path of modelPaths(decision.expression)) yield { steps: path.steps, choices: path.choices, exit: "otherwise" };
-    else for (const part of parts) for (const path of modelPaths(partTemplate(part))) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: part };
+    // A part that is itself a map or fold has no way of its own outside its body, whose ways the walk lists below; one here would read as an iteration's.
+    else for (const part of parts) for (const path of modelPaths(partTemplate(part))) if (!isIteration(part) || path.steps.length > 0) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: part };
     const entries: IterationEntry[] = [];
     let listed = true;
     for (const entry of iterationEntries(decision.expression)) {
@@ -64,6 +65,8 @@ export function* eachWayOf(decision: RulesDecision<unknown, unknown, unknown>): 
       const first = paths.next();
       if (first.done === true || first.value.steps.length === 0) continue;
       const alternatives = entries.filter(entry => entry.node === iteration).map(entry => entry.steps);
+      // Every way into the model was listed and none leads here, so no input takes the walk; an empty list of steps is a way in that holds unconditionally.
+      if (listed && alternatives.length === 0) continue;
       const reached = !listed ? { entryUnlisted: true as const } : alternatives.length > 0 && alternatives.every(steps => steps.length > 0) ? { entered: alternatives } : {};
       yield { steps: first.value.steps, choices: first.value.choices, exit: "otherwise", within: iteration, ...reached };
       for (const path of paths) yield { steps: path.steps, choices: path.choices, exit: "otherwise", within: iteration, ...reached };

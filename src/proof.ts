@@ -7,7 +7,7 @@ import { feasibilityOf } from "./feasibility.js";
 import { feasibilityScope } from "./guard-borders.js";
 import { childrenOf, choicesOf, independentParts, localRoots, dependencyName, interpret, modelDependencyIssue, modelPaths, nodeOf, partTemplate, replaceChildren } from "./model.js";
 import type { Rule } from "./rule.js";
-import { conjuncts, describeRule, holds, isDecimal, isTerm, positionData, positionOf, positionTerm, termPaths, rootsRead, withDeps, measured } from "./rule.js";
+import { conjuncts, describeRule, holds, isDecimal, isTerm, positionData, positionOf, positionTerm, pathsRead, termPaths, rootsRead, withDeps, measured } from "./rule.js";
 import type { AnySchema, AnyVariantsSchema, DecimalSchema, ArraySchema, ObjectSchema, ObjectShape, OptionalSchema, RecordSchema, EnumSchema, LiteralSchema } from "./schema.js";
 import { isVariantsSchema, schemaAtPath, tagOf, object, literal, array } from "./schema.js";
 import type { Step } from "./ways.js";
@@ -83,7 +83,7 @@ function partedProof(
   const readsOf = (clause: AnyBehavior["ensures"][number]): Set<unknown> | undefined => {
     const rule = substitute(clause.rule, { input: positionTerm([], "value"), value: (frame as { result?: unknown }).result });
     if (!rule) return undefined;
-    const read = new Set(termPaths(rule).map(path => path[0]));
+    const read = new Set(pathsRead(rule).map(path => path[0]));
     return new Set(parts.filter(part => read.has(names.get(part))));
   };
   const clauseParts = definition.ensures.map(clause => ({ clause, reads: readsOf(clause) }));
@@ -166,7 +166,10 @@ export function verify(implementation: AnyImplementation, options: { readonly ca
       }
       return true;
     };
+    const remaining = budget.remaining;
     const factored = partedProof(written, definition, scope, provesPaths);
+    // The paths a factored proof that fell back spent are not the full proof's to lose.
+    if (factored === undefined) budget.remaining = remaining;
     const proven = factored ?? provesPaths(written, { answer: definition.result, clauses: definition.ensures }, scope);
     decisions.push({ ...base, status: proven ? "verified" : "undetermined", reason: proven ? "Every construction and postcondition follows from the input, path conditions, and dependency contracts" : budget.remaining < 0 ? `Proof exceeds ${ways} paths` : "Universal construction safety could not be proved from the available contracts and conditions" });
   }

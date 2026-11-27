@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 import { eachWayOf, describeWay } from "../src/ways.js";
 import { feasibilityOf } from "../src/feasibility.js";
+import { NO_FACTS, withSteps } from "../src/outcomes.js";
 import { feasibilityScope } from "../src/guard-borders.js";
 import { positionTerm } from "../src/rule.js";
 import type { Rule } from "../src/rule.js";
@@ -127,6 +128,7 @@ describe("independent parts of a model", () => {
       },
     });
     const changed = c.verify(broken).decisions.find(decision => decision.decision === "forgets to keep");
+    expect(changed).toBeDefined();
     expect(changed?.status).not.toBe("verified");
   });
 
@@ -143,5 +145,71 @@ describe("independent parts of a model", () => {
       })) },
     });
     expect(c.verify(impl).status).toBe("verified");
+  });
+  describe("the proof of a model of independent parts", () => {
+    const Request = c.variants("kind", { request: c.object({ x: c.string(), list: c.array(c.int()) }) });
+    const prove = (result: unknown, ensures: unknown, ways: number, answer: c.Schema<unknown> = c.object({ p: c.int(), q: c.int() })) => {
+      const behavior = c.behavior("agree", { input: Request, result: answer, effects: emptyEffects, ...(ensures === undefined ? {} : { ensures }) } as never);
+      const implementation = c.implement(behavior, { cases: { request: c.model("agree", (input: any) => ({ result: (result as (input: unknown) => unknown)(input), effects: [] })) } } as never);
+      return c.verify(implementation, { ways }).decisions[0]!;
+    };
+
+    it("gives the proof over every way together a budget of its own after the factored proof could not prove the frame", () => {
+      const decision = prove(
+        (input: any) => ({ p: c.choose(input.x.$eq("A"), 1, 0), q: c.choose(input.x.$eq("A"), 1, 0) }),
+        undefined,
+        2,
+        c.object({ p: c.int(), q: c.int() }).refine((value: any) => value.p.$eq(value.q)),
+      );
+      expect([decision.status, decision.reason]).toStrictEqual(["verified", expect.any(String)]);
+    });
+  });
+  describe("what the steps of a way settle of a value", () => {
+    const compare = (operator: "==" | "!=", right: unknown) => ({ distinction: { kind: "compare", operator, left: positionTerm(["x"], "value"), right } as Rule as never, outcome: true });
+
+    it("contradicts two different strings a position is equal to", () => {
+      expect(withSteps(NO_FACTS, [compare("==", "a"), compare("==", "b")])).toBeUndefined();
+    });
+
+    it("does not contradict a number and a string of digits a decimal holds equal to, since the comparison reads both as the same decimal", () => {
+      expect(withSteps(NO_FACTS, [compare("==", 1), compare("==", "1")])).toBeDefined();
+      expect(withSteps(NO_FACTS, [compare("==", "1.0"), compare("==", "1")])).toBeDefined();
+    });
+  });
+  it("lists the ways through the body of a walk that is itself a part once, as the walk's and not as a part's", () => {
+    const Items = c.variants("kind", { request: c.object({ items: c.array(c.int()), f: c.int() }) });
+    const walked = c.behavior("walked", { input: Items, result: c.object({ a: c.array(c.int()), q: c.int() }), effects: emptyEffects });
+    const impl = c.implement(walked, { cases: { request: c.model("walked", (input: any) => ({
+      result: { a: c.map(c.int(), c.int(), input.items, (item: any) => c.choose(item.$gt(0), 1, 0)), q: c.choose(input.f.$gt(0), 1, 0) },
+      effects: [],
+    })) } } as never);
+    expect([...eachWayOf(impl.cases.request as never)].map(describeWay)).toStrictEqual([
+      "result.q: $.f > 0 holds → otherwise",
+      "result.q: $.f > 0 fails → otherwise",
+      "each of $.items[]: $.items[] > 0 holds → otherwise",
+      "each of $.items[]: $.items[] > 0 fails → otherwise",
+    ]);
+  });
+  it("keeps a value of two enums the way equates that an ordering of one of them still allows", () => {
+    const Pair = c.variants("kind", { request: c.object({ x: c.enum(["a", "b"]), y: c.enum(["a", "b"]) }) });
+    const pair = c.behavior("pair", { input: Pair, result: c.int(), effects: emptyEffects });
+    const scope = feasibilityScope(pair as never, "request");
+    const steps = (rule: Rule, outcome: boolean) => ({ distinction: rule as never, outcome });
+    const compare = (left: string, operator: "==" | "<=", right: unknown) => ({ kind: "compare", operator, left: positionTerm([left], "value"), right } as Rule);
+    const same = { kind: "compare", operator: "==", left: positionTerm(["x"], "value"), right: positionTerm(["y"], "value") } as Rule;
+    expect(feasibilityOf({ steps: [steps(same, true), steps(compare("x", "<=", "a"), true), steps(compare("y", "==", "a"), true)] }, scope).kind).toBe("feasible");
+  });
+  it("lists no way through the body of a walk that no way of choosing reaches", () => {
+    const Walked = c.variants("kind", { request: c.object({ x: c.string(), items: c.array(c.int()), flag: c.boolean() }) });
+    const dead = c.behavior("dead", { input: Walked, result: c.int(), effects: emptyEffects });
+    const impl = c.implement(dead, { cases: { request: c.model("dead", (input: any) => ({
+      result: c.choose(input.x.$eq("a"), c.choose(input.x.$eq("b"),
+        c.fold(c.int(), c.int(), input.items, 0, (total: any, item: any) => c.choose(input.flag.$eq(true), item, total)), 0), 0),
+      effects: [],
+    })) } } as never);
+    expect([...eachWayOf(impl.cases.request as never)].map(describeWay)).toStrictEqual([
+      '$.x == "a" holds, $.x == "b" fails → otherwise',
+      '$.x == "a" fails → otherwise',
+    ]);
   });
 });

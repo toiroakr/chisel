@@ -308,4 +308,11 @@ describe("TLA+ translation of executable machines", () => {
       expect((await c.proveMachine(c.specifyMachine(checkout, { invariants: [leak], crashes: true }))).status).toBe("undetermined");
     });
   });
+  it("refuses a bind of a command field that may be left out, since the bind would fail on its absence", () => {
+    const B = c.boolean();
+    const Command = c.object({ maybe: B.optional() });
+    const machine = c.machine("optional command", { state: c.boolean(), command: Command, initial: [false],
+      update: (_state, command) => c.bind(B, (command as never as { maybe: never }).maybe, () => ({ state: false })) as never });
+    expect(() => c.toTla(c.specifyMachine(machine))).toThrow("bind");
+  });
 });

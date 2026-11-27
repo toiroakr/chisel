@@ -373,7 +373,7 @@ class Compiler {
     if (node?.kind === "choose") return `(IF ${this.rule(node.condition, names, names.get("") ?? "s")} THEN ${this.value(node.yes, names, result)} ELSE ${this.value(node.no, names, result)})`;
     if (node?.kind === "bind") {
       const data = isTerm(node.value) ? termData(node.value) : undefined;
-      if (data?.kind !== "position" || data.measure !== "value" || this.schemaAt(data.path) !== node.schema) {
+      if (data?.kind !== "position" || data.measure !== "value" || this.schemaAt(data.path) !== node.schema || this.mayBeLeftOut(data.path)) {
         throw new SpecificationError("TLA+ translation cannot preserve bind schema validation");
       }
       const local = `local${this.next++}`;
@@ -381,7 +381,7 @@ class Compiler {
     }
     if (node?.kind === "map") {
       const data = isTerm(node.values) ? termData(node.values) : undefined;
-      const array = data?.kind === "position" && data.measure === "value" ? this.schemaAt(data.path) : undefined;
+      const array = data?.kind === "position" && data.measure === "value" && !this.mayBeLeftOut(data.path) ? this.schemaAt(data.path) : undefined;
       if (array?.kind !== "array" || (array as ArraySchema<unknown>).element !== node.element ||
           node.element !== node.output || !this.safeMappedBody(node.body, node.element as AnySchema, node.name)) {
         throw new SpecificationError("TLA+ translation cannot preserve map element and output schema validation");
@@ -422,6 +422,16 @@ class Compiler {
       return `[${key} \\in ${set(fields.map(([field]) => JSON.stringify(field)))} |-> CASE ${fields.map(([field, child]) => `${key} = ${JSON.stringify(field)} -> ${this.value(child, names)}`).join(" [] ")}]`;
     }
     throw new SpecificationError(`TLA+ translation cannot represent ${String(value)}`);
+  }
+
+  // Whether the field at the path, or an object on the way to it, is optional: a bind of it fails on its absence, which the translation does not model.
+  private mayBeLeftOut(path: readonly string[]): boolean {
+    let schema: AnySchema | undefined = path[0] === "state" ? this.stateSchema : path[0] === "command" ? this.commandSchema : undefined;
+    for (const key of path.slice(1)) {
+      if (schema?.kind === "optional") return true;
+      schema = schema?.kind === "object" ? (schema as ObjectSchema<ObjectShape>).shape[key] : undefined;
+    }
+    return schema?.kind === "optional";
   }
 
   private schemaAt(path: readonly string[]): AnySchema | undefined {

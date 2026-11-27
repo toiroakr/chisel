@@ -22,7 +22,8 @@ export const NO_FACTS: Facts = { equal: new Map(), unequal: new Map() };
 
 function constantKey(value: unknown): string | undefined {
   switch (typeof value) {
-    case "string": return `s${value.normalize("NFC")}`;
+    // A decimal reads a string of digits as the number it writes, so `== 1` and `== "1"` hold of one value; no fact is kept of such a string.
+    case "string": return /^\s*[+-]?\.?\d/.test(value) ? undefined : `s${value.normalize("NFC")}`;
     case "boolean": return `b${value}`;
     case "bigint": return `i${value}`;
     case "number": return Number.isFinite(value) ? `n${value === 0 ? 0 : value}` : undefined;

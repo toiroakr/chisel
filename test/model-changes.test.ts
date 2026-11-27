@@ -231,6 +231,23 @@ describe("ways inside an independent part", () => {
   it("multiplies the fields of an object a choice answers, as the ways are listed, so a model past the limit is told what to change", () => {
     const specification = c.spec("入れ子", { examples: c.examples(入れ子, {}), implementation: 入れ子にする });
     expect([...eachWayOf(入れ子にする.cases.request as never)].length).toBe(11);
-    expect(c.modelChanges(specification, { feasibility: { ways: 10 } }).map(change => change.kind)).toStrictEqual(["behavior"]);
+    const [change] = c.modelChanges(specification, { feasibility: { ways: 10 } });
+    expect({ kind: change?.kind, ways: change?.ways }).toStrictEqual({ kind: "behavior", ways: "11" });
+  });
+
+  it("multiplies the fields of an object inside the body of a walk that a part holds, as the ways are listed", () => {
+    const Rows = c.variants("kind", { request: c.object({ rows: c.array(c.int()), a: c.int(), b: c.int(), d: c.int(), f: c.int() }) });
+    const Row = c.object({ x: c.int(), y: c.int(), z: c.int() });
+    const walked = c.behavior("walked", { input: Rows, result: c.object({ p: c.array(Row), q: c.int() }), effects: emptyEffects });
+    const implementation = c.implement(walked, { cases: { request: c.model("walked", (input: any) => ({
+      result: {
+        p: c.map(c.int(), Row, input.rows, (row: any) => ({ x: c.choose(row.$gt(input.a), 1, 0), y: c.choose(row.$gt(input.b), 1, 0), z: c.choose(row.$gt(input.d), 1, 0) })),
+        q: c.choose(input.f.$gt(0), 1, 0),
+      },
+      effects: [],
+    })) } } as never);
+    const ways = [...eachWayOf(implementation.cases.request as never)].length;
+    const [change] = c.modelChanges(c.spec("walked", { examples: c.examples(walked, {}), implementation } as never), { feasibility: { ways: ways - 1 } });
+    expect(change?.ways).toBe(String(ways));
   });
 });
