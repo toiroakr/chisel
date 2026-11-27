@@ -43,7 +43,7 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
   const starter = setTimeout(() => {
     started = true;
     say();
-    ticker = setInterval(() => { said = undefined; say(); }, progress.every ?? 60000);
+    ticker = setInterval(() => { said = undefined; say(); }, Number.isFinite(progress.every) && progress.every! > 0 ? progress.every! : 60000);
   }, progress.after ?? 3000);
   const output: { stream: "stdout" | "stderr"; message: string }[] = [];
   return new Promise(resolve => {
@@ -80,6 +80,9 @@ export async function runIsolated(argv: readonly string[], timeoutMs = 30000, pr
         return;
       }
       if ("kind" in message && message.kind === "early") {
+        // Counted with the rest before it is handed on, so a callback never prints past the limit the result is held to.
+        bytes += Buffer.byteLength(message.message);
+        if (bytes > 1024 * 1024) { void finish({ exitCode: 1, logs: [], error: "Execution output exceeded 1 MiB" }); return; }
         if (progress.early !== undefined) progress.early(message.message);
         else early.push(message.message);
         return;

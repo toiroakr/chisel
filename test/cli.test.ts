@@ -356,8 +356,16 @@ describe("chisel generate with rows suggested from a called behavior", () => {
   it("counts the suggested rows apart from the rows owed", async () => {
     const result = await run(["generate", fixture("test/fixtures/suggested.ts")]);
 
-    expect(stdoutOf(result)).toMatch(/^\/\/ 義務のある行 \d+件、提案する行 1件（義務はない）$/m);
+    expect(stdoutOf(result)).toMatch(/^\/\/ 義務のある行 0件、提案する行 1件（義務はない）$/m);
     expect(stdoutOf(result)).toContain("在庫()の記録行「商品-Bは0個」の入力を$.商品IDで尋ねる");
+  });
+});
+
+describe("chisel check with a step a run stops at under a stand-in", () => {
+  it("prints the stand-in the run stopped with beside its input", async () => {
+    const result = await run(["check", fixture("test/fixtures/stops-with.ts")]);
+
+    expect(stdoutOf(result)).toMatch(/実行が止まりうる: 平均を出す: quotient\(\$\.合計, deps\.人数\) — 入力 \{[^}]*\}、with \{[^}]*人数: 0/s);
   });
 });
 

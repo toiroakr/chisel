@@ -189,7 +189,7 @@ export async function driveMachine<State, Command>(definition: Machine<State, Co
     if (point.kind === "dies") { next = run.next(false); continue; }
     let answer: EffectAnswer;
     try {
-      const performed = await options.perform({ name: point.name, index: point.index, command: point.command, before: copyOf(point.before), after: copyOf(point.after) });
+      const performed = await options.perform({ name: point.name, index: point.index, command: copyOf(point.command), before: copyOf(point.before), after: copyOf(point.after) });
       answer = { failed: false, ...(performed && performed.commands !== undefined ? { commands: performed.commands } : {}) };
     } catch (error) {
       failures.push({ name: point.name, index: point.index, command: point.command, error });
@@ -253,7 +253,7 @@ function* follow<State, Command>(definition: Machine<State, Command>, state: Sta
           const answer = (yield { kind: "effect", name: declared.name, index, command: input, before: next, after: declared.after }) as EffectAnswer;
           if (answer.failed) {
             performed.push({ name: declared.name, outcome: "failed" });
-            if ("failure" in declared) next = declared.failure as State;
+            if (Object.hasOwn(declared, "failure")) next = declared.failure as State;
             stopped = true;
             break;
           }

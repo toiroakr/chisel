@@ -67,7 +67,11 @@ describe("names of suggested rows", () => {
     });
     const { rows } = c.generate(c.examples(二度, { 基本: { given: { 状態: "入力済み", 主: "A", 副: "A" }, expect: { result: true, effects: [] } } }), 両方);
     const names = rows.filter(row => row.suggested === true).map(row => row.name);
-    expect(new Set(names).size).toBe(names.length);
-    expect(names.some(name => name.includes("$.主")) && names.some(name => name.includes("$.副"))).toBe(true);
+    expect(names).toStrictEqual([
+      "二度: 在庫()の記録行「商品-Bは0個」の入力を$.主で尋ねる",
+      "二度: 在庫()の記録行「商品-Cは5個」の入力を$.主で尋ねる",
+      "二度: 在庫()の記録行「商品-Bは0個」の入力を$.副で尋ねる",
+      "二度: 在庫()の記録行「商品-Cは5個」の入力を$.副で尋ねる",
+    ]);
   });
 });

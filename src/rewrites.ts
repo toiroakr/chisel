@@ -118,6 +118,9 @@ function readsRun(fold: FoldNode): boolean {
       return;
     }
     const node = nodeOf(value);
+    // A name a node inside the fold binds is read from within, not from what a run is handed; each is declared once.
+    if (node?.kind === "bind" || node?.kind === "map" || node?.kind === "fold") own.add(node.name);
+    if (node?.kind === "fold") own.add(node.accumulator);
     if (node?.kind === "choose") for (const path of pathsRead(node.condition as Rule)) rooted(path);
     if (node?.kind === "call") reads = true;
     for (const child of childrenOf(value)) walk(child);

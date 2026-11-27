@@ -68,10 +68,10 @@ export function relationsVerdict(steps: readonly RelationStep[], scope: AnySchem
     const kinds = new Set(group.map(step => step.rule.relation === "hasKey" ? "record" : step.rule.relation === "includes" ? "array" : "string"));
     if (kinds.size > 1) { verdicts.push({ kind: "unknown", paths: [path] }); continue; }
     const kind = [...kinds][0]!;
-    if (refuted(kind, group)) { verdicts.push({ kind: "infeasible" }); continue; }
-    const holdsAll = (value: unknown) => group.every(step => relationHolds(step.rule.relation, value, step.rule.other) === step.outcome);
     const inherited = inheritedAt(scope, path);
-    const witness = witnessesOf(kind, group, schema).map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && holdsAll(found.value));
+    if (refuted(kind, [...heldOf(inherited), ...group])) { verdicts.push({ kind: "infeasible" }); continue; }
+    const holdsAll = (value: unknown) => group.every(step => relationHolds(step.rule.relation, value, step.rule.other) === step.outcome);
+    const witness = witnessesOf(kind, [...heldOf(inherited), ...group], schema).map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && holdsAll(found.value));
     verdicts.push(witness === undefined ? { kind: "unknown", paths: [path], searched: true } : { kind: "feasible", paths: [path] });
   }
   return verdicts;
@@ -79,6 +79,15 @@ export function relationsVerdict(steps: readonly RelationStep[], scope: AnySchem
 
 function written(group: readonly RelationStep[], relation: Relation, outcome: boolean): readonly unknown[] {
   return group.filter(step => step.rule.relation === relation && step.outcome === outcome).map(step => step.rule.other);
+}
+
+// The relations an enclosing object's invariant holds of the place itself, which every value the place takes meets.
+function heldOf(inherited: readonly Rule[]): readonly RelationStep[] {
+  return inherited.flatMap(rule => {
+    if (rule.kind !== "relation" || isTerm(rule.other)) return [];
+    const position = positionData(rule.subject as Term<unknown>);
+    return position !== undefined && position.measure === "value" && position.path.length === 0 ? [{ rule, outcome: true }] : [];
+  });
 }
 
 // Shown by the laws of the relations alone, never by a search coming up empty.
@@ -170,6 +179,7 @@ export interface RelationClass {
   // A value of the class the place's schema takes, or undefined where none
   // was found though no law refutes the class: it is still owed (ADR-0130).
   readonly witness: unknown;
+  readonly only?: true;
   contains(value: unknown): boolean;
 }
 
@@ -214,11 +224,13 @@ export function relationClasses(
     for (const combo of combos) {
       const name = [outer.name, combo.map(item => label(item.rule, item.outcome)).join(" ∧ ")].filter(part => part !== "").join(" ∧ ");
       const steps = combo.map(item => ({ rule: item.rule, outcome: item.outcome }));
-      if (refuted(kind, steps)) { excluded.push(name); continue; }
+      // A class that is one value is settled by that value: no law is needed to say what it holds of each relation.
+      const settledAgainst = outer.only === true && !combo.every(item => relationHolds(item.rule.relation, outer.witness, item.rule.other) === item.outcome);
+      if (settledAgainst || refuted(kind, [...heldOf(inherited), ...steps])) { excluded.push(name); continue; }
       const contains = (value: unknown) => outer.contains(value) && combo.every(item => relationHolds(item.rule.relation, value, item.rule.other) === item.outcome);
-      const candidates = [...(outer.witness === undefined ? [] : [outer.witness]), ...witnessesOf(kind, steps, schema)];
+      const candidates = [...(outer.witness === undefined ? [] : [outer.witness]), ...witnessesOf(kind, [...heldOf(inherited), ...steps], schema)];
       const witness = candidates.map(candidate => taken(candidate, schema, inherited)).find(found => found !== undefined && contains(found.value))?.value;
-      classes.push({ name, witness, contains });
+      classes.push({ name, witness, contains, ...(outer.only === true ? { only: true as const } : {}) });
     }
   }
   return { classes, excluded };

@@ -175,6 +175,10 @@ describe("independent parts of a model", () => {
       expect(withSteps(NO_FACTS, [compare("==", 1), compare("==", "1")])).toBeDefined();
       expect(withSteps(NO_FACTS, [compare("==", "1.0"), compare("==", "1")])).toBeDefined();
     });
+
+    it("keeps its fact of a string that merely starts like a number, which no decimal reads", () => {
+      expect(withSteps(NO_FACTS, [compare("==", "1abc"), compare("==", "1abd")])).toBeUndefined();
+    });
   });
   it("lists the ways through the body of a walk that is itself a part once, as the walk's and not as a part's", () => {
     const Items = c.variants("kind", { request: c.object({ items: c.array(c.int()), f: c.int() }) });

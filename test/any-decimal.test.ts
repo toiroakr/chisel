@@ -170,3 +170,55 @@ describe("the placeholder of a decimal of any scale", () => {
     expect(schema.parse(schema.placeholder()).success).toBe(true);
   });
 });
+
+describe("a decimal past the room exact arithmetic has", () => {
+  const 比べる = c.behavior("比べる", {
+    input: c.variants("kind", { request: c.object({ a: c.decimal(), b: c.decimal() }) }),
+    result: c.boolean(),
+    effects: emptyEffects,
+  });
+  const 大きいか = c.implement(比べる, {
+    cases: { request: c.action("大きいか", { guards: v => [v.a.$gt(v.b).$else(() => ({ result: false, effects: [] }))], run: () => ({ result: true, effects: [] }) }) },
+  });
+  const huge = new Decimal("1e10001");
+
+  it("is no coordinate of a guard comparing two decimals when a row holds it, so check still reports", async () => {
+    const examples = c.examples(比べる, { 大きい: { given: { kind: "request", a: huge, b: new Decimal(0) }, expect: { result: true, effects: [] } } });
+    const report = await c.check(c.spec("比べる", { examples, implementation: 大きいか }));
+    expect(report.failures).toStrictEqual([]);
+  });
+
+  it("is no row composed for a border, so generate still offers the others", () => {
+    const examples = c.examples(比べる, { 小さい: { given: { kind: "request", a: new Decimal(0), b: huge }, expect: { result: false, effects: [] } } });
+    expect(() => c.generate(examples, 大きいか)).not.toThrow();
+  });
+
+  it("is no scale a round completes at, since the power it takes is past the room", async () => {
+    const 丸め = c.behavior("丸め", { input: c.variants("kind", { r: c.object({ v: c.decimal(2).min(new Decimal(0)).max(new Decimal(10)) }) }), result: c.decimal(), effects: emptyEffects });
+    const huge = c.implement(丸め, { cases: { r: c.model("丸める", input => ({ result: c.round(input.v, 2_000_000_000, "half-even"), effects: [] })) } });
+    const report = await c.check(c.spec("丸め", { examples: c.examples(丸め, {}), implementation: huge }));
+    expect(report.stops.map(stop => stop.status)).not.toContain("never stops");
+  });
+
+  it("is not a value a round of a decimal with no scale completes for", async () => {
+    const 丸め = c.behavior("丸め", { input: c.variants("kind", { r: c.object({ v: c.decimal().min(new Decimal(0)).max(new Decimal(10)) }) }), result: c.decimal(2), effects: emptyEffects });
+    const rounded = c.implement(丸め, { cases: { r: c.model("丸める", input => ({ result: c.round(input.v, 2, "half-even"), effects: [] })) } });
+    const report = await c.check(c.spec("丸め", { examples: c.examples(丸め, {}), implementation: rounded }));
+    expect(report.stops.map(stop => stop.status)).toStrictEqual(["not resolved"]);
+  });
+});
+
+describe("the classes a guard divides a decimal of any scale into", () => {
+  it("keeps a class that holds values between two bounds closer than a whole unit, standing for it with one of them", async () => {
+    const 狭い = c.behavior("狭い", { input: c.variants("kind", { request: c.object({ v: c.decimal().gt(new Decimal("0.1")).lt(new Decimal("0.1001")) }) }), result: c.boolean(), effects: emptyEffects });
+    const 判定 = c.implement(狭い, {
+      cases: { request: c.action("判定", { guards: v => [v.v.$gt(new Decimal("0.10005")).$else(() => ({ result: false, effects: [] }))], run: () => ({ result: true, effects: [] }) }) },
+    });
+    const report = await c.check(c.spec("狭い", { examples: c.examples(狭い, {}), implementation: 判定 }));
+    const divided = report.partitions.flatMap(partition => partition.kind === "divided" ? [partition] : []);
+    expect(divided.map(partition => [partition.missing, partition.excluded])).toStrictEqual([[["0.1 < v <= 0.10005", "0.10005 < v < 0.1001"], []]]);
+    const { rows } = c.generate(c.examples(狭い, {}), 判定);
+    const written = rows.filter(row => row.name.includes("v")).map(row => String((row.given as { v: Decimal }).v));
+    expect(written).toContain("0.10005");
+  });
+});

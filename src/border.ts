@@ -31,6 +31,8 @@ export interface Carrier {
   readonly compare: (left: unknown, right: unknown) => number;
   readonly step?: (value: unknown, direction: 1 | -1) => unknown;
   readonly past?: (value: unknown, direction: 1 | -1) => unknown;
+  // A value strictly between two, where the carrier has no step to name one beside a bound.
+  readonly between?: (low: unknown, high: unknown) => unknown;
   readonly format: (value: unknown) => string;
   readonly floor?: { readonly value: unknown; readonly reason: string };
   readonly ceiling?: { readonly value: unknown; readonly reason: string };
@@ -81,6 +83,14 @@ export function decimalCarrier(scale: number | undefined): Carrier {
       past: (value, direction) => {
         try {
           return decimalOf(fractionOf(asDecimal(value)).plus(fractionOf(direction)));
+        } catch (error) {
+          if (isOutOfRoom(error)) return undefined;
+          throw error;
+        }
+      },
+      between: (low, high) => {
+        try {
+          return decimalOf(fractionOf(asDecimal(low)).plus(fractionOf(asDecimal(high))).dividedBy(new Rational(2n)));
         } catch (error) {
           if (isOutOfRoom(error)) return undefined;
           throw error;

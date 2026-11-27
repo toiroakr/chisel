@@ -536,9 +536,32 @@ export function satisfy(rule: Rule, value: unknown, stepAt?: StepAt): unknown {
     }
     case "compare":
       return satisfyComparison(rule, value, stepAt);
+    case "relation":
+      return satisfyRelation(rule, value);
     default:
       return value;
   }
+}
+
+// A placeholder made to keep a relation to a written value: the value is written into the string, the record or the array, and where the container holds nothing to give it the shape of an entry, it is left as it was.
+function satisfyRelation(rule: RelationRule, value: unknown): unknown {
+  const position = isTerm(rule.other) ? undefined : positionData(rule.subject as Term<unknown>);
+  if (position === undefined || position.measure !== "value") return value;
+  const { other } = rule;
+  const written = writeAt(value, position.path, current => {
+    switch (rule.relation) {
+      case "startsWith": return typeof current === "string" && typeof other === "string" ? other + current : current;
+      case "endsWith":
+      case "contains": return typeof current === "string" && typeof other === "string" ? current + other : current;
+      case "hasKey": {
+        if (typeof current !== "object" || current === null || Array.isArray(current) || typeof other !== "string") return current;
+        const [first] = Object.values(current);
+        return first === undefined ? current : { ...current, [other]: first };
+      }
+      case "includes": return Array.isArray(current) ? (current.length === 0 ? [other] : [other, ...current.slice(1)]) : current;
+    }
+  });
+  return holds(rule, written) ? written : value;
 }
 
 function satisfyComparison(rule: CompareRule, value: unknown, stepAt: StepAt | undefined): unknown {

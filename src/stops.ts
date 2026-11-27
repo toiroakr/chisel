@@ -70,7 +70,8 @@ export function describeStep(value: unknown): string {
     return describeTerm(value as Term<unknown>);
   }
   const node = nodeOf(value);
-  if (node?.kind === "operation" || node?.kind === "temporal") return `${node.operator}(${describeStep(node.left)}, ${describeStep(node.right)})`;
+  if (node?.kind === "operation") return `${node.operator}(${describeStep(node.left)}, ${describeStep(node.right)})`;
+  if (node?.kind === "temporal") return `${node.operator}(${describeStep(node.left)}, ${describeStep(node.right)}, ${JSON.stringify(node.unit)})`;
   if (node?.kind === "construct") return `construct(${describeStep(node.value)})`;
   if (node?.kind === "call") return `${dependencyName(node.dependency)}()`;
   if (node !== undefined) return node.kind;
@@ -89,7 +90,17 @@ export function stopsOf(
   rows: readonly StopRow[],
   options: { readonly candidates: number; readonly proof?: ProofReport },
 ): readonly StopCoverage[] {
-  if (implementation === undefined || implementation.pipeline !== undefined || implementation.external !== undefined) return [];
+  if (implementation === undefined || implementation.external !== undefined) return [];
+  if (implementation.pipeline !== undefined) {
+    // Each stage is judged on its own. The rows are the first stage's inputs; a later stage is handed what an earlier one answers, which no row of this list is, so what stops it on its own input is not shown to stop in the pipeline.
+    const [first, second] = implementation.pipeline;
+    return [
+      ...stopsOf(first, rows, options),
+      ...stopsOf(second, [], options).map((stop): StopCoverage => stop.status === "may stop"
+        ? { decision: stop.decision, at: stop.at, status: "not resolved", reason: `この段が止まる入力は見つかったが、前の段がその入力を渡すかは決まらない（${stop.reason ?? ""}）` }
+        : stop),
+    ];
+  }
   const definition = implementation.behavior;
   const decisions = new Map<unknown, string[]>();
   for (const [tag, decision] of Object.entries(implementation.cases ?? {})) {

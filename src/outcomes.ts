@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import type { Rule } from "./rule.js";
 import { holds, isTerm, positionData } from "./rule.js";
 import type { Step } from "./ways.js";
@@ -20,10 +21,15 @@ export interface Facts {
 
 export const NO_FACTS: Facts = { equal: new Map(), unequal: new Map() };
 
+// What the comparison itself does with the string, so a prefix like `"1abc"`, which no decimal reads, keeps its fact.
+function readsAsDecimal(value: string): boolean {
+  try { new Decimal(value); return true; } catch { return false; }
+}
+
 function constantKey(value: unknown): string | undefined {
   switch (typeof value) {
     // A decimal reads a string of digits as the number it writes, so `== 1` and `== "1"` hold of one value; no fact is kept of such a string.
-    case "string": return /^\s*[+-]?\.?\d/.test(value) ? undefined : `s${value.normalize("NFC")}`;
+    case "string": return readsAsDecimal(value) ? undefined : `s${value.normalize("NFC")}`;
     case "boolean": return `b${value}`;
     case "bigint": return `i${value}`;
     case "number": return Number.isFinite(value) ? `n${value === 0 ? 0 : value}` : undefined;

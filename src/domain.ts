@@ -84,9 +84,24 @@ export function domainOf(schema: AnySchema, limit: number, constants: readonly u
         // The keys the rules write ($hasKey) are tried as keys, as `key` is.
         const keys = [...new Set(["key", ...[...constants, ...constantsOf(current.invariants)].filter((value): value is string => typeof value === "string")])];
         const first = child.values[0];
+        const bounds = integralBounds(current, "length");
         // A record held to no entry is the empty record alone, however many keys were written.
-        if (integralBounds(current, "length").upper === 0) return finish([{}], true);
-        return finish([{}, ...keys.flatMap(key => child.values.map(value => ({ [key]: value }))), ...(first === undefined ? [] : [Object.fromEntries(keys.map(key => [key, first]))])], false);
+        if (bounds.upper === 0) return finish([{}], true);
+        // A record held to at least n entries needs n keys, which the rules may not write.
+        for (let index = 2; keys.length < Math.min(bounds.lower, limit); index++) if (!keys.includes(`key${index}`)) keys.push(`key${index}`);
+        const values: unknown[] = [{}];
+        if (first !== undefined) {
+          // The first value of each key and the records the length bounds ask for come first, within the limit, so that the many singletons made of the other values never crowd them out.
+          for (const key of keys) values.push({ [key]: first });
+          for (const size of new Set([bounds.lower, bounds.upper, keys.length])) {
+            if (size !== undefined && size >= 1 && size <= keys.length) values.push(Object.fromEntries(keys.slice(0, size).map(key => [key, first])));
+          }
+          other: for (const value of child.values.slice(1)) for (const key of keys) {
+            if (values.length >= limit) break other;
+            values.push({ [key]: value });
+          }
+        }
+        return finish(values, false);
       }
     }
     const local = [...constants, ...constantsOf(current.invariants)];

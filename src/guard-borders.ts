@@ -4,7 +4,7 @@ import type { AnyBehavior, AnyImplementation, ComparisonReached, RulesDecision }
 import type { Border } from "./border.js";
 import type { Carrier } from "./border.js";
 import { bordersOf, decimalCarrier, decimalUnitsCarrier, integerCarrier, nanosecondCarrier, normalize, numberCarrier } from "./border.js";
-import { decimalOf, fractionOf } from "./exact.js";
+import { decimalOf, fractionOf, isOutOfRoom } from "./exact.js";
 import type { Decimal } from "decimal.js";
 import type { Position } from "./partition.js";
 import { carrierOf, positionsOf, writeExactly } from "./partition.js";
@@ -305,6 +305,8 @@ function unrooted(rule: Rule): Rule | undefined {
 export interface GuardClass {
   readonly name: string;
   readonly witness: unknown;
+  // Set where the class is the one value `witness`, so a relation is settled by that value alone.
+  readonly only?: true;
   contains(value: unknown): boolean;
 }
 
@@ -407,7 +409,7 @@ function partitionAt(
       (to === undefined ||
         carrier.compare(value, to.value) < 0 ||
         (to.inclusive && carrier.compare(value, to.value) === 0));
-    const witness =
+    let witness =
       from === undefined
         ? to === undefined
           ? undefined
@@ -417,6 +419,11 @@ function partitionAt(
         : from.inclusive
           ? from.value
           : (carrier.step?.(from.value, 1) ?? carrier.past?.(from.value, 1));
+    // A bound's neighbour (or a whole unit past it) may lie beyond the other edge, where the interval still holds values between them.
+    if ((witness === undefined || !contains(witness)) && from !== undefined && to !== undefined && carrier.between !== undefined) {
+      const between = carrier.between(from.value, to.value);
+      if (between !== undefined && contains(between)) witness = between;
+    }
     const single =
       from !== undefined &&
       to !== undefined &&
@@ -434,9 +441,19 @@ function partitionAt(
       excluded.push(name);
       continue;
     }
-    classes.push({ name, witness, contains });
+    classes.push({ name, witness, contains, ...(single ? { only: true as const } : {}) });
   }
   return { path, segments, classes, excluded };
+}
+
+// A decimal past the digits exact arithmetic has room for gives no coordinate and no row, as the decimal carrier gives no run past it.
+function withinRoom<T>(compute: () => T | undefined): T | undefined {
+  try {
+    return compute();
+  } catch (error) {
+    if (isOutOfRoom(error)) return undefined;
+    throw error;
+  }
 }
 
 function admittedRange(
@@ -811,7 +828,7 @@ function betweenOn(
       if (!first.onTrail(reached.scope) || !second.onTrail(reached.scope)) return undefined;
       if (exact) {
         const [a, b] = [readOperand(first.term, reached.scope), readOperand(second.term, reached.scope)];
-        return a === undefined || b === undefined ? undefined : decimalOf(fractionOf(a as Decimal).minus(fractionOf(b as Decimal)));
+        return a === undefined || b === undefined ? undefined : withinRoom(() => decimalOf(fractionOf(a as Decimal).minus(fractionOf(b as Decimal))));
       }
       const a = read(first, reached.scope);
       const b = read(second, reached.scope);
@@ -835,13 +852,15 @@ function betweenOn(
         return undefined;
       }
       if (exact) {
-        const shifted = fractionOf(other as Decimal).plus(fractionOf(coordinate as Decimal).times(fractionOf(sign)));
-        const written = moved.write(given, moving.measure, decimalOf(shifted));
-        if (written === undefined || fixed.standsIn || !deepEqual(fixed.segments, moving.segments)) return written;
-        // Both sides read the one place moved, so the row is kept only where it
-        // stands at the point.
-        const [a, b] = [first, second].map(side => at(side.segments)?.valuesIn(written)[0]);
-        return isDecimal(a) && isDecimal(b) && fractionOf(a).minus(fractionOf(b)).comparedTo(fractionOf(coordinate as Decimal)) === 0 ? written : undefined;
+        return withinRoom(() => {
+          const shifted = fractionOf(other as Decimal).plus(fractionOf(coordinate as Decimal).times(fractionOf(sign)));
+          const written = moved.write(given, moving.measure, decimalOf(shifted));
+          if (written === undefined || fixed.standsIn || !deepEqual(fixed.segments, moving.segments)) return written;
+          // Both sides read the one place moved, so the row is kept only where it
+          // stands at the point.
+          const [a, b] = [first, second].map(side => at(side.segments)?.valuesIn(written)[0]);
+          return isDecimal(a) && isDecimal(b) && fractionOf(a).minus(fractionOf(b)).comparedTo(fractionOf(coordinate as Decimal)) === 0 ? written : undefined;
+        });
       }
       if (moment?.write !== undefined) {
         const units = (moment.read(other, fixed) as bigint) + BigInt(sign) * (coordinate as bigint);
@@ -1016,9 +1035,9 @@ function unreadIn(rule: Rule, frames: Frames): string[] {
         ? [describeRule(rule, frames.root.label, labelsOf(frames))]
         : unreadIn(rule.each, inner);
     }
-    // Read by the classes it divides the place into and the arms on each side.
+    // Read by the classes it divides the place into and the arms on each side, where it is a plain value of a place against a written value; one read through a transform, or against another place, divides nothing and is said unread.
     case "relation":
-      return [];
+      return relationThresholdsIn(rule, frames).length > 0 ? [] : [describeRule(rule, frames.root.label, labelsOf(frames))];
     case "compare": {
       const terms = [rule.left, rule.right].filter(isTerm) as Term<unknown>[];
       // Two constants settle without reading anything.

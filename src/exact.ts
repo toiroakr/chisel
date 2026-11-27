@@ -19,6 +19,8 @@ export type Rounding = "half-up" | "half-down" | "half-even" | "up" | "down" | "
 // A rational rounded to `scale` digits after the point, as Souther's
 // Decimal.round does: exact, at any scale.
 export function roundedAt(value: Rational, scale: number, mode: Rounding): Rational {
+  // The power below is built before any digit is read, so a scale past the budget fractionOf holds numbers to is refused here.
+  if (scale > 10000) throw new OutOfRoom("Exact arithmetic exceeds the 10000-digit budget");
   const unit = 10n ** BigInt(scale);
   const scaled = value.times(new Rational(unit));
   const { numerator, denominator } = scaled;

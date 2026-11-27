@@ -82,6 +82,23 @@ describe("driveMachine", () => {
     expect(result.state).toStrictEqual({ step: "shipped", name: "A-100" });
     expect(result.steps.map(step => step.after.name)).toStrictEqual(["A-100", "A-100"]);
   });
+  it("hands perform a copy of the command too, so changing it reaches neither the recorded steps nor the failures", async () => {
+    const result = await c.driveMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, {
+      perform: effect => { (effect.command as { name?: string }).name = "TAMPERED"; if (effect.name === "reserve") throw new Error("unavailable"); },
+    });
+    expect(result.steps[0]!.command).toStrictEqual({ type: "place", name: "A-100" });
+    expect(result.failures[0]!.command).toStrictEqual({ type: "place", name: "A-100" });
+  });
+  it("leaves an effect without a declared failure in the state it left, even where Object.prototype carries a failure", async () => {
+    const inherited = { step: "nowhere", name: "polluted" };
+    (Object.prototype as { failure?: unknown }).failure = inherited;
+    try {
+      const result = await c.driveMachine(order, { step: "reserved", name: "A-100" }, { type: "ship" }, {
+        perform: () => { throw new Error("unavailable"); },
+      });
+      expect(result.state).toStrictEqual({ step: "reserved", name: "A-100" });
+    } finally { delete (Object.prototype as { failure?: unknown }).failure; }
+  });
   it("reports an exception from a fault-injection callback of runMachine as the machine's failure, with the steps already run", () => {
     const error = new Error("probe");
     const run = () => c.runMachine(order, { step: "start", name: "" }, { type: "place", name: "A-100" }, { fails: effect => { if (effect.name === "ship") throw error; return false; } });

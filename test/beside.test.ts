@@ -227,4 +227,35 @@ describe("a computation is told by its positions, not by how they render", () =>
     expect(keys.length).toBe(2);
     expect(keys[0]).not.toBe(keys[1]);
   });
+  it("tells the borders of the two apart when the rows tell one", async () => {
+    const 点 = behavior("点", {
+      input: variants("状態", { 入力済み: object({ "a.b": int(), a: object({ b: int() }), y: int() }) }),
+      result: variants("結果", { 真: object({}), 偽: object({}) }),
+      effects: variants("種類", {}),
+    });
+    const 二つ = implement(点, {
+      cases: {
+        入力済み: action("二つ", {
+          guards: v => [
+            v["a.b"].$plus(v.y).$plus(v.y).$lt(60).$else(偽),
+            v.a.b.$plus(v.y).$plus(v.y).$gte(-10).$else(偽),
+          ],
+          run: () => ({ result: { 結果: "真" }, effects: [] }),
+        }),
+      },
+    });
+    // Rows at the first guard's cut split its weights three ways; those at the second guard's cut only one way.
+    const rows: Record<string, { given: { 状態: "入力済み"; "a.b": number; a: { b: number }; y: number }; expect: { result: { 結果: "真" | "偽" }; effects: [] } }> = {};
+    const add = (key: number, nested: number, y: number) => {
+      rows[`(${key}, ${nested}, ${y})`] = { given: { 状態: "入力済み", "a.b": key, a: { b: nested }, y }, expect: { result: { 結果: key + 2 * y < 60 && nested + 2 * y >= -10 ? "真" : "偽" }, effects: [] } };
+    };
+    for (const v of [57, 58, 59, 60, 61, 62]) for (const y of [0, 5, -3]) add(v - 2 * y, 0, y);
+    for (const v of [-12, -11, -10, -9, -8]) add(0, v, 0);
+    const report = await check(spec("点", { examples: examples(点, rows), implementation: 二つ }));
+
+    expect(report.borders.map(border => [border.rule, border.beside?.status, border.beside?.status === "told" ? border.beside.through : undefined])).toStrictEqual([
+      ["guard $.a.b + 2 * $.y < 60", "told", undefined],
+      ["guard $.a.b + 2 * $.y >= -10", "not told", undefined],
+    ]);
+  });
 });

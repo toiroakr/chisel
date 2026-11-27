@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { Rational, fractionOf, isRational, INT64_MIN, INT64_MAX, roundedAt } from "./exact.js";
+import { Rational, fractionOf, isOutOfRoom, isRational, INT64_MIN, INT64_MAX, roundedAt } from "./exact.js";
 import { nodeOf } from "./model.js";
 import type { Rule, Operator } from "./rule.js";
 import { isDecimal, isTerm, termData, positionTerm, conjuncts, positionData, counts } from "./rule.js";
@@ -181,8 +181,16 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
     if (!inner || onTimeline(inner.kind) || typeof node.right !== "number") return undefined;
     // A number is rounded only where it is a whole one: round refuses any other.
     if (inner.kind === "number" && !(inner.integral && safeInteger(inner))) return undefined;
+    // A decimal with no scale holds any number of digits, among them more than exact arithmetic has room for, so a run may be out of room where its range says it completes.
+    if (inner.kind === "decimal" && inner.scale === undefined) return undefined;
     const mode = node.mode ?? "half-even";
-    return { kind: "decimal", integral: node.right === 0, scale: node.right, low: roundedAt(inner.low, node.right, mode), high: roundedAt(inner.high, node.right, mode) };
+    try {
+      return { kind: "decimal", integral: node.right === 0, scale: node.right, low: roundedAt(inner.low, node.right, mode), high: roundedAt(inner.high, node.right, mode) };
+    } catch (error) {
+      // A scale past the room exact arithmetic has completes to no range.
+      if (isOutOfRoom(error)) return undefined;
+      throw error;
+    }
   }
   if (node?.kind === "operation") {
     if (node.operator === "concat") return undefined;
@@ -209,6 +217,8 @@ function interval(value: unknown, scope: AnySchema, steps: readonly Step[]): Int
   } catch { return undefined; }
 }
 function exactNumber(range: Interval | undefined): Interval | undefined {
+  // A signed 64-bit result past its ends is an operation that stops, however exactly the range is worked out.
+  if (range?.kind === "bigint") return range.low.comparedTo(fractionOf(INT64_MIN)) >= 0 && range.high.comparedTo(fractionOf(INT64_MAX)) <= 0 ? range : undefined;
   if (range?.kind !== "number") return range;
   return range.integral && range.low.comparedTo(fractionOf(Number.MIN_SAFE_INTEGER)) >= 0 && range.high.comparedTo(fractionOf(Number.MAX_SAFE_INTEGER)) <= 0 ? range : undefined;
 }

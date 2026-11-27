@@ -827,7 +827,7 @@ function formatStops(stops: AdequacyReport["stops"]): string[] {
   return [
     `  停止                 止まりうる ${count("may stop")}   未解決 ${count("not resolved")}`,
     ...shown.map(stop => stop.status === "may stop"
-      ? `    ! 実行が止まりうる: ${stop.decision}: ${stop.at} — 入力 ${formatTypeScriptValue(stop.input)}${stop.keeping === undefined ? "" : `。${stop.keeping}`}`
+      ? `    ! 実行が止まりうる: ${stop.decision}: ${stop.at} — 入力 ${formatTypeScriptValue(stop.input)}${stop.with === undefined ? "" : `、with ${formatTypeScriptValue(stop.with)}`}${stop.keeping === undefined ? "" : `。${stop.keeping}`}`
       : `    ? 停止が未解決: ${stop.decision}: ${stop.at} — ${stop.reason}`),
   ];
 }

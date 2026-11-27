@@ -789,7 +789,8 @@ export function offGridEquality(
       const subject = rule.relation === "includes" && !isTerm(rule.other) ? positionData(rule.subject) : undefined;
       if (subject === undefined || subject.measure !== "value") return undefined;
       const collection = resolve(subject.path);
-      const element = collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
+      const held = collection?.kind === "array" ? (collection as ArraySchema<unknown>).element : undefined;
+      const element = held?.kind === "optional" ? (held as OptionalSchema<unknown>).schema : held;
       return element !== undefined && holdsNoDecimal(element, "==", rule.other)
         ? `compares ${nameOf(subject.path, label, labels)}[] with ${String(rule.other)}, which no ${decimalLabel(element as DecimalSchema)} holds: ${describeRule(rule, label, labels)}`
         : undefined;

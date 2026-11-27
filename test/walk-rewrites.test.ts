@@ -64,6 +64,18 @@ describe("a fold owes a row whose step reads what an earlier step answered", () 
     expect(report.walks).toStrictEqual([]);
   });
 
+  it("leaves out a fold whose body reads only locals it binds from constants", async () => {
+    const 束縛 = c.implement(合計, {
+      cases: { order: c.model("束縛", () => ({
+        result: c.fold(c.int(), c.int(), [1, 2], 0, (total, x) => c.bind(c.int(), 5, five => c.arithmetic("add", c.arithmetic("add", total, x), five))),
+        effects: [],
+      })) },
+    });
+    const report = await c.check(c.spec("合計", { examples: c.examples(合計, {}), implementation: 束縛 }));
+
+    expect(report.walks).toStrictEqual([]);
+  });
+
   it("offers a row of two elements that tells both rewrites apart", () => {
     const { rows } = c.generate(rowsOf({ 空: [], 一つ: [1] }), 足す);
     const walked = rows.filter(row => row.name.includes("fold over"));

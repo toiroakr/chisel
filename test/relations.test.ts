@@ -131,16 +131,18 @@ describe("the values that stand for a class of relations", () => {
     const report = await c.check(c.spec("値", { examples: c.examples(definition as never, {}), implementation: implementation as never }));
     expect(report.measures.rules.status).toBe("complete");
     const rules = report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => `${rule.way}: ${rule.status}`) : [];
-    expect(rules.some(rule => rule.startsWith('startsWith($.s, "B") holds') && rule.endsWith("gap"))).toBe(false);
+    expect(rules).toStrictEqual(['startsWith($.s, "B") holds → otherwise: no row owed', 'startsWith($.s, "B") fails → else of guard 1: gap']);
+    expect(report.partitions.filter(partition => partition.kind === "divided").map(partition => partition.kind === "divided" ? [partition.missing, partition.excluded] : [])).toStrictEqual([[['¬startsWith("B")'], ['startsWith("B")']]]);
   });
 
   it("stands for a class with the value a row holds once parsed, NFC and all", async () => {
     const definition = 値({ tags: c.array(c.string()) });
     const implementation = guarded(definition, ((v: c.TermOf<{ tags: string[] }>) => v.tags.$includes("é")) as never);
     const { rows } = c.generate(c.examples(definition as never, {}), implementation as never);
-    const held = rows.filter(row => row.name.includes("includes")).map(row => (row.given as { tags: string[] }).tags);
-    expect(held.length).toBeGreaterThan(0);
-    expect(held.every(tags => tags.every(tag => tag === tag.normalize("NFC")))).toBe(true);
+    const held = rows.filter(row => row.name.endsWith(' = includes("é")')).map(row => (row.given as { tags: string[] }).tags);
+    expect(held.length).toBe(1);
+    expect(held[0]!.every(tag => tag === tag.normalize("NFC"))).toBe(true);
+    expect(held[0]!.includes("é")).toBe(true);
   });
 
   it("pads a witness to the length the place's schema declares", async () => {
@@ -148,9 +150,59 @@ describe("the values that stand for a class of relations", () => {
     const implementation = guarded(definition, ((v: c.TermOf<{ code: string }>) => v.code.$startsWith("AB")) as never);
     const { rows, notComposed } = c.generate(c.examples(definition as never, {}), implementation as never);
     expect(notComposed.filter(item => item.includes("startsWith"))).toStrictEqual([]);
-    const padded = rows.filter(row => row.name.includes("startsWith"));
-    expect(padded.length).toBeGreaterThan(0);
-    expect(padded.every(row => (row.given as { code: string }).code.length >= 12)).toBe(true);
+    const padded = rows.filter(row => row.name.endsWith(' = startsWith("AB")')).map(row => (row.given as { code: string }).code);
+    expect(padded.length).toBe(1);
+    expect(padded[0]!.startsWith("AB") && padded[0]!.length >= 12).toBe(true);
+  });
+});
+
+describe("a relation beside a comparison that names one value", () => {
+  it("excludes the class where that value fails a relation it holds, which no value could be", async () => {
+    const definition = c.behavior("値", { input: c.variants("kind", { request: c.object({ s: c.string() }) }), result: c.string(), effects: c.variants("種類", {}) });
+    const implementation = c.implement(definition, {
+      cases: { request: c.action("判定", {
+        guards: ((v: c.TermOf<{ s: string }>) => [v.s.$eq("abc").$else(() => ({ result: "a", effects: [] })), v.s.$startsWith("a").$else(() => ({ result: "b", effects: [] }))]) as never,
+        run: () => ({ result: "c", effects: [] }),
+      }) },
+    } as never);
+    const report = await c.check(c.spec("値", { examples: c.examples(definition, {}), implementation }));
+    const divided = report.partitions.flatMap(partition => partition.kind === "divided" ? [partition] : []);
+    expect(divided.map(partition => partition.excluded)).toStrictEqual([['v = "abc" ∧ ¬startsWith("a")']]);
+    expect(divided.flatMap(partition => partition.missing)).not.toContain('v = "abc" ∧ ¬startsWith("a")');
+  });
+});
+
+describe("a relation read through a transform", () => {
+  const definition = c.behavior("値", { input: c.variants("kind", { request: c.object({ code: c.string() }).refine(((v: c.TermOf<{ code: string }>) => v.code.$startsWith("Z")) as never) }), result: c.string(), effects: c.variants("種類", {}) });
+  const implementation = c.implement(definition, {
+    cases: { request: c.action("判定", {
+      guards: ((v: c.TermOf<{ code: string }>) => [v.code.$lowercase().$startsWith("ab").$else(() => ({ result: "a", effects: [] }))]) as never,
+      run: () => ({ result: "c", effects: [] }),
+    }) },
+  } as never);
+
+  it("is named among the comparisons not read, as it divides the place into no class", async () => {
+    const report = await c.check(c.spec("値", { examples: c.examples(definition, {}), implementation }));
+    expect(report.measures.comparisons).toStrictEqual({ status: "partial", notRead: ['判定: startsWith(lowercase($.code), "ab")'] });
+  });
+
+  it("leaves a way through it undecided rather than owing a row an invariant on the place may refuse", async () => {
+    const report = await c.check(c.spec("値", { examples: c.examples(definition, {}), implementation }));
+    const rules = report.measures.rules.status === "complete" ? report.measures.rules.rules.map(rule => `${rule.way}: ${rule.status}`) : [];
+    expect(rules).toStrictEqual(['startsWith(lowercase($.code), "ab") holds → otherwise: undecided', 'startsWith(lowercase($.code), "ab") fails → else of guard 1: undecided']);
+  });
+});
+
+describe("the placeholder of a schema holding a relation invariant", () => {
+  const held = (schema: c.AnySchema) => schema.parse(schema.placeholder()).success;
+
+  it("is a value the schema takes, whichever relation it holds", () => {
+    expect(held(c.string().refine(v => (v as never as c.TermOf<string>).$startsWith("A")))).toBe(true);
+    expect(held(c.string().refine(v => (v as never as c.TermOf<string>).$endsWith("Z")))).toBe(true);
+    expect(held(c.string().refine(v => (v as never as c.TermOf<string>).$contains("mid")))).toBe(true);
+    expect(held(c.record(c.int()).refine(v => (v as never as c.TermOf<Record<string, number>>).$hasKey("USD")))).toBe(true);
+    expect(held(c.array(c.string()).refine(v => (v as never as c.TermOf<string[]>).$includes("vip")))).toBe(true);
+    expect(held(c.object({ s: c.string() }).refine(v => (v as never as c.TermOf<{ s: string }>).s.$startsWith("A")))).toBe(true);
   });
 });
 
@@ -158,6 +210,8 @@ describe("a relation that never holds as written", () => {
   it("refuses an array of cents asked whether it includes a value off their grid", async () => {
     const { Decimal } = await import("decimal.js");
     expect(() => c.object({ amounts: c.array(c.decimal(2)) }).refine(v => v.amounts.$includes(new Decimal("0.005"))))
+      .toThrow("refine compares $.amounts[] with 0.005, which no decimal(2) holds");
+    expect(() => c.object({ amounts: c.array(c.decimal(2).optional()) }).refine(v => v.amounts.$includes(new Decimal("0.005"))))
       .toThrow("refine compares $.amounts[] with 0.005, which no decimal(2) holds");
   });
 

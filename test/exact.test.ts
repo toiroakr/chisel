@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as c from "../src/index.js";
 import { interpret } from "../src/model.js";
 import { domainOf } from "../src/domain.js";
@@ -81,4 +81,20 @@ it("serializes report documents containing int64 counterexamples without a repla
   const document = c.reportDocument([report], { id: "report", name: "report" });
   const encoded = JSON.parse(JSON.stringify(document));
   expect(encoded.reports[0].measures.constructions.decisions[0].counterexample.n).toBe("0");
+});
+
+describe("the records a domain holds", () => {
+  it("holds a record of the length a lower bound asks for, though no rule writes its keys", () => {
+    const { values } = domainOf(c.record(c.int().min(0).max(1)).min(2), 50);
+    expect(values.some(value => Object.keys(value as object).length >= 2)).toBe(true);
+    expect(values.every(value => c.record(c.int().min(0).max(1)).min(2).parse(value).success || Object.keys(value as object).length < 2)).toBe(true);
+  });
+
+  it("builds no more records than its limit, and still names each written key and the record of every one", () => {
+    const keys = Array.from({ length: 1000 }, (_, index) => `k${index}`);
+    const { values } = domainOf(c.record(c.int().min(0).max(4095)), 4096, keys);
+    expect(values.length).toBeLessThanOrEqual(4096);
+    expect(keys.every(key => values.some(value => Object.hasOwn(value as object, key)))).toBe(true);
+    expect(values.some(value => Object.keys(value as object).length > 1000)).toBe(true);
+  });
 });

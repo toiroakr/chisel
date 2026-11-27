@@ -279,7 +279,8 @@ export function feasibilityOf(
     const shared = verdict.paths.some(path => [...groups.values()].some(group => sharesValue(path, group.path)) || opaque.flat().some(other => sharesValue(path, other)));
     if (verdict.kind === "unknown" || shared) opaque.push(verdict.paths);
     else relationReads.push(...verdict.paths);
-    if (verdict.kind === "unknown" && verdict.searched) unsettled = true;
+    // An unknown verdict is no settled way, searched or not: a transformed or quantified subject was never read, so an invariant of its place may refuse it.
+    if (verdict.kind === "unknown") unsettled = true;
   }
 
   const intervals = new Map<string, Interval | undefined>();
