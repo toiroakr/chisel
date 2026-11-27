@@ -279,5 +279,7 @@ function measuredRange(value: unknown, scope: AnySchema, steps: readonly Step[])
 // no division by nought and no number past the exact range is in it. Undefined
 // ranges say nothing either way.
 export function completes(value: unknown, scope: AnySchema, steps: readonly Step[]): boolean {
-  return interval(value, scope, steps) !== undefined;
+  const range = interval(value, scope, steps);
+  // A decimal of no scale holds any number of digits, among them more than exact arithmetic has room for, which a range cannot tell: its sum has no scale either.
+  return range !== undefined && !(range.kind === "decimal" && range.scale === undefined);
 }

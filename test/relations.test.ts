@@ -152,7 +152,8 @@ describe("the values that stand for a class of relations", () => {
     } as never);
     const report = await c.check(c.spec("値", { examples: c.examples(definition as never, {}), implementation: implementation as never }));
     const divided = report.partitions.flatMap(partition => partition.kind === "divided" ? [partition] : []);
-    expect(divided.flatMap(partition => partition.excluded).filter(name => name.includes("startsWith") && !name.includes("¬"))).toStrictEqual([]);
+    expect(divided.flatMap(partition => partition.excluded)).toStrictEqual(['v = "e\u0301" ∧ ¬startsWith("é")']);
+    expect(divided.flatMap(partition => partition.missing)).toContain('v = "e\u0301" ∧ startsWith("é")');
   });
 
   it("stands for a class with the value a row holds once parsed, NFC and all", async () => {

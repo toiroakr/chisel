@@ -239,6 +239,19 @@ describe("a decimal of a scale past the room exact arithmetic has", () => {
     expect(report.stops.map(stop => stop.status)).not.toContain("never stops");
   });
 
+  it("is not said never to stop of a decimal of no scale either, which holds as many digits", async () => {
+    const 無限 = c.behavior("無限", {
+      input: c.variants("kind", { request: c.object({ v: c.decimal().min(new Decimal(0)).max(new Decimal(1)) }) }),
+      result: c.decimal(),
+      effects: emptyEffects,
+    });
+    const 加える = c.implement(無限, {
+      cases: { request: c.model("加える", input => ({ result: c.arithmetic("add", input.v, new Decimal(1)), effects: [] })) },
+    });
+    const report = await c.check(c.spec("無限", { examples: c.examples(無限, {}), implementation: 加える }));
+    expect(report.stops.map(stop => stop.status)).not.toContain("never stops");
+  });
+
   it("names no midpoint of two bounds whose middle is out of room, as it names no value past them", () => {
     expect(decimalCarrier(undefined).between?.(new Decimal(0), new Decimal("1e-10000"))).toBeUndefined();
     expect(String(decimalCarrier(undefined).between?.(new Decimal(0), new Decimal("1e-10")))).toBe("5e-11");

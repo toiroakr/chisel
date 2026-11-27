@@ -8,7 +8,7 @@
 import type { Relation, RelationRule, Term } from "./rule.js";
 import { conjuncts, holds, isTerm, positionData, relationHolds, sameElement } from "./rule.js";
 import type { Rule } from "./rule.js";
-import type { AnySchema, OptionalSchema } from "./schema.js";
+import type { AnySchema } from "./schema.js";
 import { schemaAtPath } from "./schema.js";
 import { inheritedAt } from "./guard-scope.js";
 import { integralBounds } from "./domain.js";
@@ -93,7 +93,7 @@ function heldOf(inherited: readonly Rule[]): readonly RelationStep[] {
 
 // What every value of the place holds of itself: the relations an enclosing object's invariants and the place's own schema write on it.
 function heldAt(schema: AnySchema | undefined, inherited: readonly Rule[]): readonly RelationStep[] {
-  const own = schema === undefined ? [] : [...schema.invariants, ...(schema.kind === "optional" ? (schema as OptionalSchema<unknown>).schema.invariants : [])].flatMap(conjuncts);
+  const own = schema === undefined ? [] : schema.invariants.flatMap(conjuncts);
   return heldOf([...inherited, ...own]);
 }
 
